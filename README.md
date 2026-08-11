@@ -17,6 +17,7 @@
 - שמירת ספק WebView מערכתי פעיל תוך השעיית ממשק הדפדפן במכשירים שבהם Chrome מספק את המנוע.
 - שמירת אפליקציית הניהול ו־Tailscale זמינות ומוגנות מהסרה.
 - יומן פעולות ניהול מקומי.
+- ערוץ עדכון עצמי חתום: בדיקה יומית, אימות ECDSA למטא־דאטה, אימות hash/זהות/גרסה/חתימת APK והתקנה שקטה דרך Device Owner.
 
 ## דרישות
 
@@ -47,6 +48,7 @@ adb shell dpm set-device-owner \
 ## אבטחה ופריסה
 
 תכנון מנגנון ההתקנות וה־fail-closed במצב רשימה לבנה מתועד ב־[`docs/package-reconciliation.md`](docs/package-reconciliation.md).
+תכנון, בנייה ופרסום של עדכונים מרחוק מתועדים ב־[`docs/secure-updates.md`](docs/secure-updates.md).
 
 - אין לשמור בריפוזיטורי מפתח חתימה, קוד מנהל, קוד שחזור או פרטי מכשיר.
 - בנייה רגילה נשארת חתומה בהגדרת הפיתוח לצורך תאימות למכשיר הניסוי בלבד. מסלול Production מפורש, עם application ID נפרד ומפתח חיצוני, מתועד ב־[`docs/production-release.md`](docs/production-release.md).
@@ -56,4 +58,4 @@ adb shell dpm set-device-owner \
 
 ## סטטוס
 
-גרסת פיילוט: `0.3.3`.
+גרסת פיילוט: `0.4.1`.

@@ -7,6 +7,8 @@ import android.content.Intent;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.LockdownPolicyController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
+import com.example.lockdowndpc.updates.UpdateScheduler;
+import com.example.lockdowndpc.updates.SecureUpdateManager;
 
 public final class PolicyRefreshReceiver extends BroadcastReceiver {
     @Override
@@ -16,6 +18,10 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         if (!supportedAction) {
             return;
+        }
+        UpdateScheduler.schedule(context.getApplicationContext());
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
+            SecureUpdateManager.onPackageReplaced(context.getApplicationContext());
         }
         if (AllowedAppsStore.isProtectionEnabled(context)) {
             PendingResult pendingResult = goAsync();

@@ -1,0 +1,6 @@
+flowchart LR
+  Admin[Enterprise admin] --> EMM[Android Enterprise / EMM]
+  EMM --> Play[Managed Google Play]
+  Play --> PM[Package Manager]
+  PM --> DPC[DPC]
+  DPC --> Policy[Policy reconciliation]

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -75,6 +76,12 @@ import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import com.example.lockdowndpc.updates.SecureUpdateManager
+import com.example.lockdowndpc.updates.UpdateConfig
+import com.example.lockdowndpc.updates.UpdatePhase
+import com.example.lockdowndpc.updates.UpdateScheduler
+import com.example.lockdowndpc.updates.UpdateSnapshot
+import com.example.lockdowndpc.updates.UpdateStateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -88,6 +95,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        UpdateScheduler.schedule(applicationContext)
         // Start fail-closed: on release builds the window is protected before
         // Compose can draw its first frame. Public/admin screens explicitly
         // clear the flag after their state has been resolved.
@@ -198,6 +206,8 @@ private fun AdminConsole(
     var modePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
     var policyOperationInProgress by remember { mutableStateOf(false) }
+    var updateOperationInProgress by remember { mutableStateOf(false) }
+    var updateSnapshot by remember { mutableStateOf(UpdateStateStore.read(context)) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val status = remember(screen, statusRevision) { readStatus(context) }
@@ -380,12 +390,30 @@ private fun AdminConsole(
         }
     }
 
+    fun checkForUpdates() {
+        if (updateOperationInProgress || !requireSession()) {
+            return
+        }
+        AdminSession.extend()
+        updateOperationInProgress = true
+        coroutineScope.launch {
+            withContext(Dispatchers.IO) {
+                SecureUpdateManager.checkNow(context.applicationContext)
+            }
+            updateSnapshot = UpdateStateStore.read(context)
+            updateOperationInProgress = false
+        }
+    }
+
     LaunchedEffect(screen) { onSecureScreen(screen.secure) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         when {
             screen == ConsoleScreen.ADMIN && !AdminSession.isUnlocked() -> showLocked()
-            screen == ConsoleScreen.ADMIN -> statusRevision++
+            screen == ConsoleScreen.ADMIN -> {
+                statusRevision++
+                updateSnapshot = UpdateStateStore.read(context)
+            }
             screen == ConsoleScreen.RECOVERY && !AdminSession.isUnlocked() -> showLocked()
             screen == ConsoleScreen.ENROLLMENT && isDeviceOwner(context) -> {
                 message = null
@@ -416,6 +444,8 @@ private fun AdminConsole(
         ConsoleScreen.ADMIN -> AdminScreen(
             status = status,
             policyOperationInProgress = policyOperationInProgress,
+            updateOperationInProgress = updateOperationInProgress,
+            updateSnapshot = updateSnapshot,
             message = message,
             onApply = ::applyProtection,
             onPause = ::pauseProtection,
@@ -435,6 +465,7 @@ private fun AdminConsole(
             },
             onNewRecoveryCode = ::rotateRecoveryCode,
             onOpenAuditLog = { if (requireSession()) auditLogVisible = true },
+            onCheckUpdate = ::checkForUpdates,
             onLock = { showLocked() },
         )
 
@@ -599,6 +630,8 @@ private fun LockedScreen(
 private fun AdminScreen(
     status: ConsoleStatus,
     policyOperationInProgress: Boolean,
+    updateOperationInProgress: Boolean,
+    updateSnapshot: UpdateSnapshot,
     message: UiMessage?,
     onApply: () -> Unit,
     onPause: () -> Unit,
@@ -607,6 +640,7 @@ private fun AdminScreen(
     onChangePin: () -> Unit,
     onNewRecoveryCode: () -> Unit,
     onOpenAuditLog: () -> Unit,
+    onCheckUpdate: () -> Unit,
     onLock: () -> Unit,
 ) {
     val allowSelected = status.mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
@@ -685,6 +719,33 @@ private fun AdminScreen(
                 supporting = stringResource(R.string.admin_new_recovery_supporting),
                 onClick = onNewRecoveryCode,
                 showDivider = true,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.admin_section_updates)) {
+            ActionRow(
+                icon = Icons.Rounded.SystemUpdateAlt,
+                title = stringResource(
+                    when {
+                        !UpdateConfig.isConfigured -> R.string.update_disabled_title
+                        updateOperationInProgress -> R.string.update_checking_title
+                        updateSnapshot.phase == UpdatePhase.FAILED -> R.string.update_failed_title
+                        updateSnapshot.phase == UpdatePhase.INSTALLING -> R.string.update_installing_title
+                        else -> R.string.update_check_title
+                    }
+                ),
+                supporting = updateSnapshot.message.ifBlank {
+                    stringResource(
+                        if (UpdateConfig.isConfigured) {
+                            R.string.update_ready_supporting
+                        } else {
+                            R.string.update_disabled_supporting
+                        }
+                    )
+                },
+                enabled = UpdateConfig.isConfigured && !updateOperationInProgress,
+                onClick = onCheckUpdate,
             )
         }
 

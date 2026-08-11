@@ -25,7 +25,16 @@ DEVICE_GUARD_STORE_FILE
 DEVICE_GUARD_STORE_PASSWORD
 DEVICE_GUARD_KEY_ALIAS
 DEVICE_GUARD_KEY_PASSWORD
+DEVICE_GUARD_UPDATE_MANIFEST_URL
+DEVICE_GUARD_UPDATE_PUBLIC_KEY
+DEVICE_GUARD_UPDATE_PUBLIC_KEY_SHA256
 ```
+
+שלושת הערכים האחרונים מפעילים את ערוץ העדכונים החתום. כתובת ה־manifest חייבת להיות
+HTTPS; המפתח הוא מפתח EC ציבורי בפורמט X.509/Base64. המפתח הפרטי התואם נשמר
+בכספת נפרדת ממפתח חתימת ה־APK ומשמש רק ליצירת manifest חתום. ערך ה־SHA-256
+הוא fingerprint של בתים מפוענחים של אותו מפתח ציבורי. בניית Production נכשלת
+אם ערך חסר, אם המפתח אינו EC/X.509, או אם ה־fingerprint אינו תואם.
 
 ## בנייה
 

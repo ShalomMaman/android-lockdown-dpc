@@ -4,6 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+fun String.asBuildConfigString(): String =
+    "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+val updateManifestUrl = providers.gradleProperty("deviceGuardUpdateManifestUrl")
+    .orElse(providers.environmentVariable("DEVICE_GUARD_UPDATE_MANIFEST_URL"))
+    .orElse("")
+val updatePublicKey = providers.gradleProperty("deviceGuardUpdatePublicKey")
+    .orElse(providers.environmentVariable("DEVICE_GUARD_UPDATE_PUBLIC_KEY"))
+    .orElse("")
+
 android {
     namespace = "com.example.lockdowndpc"
     compileSdk = 36
@@ -12,8 +22,10 @@ android {
         applicationId = "com.example.lockdowndpc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 7
-        versionName = "0.4.0"
+        versionCode = 8
+        versionName = "0.4.1"
+        buildConfigField("String", "UPDATE_MANIFEST_URL", updateManifestUrl.get().asBuildConfigString())
+        buildConfigField("String", "UPDATE_PUBLIC_KEY", updatePublicKey.get().asBuildConfigString())
     }
 
     buildTypes {
@@ -29,6 +41,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     compileOptions {
@@ -60,4 +73,5 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20251224")
 }
