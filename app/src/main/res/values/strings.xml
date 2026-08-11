@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">מגן המכשיר</string>
+    <string name="admin_label">ניהול והגנת המכשיר</string>
+    <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
+    <string name="app_row_format">%1$s\n%2$s</string>
+    <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
+    <string name="policy_applied">ההגנה פעילה. נחסמו %1$d אפליקציות.</string>
+    <string name="policy_applied_with_warnings">ההגנה פעילה. נחסמו %1$d אפליקציות.\nהושלם עם %2$d אזהרות תאימות.</string>
+    <string name="status_format_with_allowlist">ניהול מערכת: %1$s\nמדיניות הגנה: %2$s\nרשימת אפליקציות: %3$s</string>
+    <string name="configured">מוגדרת</string>
+    <string name="configuration_required">נדרשת הגדרה</string>
+    <string name="active">פעיל</string>
+    <string name="not_configured">לא מוגדר</string>
+    <string name="not_enabled">טרם הופעלה</string>
+</resources>

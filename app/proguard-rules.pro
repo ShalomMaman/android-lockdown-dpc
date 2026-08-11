@@ -1,0 +1,2 @@
+-keep class com.example.lockdowndpc.admin.LockdownAdminReceiver { *; }
+-keep class com.example.lockdowndpc.receivers.** { *; }
