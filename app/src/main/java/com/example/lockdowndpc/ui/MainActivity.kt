@@ -50,6 +50,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +75,9 @@ import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Administrator console. The screen sequence, the three minute admin session and
@@ -193,7 +197,9 @@ private fun AdminConsole(
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var modePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
+    var policyOperationInProgress by remember { mutableStateOf(false) }
     var statusRevision by remember { mutableIntStateOf(0) }
+    val coroutineScope = rememberCoroutineScope()
     val status = remember(screen, statusRevision) { readStatus(context) }
 
     fun showLocked() {
@@ -295,7 +301,7 @@ private fun AdminConsole(
     }
 
     fun applyProtection() {
-        if (!requireSession()) {
+        if (policyOperationInProgress || !requireSession()) {
             return
         }
         AdminSession.extend()
@@ -304,52 +310,62 @@ private fun AdminConsole(
             onOpenAppList()
             return
         }
-        val result = LockdownPolicyController.apply(context)
-        statusRevision++
-        if (!result.deviceOwner()) {
-            message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
-            return
+        policyOperationInProgress = true
+        message = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                LockdownPolicyController.apply(context.applicationContext)
+            }
+            policyOperationInProgress = false
+            statusRevision++
+            if (!result.deviceOwner()) {
+                message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
+            } else if (!result.applied()) {
+                val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
+                showAdmin()
+                message = UiMessage(
+                    context.getString(R.string.policy_failed, detail),
+                    isError = true,
+                )
+            } else {
+                AuditLog.append(context, context.getString(R.string.audit_apply))
+                showAdmin()
+                message = UiMessage(
+                    context.getString(R.string.policy_applied, result.blockedPackages()),
+                    isError = false,
+                )
+            }
         }
-        if (!result.applied()) {
-            val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
-            showAdmin()
-            message = UiMessage(
-                context.getString(R.string.policy_failed, detail),
-                isError = true,
-            )
-            return
-        }
-        AuditLog.append(context, context.getString(R.string.audit_apply))
-        showAdmin()
-        message = UiMessage(
-            context.getString(R.string.policy_applied, result.blockedPackages()),
-            isError = false,
-        )
     }
 
     fun pauseProtection() {
-        if (!requireSession()) {
+        if (policyOperationInProgress || !requireSession()) {
             return
         }
         AdminSession.extend()
-        val result = LockdownPolicyController.pause(context)
-        statusRevision++
-        if (!result.deviceOwner()) {
-            message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
-            return
+        policyOperationInProgress = true
+        message = null
+        coroutineScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                LockdownPolicyController.pause(context.applicationContext)
+            }
+            policyOperationInProgress = false
+            statusRevision++
+            if (!result.deviceOwner()) {
+                message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
+            } else if (!result.applied()) {
+                val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
+                showAdmin()
+                message = UiMessage(
+                    context.getString(R.string.admin_pause_failed, detail),
+                    isError = true,
+                )
+            } else {
+                AuditLog.append(context, context.getString(R.string.audit_pause))
+                showAdmin()
+                message = UiMessage(context.getString(R.string.admin_pause_ok), isError = false)
+            }
         }
-        if (!result.applied()) {
-            val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
-            showAdmin()
-            message = UiMessage(
-                context.getString(R.string.admin_pause_failed, detail),
-                isError = true,
-            )
-            return
-        }
-        AuditLog.append(context, context.getString(R.string.audit_pause))
-        showAdmin()
-        message = UiMessage(context.getString(R.string.admin_pause_ok), isError = false)
     }
 
     fun rotateRecoveryCode() {
@@ -399,6 +415,7 @@ private fun AdminConsole(
 
         ConsoleScreen.ADMIN -> AdminScreen(
             status = status,
+            policyOperationInProgress = policyOperationInProgress,
             message = message,
             onApply = ::applyProtection,
             onPause = ::pauseProtection,
@@ -581,6 +598,7 @@ private fun LockedScreen(
 @Composable
 private fun AdminScreen(
     status: ConsoleStatus,
+    policyOperationInProgress: Boolean,
     message: UiMessage?,
     onApply: () -> Unit,
     onPause: () -> Unit,
@@ -613,9 +631,14 @@ private fun AdminScreen(
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
             text = stringResource(
-                if (status.protectionEnabled) R.string.admin_apply_refresh else R.string.admin_apply
+                when {
+                    policyOperationInProgress -> R.string.admin_policy_working
+                    status.protectionEnabled -> R.string.admin_apply_refresh
+                    else -> R.string.admin_apply
+                }
             ),
             icon = if (status.protectionEnabled) Icons.Rounded.Refresh else Icons.Rounded.Shield,
+            enabled = !policyOperationInProgress,
             onClick = onApply,
         )
 

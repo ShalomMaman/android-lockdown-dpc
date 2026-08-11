@@ -10,6 +10,7 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.os.SystemClock;
 import android.os.UserManager;
 import android.util.Log;
 import android.webkit.WebView;
@@ -90,6 +91,14 @@ public final class LockdownPolicyController {
         int visibleCount = 0;
         for (String packageName : packagesToShow) {
             if (packageName.equals(context.getPackageName())) {
+                continue;
+            }
+            // The static browser/store catalog contains packages from many OEMs.
+            // DevicePolicyManager may return false (instead of throwing) when
+            // asked to update a package that is not present, which would turn a
+            // successful pause into a false failure. Hidden apps still report
+            // FLAG_INSTALLED, so this does not skip packages managed by this DPC.
+            if (!isInstalled(context.getPackageManager(), packageName)) {
                 continue;
             }
             try {
@@ -209,6 +218,10 @@ public final class LockdownPolicyController {
             List<String> errors
     ) {
         ComponentName blockedActivity = new ComponentName(admin.getPackageName(), BlockedBrowserActivity.class.getName());
+        // Android 14+ applies this policy asynchronously. Register both filters
+        // first, then verify their effective resolution with a short bounded
+        // retry. PolicyUpdateAuditReceiver remains the authoritative backstop
+        // for a later conflicting-admin result.
         for (String scheme : new String[]{"http", "https"}) {
             try {
                 IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
@@ -216,15 +229,38 @@ public final class LockdownPolicyController {
                 filter.addCategory(Intent.CATEGORY_BROWSABLE);
                 filter.addDataScheme(scheme);
                 dpm.addPersistentPreferredActivity(admin, filter, blockedActivity);
+            } catch (RuntimeException exception) {
+                errors.add("קישורי " + scheme + ": " + exception.getClass().getSimpleName());
+            }
+        }
+        for (String scheme : new String[]{"http", "https"}) {
+            try {
                 Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(scheme + "://policy-check.invalid"));
                 probe.addCategory(Intent.CATEGORY_BROWSABLE);
-                if (!blockedActivity.equals(resolveActivity(context.getPackageManager(), probe))) {
+                if (!eventuallyResolvesTo(context.getPackageManager(), probe, blockedActivity)) {
                     errors.add("קישורי " + scheme + ": יעד החסימה לא אומת");
                 }
             } catch (RuntimeException exception) {
                 errors.add("קישורי " + scheme + ": " + exception.getClass().getSimpleName());
             }
         }
+    }
+
+    private static boolean eventuallyResolvesTo(
+            PackageManager pm,
+            Intent intent,
+            ComponentName expected
+    ) {
+        int attempts = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ? 20 : 1;
+        for (int attempt = 0; attempt < attempts; attempt++) {
+            if (expected.equals(resolveActivity(pm, intent))) {
+                return true;
+            }
+            if (attempt + 1 < attempts) {
+                SystemClock.sleep(100);
+            }
+        }
+        return false;
     }
 
     private static void setBlockedBrowserComponentEnabled(

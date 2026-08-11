@@ -65,6 +65,7 @@
     <string name="admin_subtitle_block">האפליקציות שתסומנו ייחסמו בזמן ההגנה; שאר האפליקציות יישארו פעילות.</string>
     <string name="admin_apply">הפעלת ההגנה</string>
     <string name="admin_apply_refresh">שמירה ורענון ההגנה</string>
+    <string name="admin_policy_working">מאמת את מדיניות ההגנה…</string>
     <string name="admin_section_protection">הגדרות הגנה</string>
     <string name="admin_section_access">אבטחת גישה</string>
     <string name="admin_section_records">תיעוד ובקרה</string>
