@@ -60,6 +60,20 @@
             </intent-filter>
         </receiver>
 
+        <!--
+            A DeviceAdminService is the Android-supported way for a device owner
+            targeting API 26+ to keep a runtime package receiver available. The
+            BIND_DEVICE_ADMIN permission prevents other apps from binding it.
+        -->
+        <service
+            android:name=".admin.LockdownDeviceAdminService"
+            android:exported="true"
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
+            <intent-filter>
+                <action android:name="android.app.action.DEVICE_ADMIN_SERVICE" />
+            </intent-filter>
+        </service>
+
         <receiver
             android:name=".receivers.PolicyRefreshReceiver"
             android:directBootAware="false"
@@ -67,10 +81,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.PACKAGE_ADDED" />
-                <data android:scheme="package" />
             </intent-filter>
         </receiver>
 

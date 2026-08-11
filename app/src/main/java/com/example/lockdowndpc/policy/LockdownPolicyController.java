@@ -27,7 +27,7 @@ public final class LockdownPolicyController {
 
     private LockdownPolicyController() {}
 
-    public static PolicyResult apply(Context context) {
+    public static synchronized PolicyResult apply(Context context) {
         AllowedAppsStore.markApplyStarted(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -58,7 +58,7 @@ public final class LockdownPolicyController {
         return new PolicyResult(true, verified, packageCounts[0], packageCounts[1], errors);
     }
 
-    public static PolicyResult pause(Context context) {
+    public static synchronized PolicyResult pause(Context context) {
         AllowedAppsStore.markPauseStarted(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
