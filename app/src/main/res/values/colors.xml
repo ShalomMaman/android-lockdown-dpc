@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Kept in sync with LockdownColors in ui/theme/LockdownTheme.kt. -->
+    <color name="window_background">#F6F8FC</color>
+    <color name="brand_primary">#174EA6</color>
+</resources>
