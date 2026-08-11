@@ -21,8 +21,11 @@ import com.example.lockdowndpc.security.AdminSession;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public final class AllowedAppsActivity extends Activity {
@@ -71,7 +74,7 @@ public final class AllowedAppsActivity extends Activity {
             checkBox.setPadding(0, dp(8), 0, dp(8));
             checkBox.setChecked(configured
                     ? allowed.contains(app.packageName)
-                    : allowSelected && app.launchable);
+                    : allowSelected);
             content.addView(checkBox, matchWrap());
             rows.add(new AppRow(app.packageName, checkBox));
         }
@@ -99,29 +102,74 @@ public final class AllowedAppsActivity extends Activity {
     private List<AppEntry> loadThirdPartyApps(Set<String> managed) {
         PackageManager pm = getPackageManager();
         ArrayList<AppEntry> apps = new ArrayList<>();
+        Map<String, ApplicationInfo> applicationInfo = new LinkedHashMap<>();
         List<ApplicationInfo> installed;
+        long inventoryFlags = PackageManager.MATCH_UNINSTALLED_PACKAGES
+                | PackageManager.MATCH_DISABLED_COMPONENTS;
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            installed = pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0));
+            installed = pm.getInstalledApplications(
+                    PackageManager.ApplicationInfoFlags.of(inventoryFlags)
+            );
         } else {
             //noinspection deprecation
-            installed = pm.getInstalledApplications(0);
+            installed = pm.getInstalledApplications((int) inventoryFlags);
         }
         for (ApplicationInfo info : installed) {
-            boolean system = (info.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
-            boolean launchable = pm.getLaunchIntentForPackage(info.packageName) != null;
-            if (system || (!launchable && !managed.contains(info.packageName))
-                    || info.packageName.equals(getPackageName())
-                    || info.packageName.equals("com.tailscale.ipn")) {
+            // MATCH_UNINSTALLED_PACKAGES can also return packages whose APK was
+            // removed but data was retained. Keep only applications installed
+            // for this user; DPC-hidden applications retain FLAG_INSTALLED.
+            if ((info.flags & ApplicationInfo.FLAG_INSTALLED) != 0) {
+                applicationInfo.put(info.packageName, info);
+            }
+        }
+
+        Set<String> candidatePackages = new LinkedHashSet<>(applicationInfo.keySet());
+        candidatePackages.addAll(managed);
+        for (String packageName : candidatePackages) {
+            ApplicationInfo info = applicationInfo.get(packageName);
+            if (info == null) {
+                info = loadApplicationInfo(pm, packageName);
+            }
+
+            boolean system = info != null && (info.flags
+                    & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
+            if (system
+                    || packageName.equals(getPackageName())
+                    || packageName.equals("com.tailscale.ipn")) {
                 continue;
             }
-            if (LockdownPackages.ALWAYS_BLOCKED.contains(info.packageName)
-                    || LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(info.packageName)) {
+            if (LockdownPackages.ALWAYS_BLOCKED.contains(packageName)
+                    || LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(packageName)) {
                 continue;
             }
-            apps.add(new AppEntry(info.loadLabel(pm).toString(), info.packageName, launchable));
+
+            String label = info != null
+                    ? info.loadLabel(pm).toString()
+                    : AllowedAppsStore.getRememberedLabel(this, packageName);
+            AllowedAppsStore.rememberManagedPackage(this, packageName, label);
+            apps.add(new AppEntry(label, packageName));
         }
         apps.sort(Comparator.comparing(app -> app.label.toLowerCase(Locale.getDefault())));
         return apps;
+    }
+
+    private ApplicationInfo loadApplicationInfo(PackageManager pm, String packageName) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                return pm.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(
+                        PackageManager.MATCH_DISABLED_COMPONENTS
+                                | PackageManager.MATCH_UNINSTALLED_PACKAGES
+                ));
+            }
+            //noinspection deprecation
+            return pm.getApplicationInfo(
+                    packageName,
+                    PackageManager.MATCH_DISABLED_COMPONENTS
+                            | PackageManager.MATCH_UNINSTALLED_PACKAGES
+            );
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return null;
+        }
     }
 
     private void saveAndClose() {
@@ -163,6 +211,6 @@ public final class AllowedAppsActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private record AppEntry(String label, String packageName, boolean launchable) {}
+    private record AppEntry(String label, String packageName) {}
     private record AppRow(String packageName, CheckBox checkBox) {}
 }

@@ -11,9 +11,12 @@ public final class AllowedAppsStore {
     private static final String PREFS = "lockdown_policy";
     private static final String KEY_ALLOWED = "allowed_packages";
     private static final String KEY_ENABLED = "protection_enabled";
+    private static final String KEY_POLICY_STATE = "policy_state";
+    private static final String KEY_POLICY_ERROR = "policy_error";
     private static final String KEY_ALLOWLIST_CONFIGURED = "allowlist_configured";
     private static final String KEY_MANAGED_PACKAGES = "managed_packages";
     private static final String KEY_MODE = "protection_mode";
+    private static final String KEY_LABEL_PREFIX = "app_label:";
 
     private AllowedAppsStore() {}
 
@@ -42,9 +45,26 @@ public final class AllowedAppsStore {
     }
 
     public static void addManagedPackage(Context context, String packageName) {
+        rememberManagedPackage(context, packageName, null);
+    }
+
+    public static void rememberManagedPackage(
+            Context context,
+            String packageName,
+            String label
+    ) {
         HashSet<String> managed = new HashSet<>(getManagedPackages(context));
         managed.add(packageName);
-        prefs(context).edit().putStringSet(KEY_MANAGED_PACKAGES, managed).apply();
+        SharedPreferences.Editor editor = prefs(context).edit()
+                .putStringSet(KEY_MANAGED_PACKAGES, managed);
+        if (label != null && !label.isBlank()) {
+            editor.putString(KEY_LABEL_PREFIX + packageName, label);
+        }
+        editor.apply();
+    }
+
+    public static String getRememberedLabel(Context context, String packageName) {
+        return prefs(context).getString(KEY_LABEL_PREFIX + packageName, packageName);
     }
 
     public static boolean isAllowlistConfigured(Context context) {
@@ -73,8 +93,69 @@ public final class AllowedAppsStore {
         return prefs(context).getBoolean(KEY_ENABLED, false);
     }
 
-    public static void setProtectionEnabled(Context context, boolean enabled) {
-        prefs(context).edit().putBoolean(KEY_ENABLED, enabled).apply();
+    public static PolicyState getPolicyState(Context context) {
+        SharedPreferences preferences = prefs(context);
+        String fallback = preferences.getBoolean(KEY_ENABLED, false)
+                ? PolicyState.ACTIVE.name()
+                : PolicyState.INACTIVE.name();
+        String stored = preferences.getString(KEY_POLICY_STATE, fallback);
+        try {
+            return PolicyState.valueOf(stored);
+        } catch (IllegalArgumentException ignored) {
+            return PolicyState.FAILED;
+        }
+    }
+
+    public static String getPolicyError(Context context) {
+        return prefs(context).getString(KEY_POLICY_ERROR, "");
+    }
+
+    public static void markApplyStarted(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
+                .remove(KEY_POLICY_ERROR)
+                .commit();
+    }
+
+    public static void markApplySucceeded(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_POLICY_STATE, PolicyState.ACTIVE.name())
+                .remove(KEY_POLICY_ERROR)
+                .commit();
+    }
+
+    public static void markApplyFailed(Context context, String error) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())
+                .putString(KEY_POLICY_ERROR, error)
+                .commit();
+    }
+
+    public static void markPauseStarted(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, false)
+                .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
+                .remove(KEY_POLICY_ERROR)
+                .commit();
+    }
+
+    public static void markPauseSucceeded(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, false)
+                .putString(KEY_POLICY_STATE, PolicyState.INACTIVE.name())
+                .remove(KEY_POLICY_ERROR)
+                .commit();
+    }
+
+    public static void markPauseFailed(Context context, String error) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, false)
+                .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())
+                .putString(KEY_POLICY_ERROR, error)
+                .commit();
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -84,5 +165,12 @@ public final class AllowedAppsStore {
     public enum ProtectionMode {
         BLOCK_SELECTED,
         ALLOW_SELECTED
+    }
+
+    public enum PolicyState {
+        INACTIVE,
+        APPLYING,
+        ACTIVE,
+        FAILED
     }
 }
