@@ -1,15 +1,15 @@
-# מסלול בנייה וחתימה ל־Production
+# Production identity and signing
 
-מסלול ה־Production נפרד במכוון מהפיילוט הקיים:
+The production path is intentionally separate from the existing pilot:
 
-- בנייה רגילה ממשיכה להשתמש בזהות `com.example.lockdowndpc` ובחתימת הפיתוח, ולכן יכולה לעדכן את מכשיר הפיילוט שכבר הוגדר כ־Device Owner.
-- בניית Production משתמשת בזהות הזמנית `il.co.shalommaman.deviceguard` ודורשת מפתח חתימה חיצוני. הסודות והמפתח אינם נשמרים בריפוזיטורי.
+- A normal build keeps the `com.example.lockdowndpc` identity and pilot signer, so it can update the already provisioned Device Owner test device.
+- A production build uses the temporary `il.co.shalommaman.deviceguard` identity and requires an external signing key. Keys and secrets never live in this repository.
 
-> לפני מסירת המכשיר הראשון ללקוח יש לאשר סופית את שם החברה ואת ה־application ID. אחרי פרסום או provisioning אין לשנות אותם.
+> Finalize the organization name and application ID before provisioning the first customer device. Changing either after release is a migration, not a normal update.
 
-## הכנת מפתח
+## Signing material
 
-את קובץ המפתח שומרים בכספת ארגונית ובגיבוי מוצפן, מחוץ לתיקיית הפרויקט. את ארבעת הערכים הבאים מגדירים ב־CI secret store, במשתני סביבה מקומיים או בקובץ `~/.gradle/gradle.properties` שאינו חלק מהריפוזיטורי:
+Store the keystore in an organizational vault with an encrypted backup, outside the project directory. Provide these values through a CI secret store, local environment variables, or an untracked `~/.gradle/gradle.properties` file:
 
 ```properties
 deviceGuardStoreFile=/absolute/secure/path/device-guard-production.jks
@@ -18,7 +18,7 @@ deviceGuardKeyAlias=device-guard-production
 deviceGuardKeyPassword=REDACTED
 ```
 
-לחלופין, משתני הסביבה הנתמכים הם:
+Equivalent environment variables are:
 
 ```text
 DEVICE_GUARD_STORE_FILE
@@ -30,42 +30,38 @@ DEVICE_GUARD_UPDATE_PUBLIC_KEY
 DEVICE_GUARD_UPDATE_PUBLIC_KEY_SHA256
 ```
 
-שלושת הערכים האחרונים מפעילים את ערוץ העדכונים החתום. כתובת ה־manifest חייבת להיות
-HTTPS; המפתח הוא מפתח EC ציבורי בפורמט X.509/Base64. המפתח הפרטי התואם נשמר
-בכספת נפרדת ממפתח חתימת ה־APK ומשמש רק ליצירת manifest חתום. ערך ה־SHA-256
-הוא fingerprint של בתים מפוענחים של אותו מפתח ציבורי. בניית Production נכשלת
-אם ערך חסר, אם המפתח אינו EC/X.509, או אם ה־fingerprint אינו תואם.
+The final three values enable the signed update channel. The manifest URL must use HTTPS. The public key is an EC SubjectPublicKeyInfo value encoded as X.509 DER and then Base64. Its matching private key is separate from the APK-signing key and is used only to sign update manifests. The SHA-256 value is the fingerprint of the decoded public-key DER bytes. A production build fails if any value is missing, the key is not valid P-256 EC/X.509, or the approved fingerprint does not match.
 
-## בנייה
+## Build
 
-ה־init script הוא מתג מפורש: בלי `-I` מתקבל APK של הפיילוט; איתו מתקבל APK של Production.
+The init script is an explicit switch: without `-I`, Gradle produces a pilot APK; with it, Gradle produces a production APK.
 
 ```bash
 ./gradlew -I gradle/production.init.gradle.kts clean assembleRelease lintRelease test
 ```
 
-יש לאמת לפני פרסום שה־APK קיבל את הזהות והחתימה הנכונות:
+Verify identity and signer before publishing:
 
 ```bash
 apkanalyzer manifest application-id app/build/outputs/apk/release/app-release.apk
 apksigner verify --print-certs app/build/outputs/apk/release/app-release.apk
 ```
 
-אין להפיץ APK אם ה־application ID אינו `il.co.shalommaman.deviceguard`, אם החתימה היא תעודת debug, או אם טביעת האצבע אינה תואמת לרישום המאושר של הארגון.
+Do not distribute an APK if its application ID is not `il.co.shalommaman.deviceguard`, it uses a debug certificate, or its certificate fingerprint differs from the approved organizational record.
 
 ## Provisioning
 
-ה־namespace של הקוד נשאר כרגע `com.example.lockdowndpc` כדי לא לשנות את רכיב הניהול של מכשיר הפיילוט. לכן ב־Production יש להשתמש בשם הרכיב המלא:
+The source namespace remains `com.example.lockdowndpc` so the pilot's administration component stays stable. Use the fully qualified component name for production provisioning:
 
 ```bash
 adb shell dpm set-device-owner \
   il.co.shalommaman.deviceguard/com.example.lockdowndpc.admin.LockdownAdminReceiver
 ```
 
-אותו ערך מלא נדרש גם בשדה `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME` של QR provisioning.
+The same value is required in `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME` during QR provisioning.
 
-## אין שדרוג ישיר מהפיילוט
+## No in-place pilot-to-production migration
 
-APK של Production הוא אפליקציה אחרת ואינו יכול לעדכן את `com.example.lockdowndpc`. בנוסף, Device Owner קשור לרכיב האדמין הקיים. מעבר של מכשיר פיילוט לזהות Production מחייב תהליך מעבר מתוכנן — בדרך כלל הסרת ניהול/איפוס יצרן ו־provisioning מחדש — ולא התקנת APK מעל הקיים.
+The production APK is a different application and cannot update `com.example.lockdowndpc`. Device Owner ownership is also bound to the existing administrator component. Moving a pilot device to the production identity requires a planned migration, normally management removal or a factory reset followed by fresh provisioning.
 
-מקורות רשמיים: [הגדרת application ID ו־namespace](https://developer.android.com/build/configure-app-module), [חתימת אפליקציות ועדכונים](https://developer.android.com/studio/publish/app-signing), [בניית DPC ו־ComponentName](https://developer.android.com/work/dpc/build-dpc).
+Official references: [application ID and namespace](https://developer.android.com/build/configure-app-module), [app signing and updates](https://developer.android.com/studio/publish/app-signing), and [building a DPC](https://developer.android.com/work/dpc/build-dpc).

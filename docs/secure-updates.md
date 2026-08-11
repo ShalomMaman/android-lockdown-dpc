@@ -1,38 +1,31 @@
-# עדכונים מרחוק ללא ADB
+# Remote updates without ADB
 
-האפליקציה כוללת ערוץ עדכון עצמי עבור מכשיר שמוגדר כ־`Device Owner`. הערוץ
-מושבת כברירת מחדל ונפתח רק בבנייה שקיבלה גם כתובת HTTPS ל־manifest וגם מפתח
-EC ציבורי לאימות המטא־דאטה.
+Device Guard includes a self-update channel for a Device Owner installation. The channel is disabled by default and becomes active only when the build receives both an HTTPS manifest URL and an EC public key for metadata verification.
 
-## גבול האמון
+## Trust boundary
 
-שרת הקבצים אינו נחשב מהימן לבדו. לפני התקנה הלקוח דורש את כל התנאים הבאים:
+The file host is not trusted by itself. Before installation, the client requires every condition below:
 
-1. ה־manifest חתום ב־ECDSA באמצעות מפתח המטא־דאטה האופליין.
-2. שם החבילה זהה לאפליקציה המותקנת וקוד הגרסה גבוה יותר.
-3. כתובת ה־APK וכל ההפניות משתמשות ב־HTTPS בלבד.
-4. הגודל ו־SHA-256 של הקובץ תואמים ל־manifest החתום.
-5. Android מצליח לקרוא את ה־APK, ושם החבילה, הגרסה ותעודת החתימה שלו זהים
-   לערכים המאושרים ולאפליקציה המותקנת.
-6. רק לאחר כל הבדיקות נפתחת `PackageInstaller.Session` עבור אותה חבילה.
+1. The manifest has a valid ECDSA signature from the offline metadata key.
+2. The package name matches the installed app and the version code is higher.
+3. The APK URL and every redirect use HTTPS.
+4. The downloaded size and SHA-256 match the signed manifest.
+5. Android can parse the APK, and its package, version, and signing lineage match the authorized values and installed app.
+6. Only then does the client open a `PackageInstaller.Session` for that package.
 
-כשל בכל שלב עוצר את ההתקנה ואינו משהה או משנה את מדיניות ההגנה. הבדיקה
-מתוזמנת מיד לאחר bootstrap ולאחר מכן פעם ביום באמצעות `JobScheduler`; אין
-שירות רשת קבוע בזיכרון. מנהל מורשה יכול להפעיל בדיקה ידנית ממסך הניהול.
+Any failure stops installation without pausing or weakening the protection policy. The app checks once after bootstrap and then daily with `JobScheduler`; it does not keep a network service resident in memory. An authorized administrator can also request an immediate check from the console.
 
-## הגדרת בנייה
+## Build configuration
 
-הערכים נתמכים כ־Gradle properties או כמשתני סביבה:
+These values are supported as Gradle properties or environment variables:
 
 ```text
 deviceGuardUpdateManifestUrl / DEVICE_GUARD_UPDATE_MANIFEST_URL
-deviceGuardUpdatePublicKey   / DEVICE_GUARD_UPDATE_PUBLIC_KEY
+deviceGuardUpdatePublicKey / DEVICE_GUARD_UPDATE_PUBLIC_KEY
 deviceGuardUpdatePublicKeySha256 / DEVICE_GUARD_UPDATE_PUBLIC_KEY_SHA256
 ```
 
-המפתח הציבורי הוא SubjectPublicKeyInfo של EC בקידוד DER ולאחריו Base64 ללא
-שורות. מפתח המטא־דאטה נפרד לחלוטין ממפתח חתימת ה־APK. לדוגמה, ליצירת זוג
-P-256 מוצפן מחוץ לריפוזיטורי:
+The public key is a DER-encoded EC SubjectPublicKeyInfo value represented as Base64 without line breaks. Keep the metadata key separate from the APK-signing key. Generate an encrypted P-256 key pair outside the repository, for example:
 
 ```bash
 openssl genpkey -algorithm EC \
@@ -46,14 +39,11 @@ openssl pkey \
   | openssl base64 -A
 ```
 
-יש לשמור את המפתח הפרטי ואת הסיסמה בכספת ארגונית עם גיבוי מוצפן ובקרת גישה.
-המפתח הציבורי אינו סוד וניתן להעבירו לבנייה. מסלול Production נכשל אם הגדרות
-העדכון או הגדרות חתימת ה־APK חסרות.
+Store the private key and passphrase in an organizational vault with encrypted backup and access control. The public key is not secret. The production build fails if either update configuration or APK-signing configuration is incomplete.
 
-## יצירת release
+## Create a release
 
-`tools/publish_update.py` בודק את זהות ה־APK ואת תעודת החתימה באמצעות כלי
-Android הרשמיים לפני שהוא יוצר manifest. הוא אינו דורס קובץ קיים ללא `--force`.
+`tools/publish_update.py` verifies APK identity and signer with the Android SDK tools before creating the signed manifest. It never overwrites an existing output unless `--force` is explicit.
 
 ```bash
 ./tools/publish_update.py \
@@ -67,27 +57,14 @@ Android הרשמיים לפני שהוא יוצר manifest. הוא אינו דו
   --output /secure/releases/latest.json
 ```
 
-מעלים את ה־APK לכתובת הגרסה הקבועה ואת `latest.json` לכתובת היציבה שהוטמעה
-באפליקציה. פרסום מקצועי חייב להיות אטומי מבחינת הסדר: קודם APK בלתי־משתנה,
-אחר כך manifest חתום שמפנה אליו.
+Upload the immutable APK first, then atomically replace the stable `latest.json` consumed by devices. The signed manifest includes issue and expiration times. Clients reject validity periods above 91 days; the publisher defaults to 30 days. Refresh `latest.json` before expiration even when no APK version changes.
 
-ה־manifest כולל זמני הנפקה ותפוגה, ותוקפו מוגבל בצד הלקוח ל־91 ימים. כלי
-הפרסום משתמש ב־30 ימים כברירת מחדל. יש לרענן את `latest.json` לפני התפוגה גם
-אם לא יצאה גרסת APK חדשה. המכשיר שומר גם את קוד הגרסה החתום הגבוה ביותר שכבר
-ראה, ולכן השרת אינו יכול להחזיר אותו ל־manifest ישן יותר לאחר שכבר ראה חדש.
+The device also records the highest authorized version code it has accepted. A compromised file host therefore cannot replay an older signed manifest after the device has observed a newer one.
 
-## Bootstrap ו־rollback
+## Bootstrap and rollback
 
-לגרסה שכבר מותקנת במכשיר ואין בה updater נדרשת התקנת bootstrap אחת באמצעות
-ADB. מאותו רגע העדכונים הרגילים אינם זקוקים למחשב, כל עוד המכשיר מחובר לרשת
-וערוץ ה־HTTPS זמין.
+A device running a version without the updater needs one bootstrap installation through ADB. Routine updates no longer need a computer after that, provided the device has network access and can reach the HTTPS channel.
 
-Android אינו מאפשר להחליף application ID או תעודת חתימת APK בעדכון רגיל.
-מכשיר הפיילוט נשאר ב־`com.example.lockdowndpc` ובחתימת הפיילוט; מכשירי לקוח
-חדשים חייבים לעבור provisioning עם זהות ומפתח Production. תיקון או rollback
-מופצים כגרסה חדשה עם `versionCode` גבוה יותר, ולא כהורדת גרסה.
+Android does not allow a normal update to replace an application ID or unrelated APK signer. The pilot remains `com.example.lockdowndpc` with its existing pilot signer. New customer devices must be provisioned with the production identity and key. Ship a corrective release or rollback as a new, higher `versionCode`, never as a downgrade.
 
-ב־Android 9 ומעלה הלקוח מקבל סיבוב תעודה רק כאשר ה־APK החדש כולל signing
-lineage מאומת שמכיל את החותם הנוכחי. חבילות עם כמה חותמים דורשות התאמה מדויקת
-ואינן יכולות לסובב חתימות. כל סיבוב מפתח עדיין מחייב rehearsal במכשיר בדיקה
-לפני פרסום ללקוחות.
+On Android 9 and newer, the client accepts certificate rotation only when the new APK contains a platform-verified signing lineage that includes the currently installed signer. Multi-signer packages require an exact signer set and cannot use this rotation path. Rehearse every signer rotation on a test device before customer release.

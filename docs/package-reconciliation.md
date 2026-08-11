@@ -1,19 +1,19 @@
-# Reconciliation לאחר התקנת אפליקציות
+# Package-install reconciliation
 
-ב־Android 8.0 ומעלה רוב שידורי החבילות המרומזים אינם נמסרים ל־receiver שמוצהר רק ב־manifest. לכן `PACKAGE_ADDED` הוסר מה־receiver הסטטי והועבר למקלט דינמי בתוך `LockdownDeviceAdminService`.
+On Android 8.0 and newer, most implicit package broadcasts are not delivered to a receiver declared only in the manifest. `PACKAGE_ADDED` is therefore handled by a dynamic receiver inside `LockdownDeviceAdminService` rather than by the static receiver.
 
-Android מחזיק חיבור ל־`DeviceAdminService` של Device Owner כל עוד המשתמש פעיל. אם התהליך נהרג עקב לחץ זיכרון, המערכת קושרת אותו מחדש לאחר backoff. השירות מבצע reconciliation מלא גם ב־`onCreate()`, כך שהפעלה מחדש מתקנת התקנות שאירעו בזמן שהתהליך לא היה זמין.
+Android keeps a Device Owner's `DeviceAdminService` bound while the user is active. If memory pressure kills the process, the system rebinds it after backoff. The service also performs a full reconciliation in `onCreate()`, so a restarted process repairs package changes that occurred while it was unavailable.
 
-ההתנהגות לפי מצב המדיניות:
+Behavior depends on the selected policy mode:
 
-- במצב רשימה לבנה (`ALLOW_SELECTED`), כל אפליקציית צד שלישי חדשה מתווספת למלאי המנוהל ונחסמת כל עוד לא אושרה במפורש.
-- במצב רשימה שחורה (`BLOCK_SELECTED`), חבילות חסומות מוכרות נחסמות מחדש, אבל אפליקציה אקראית חדשה מותרת מעצם הגדרת המצב.
-- אם הגנה לא התבקשה, השירות אינו מחיל חסימה. הפעלה עתידית מבצעת סריקה מלאה ולא נשענת רק על היסטוריית broadcasts.
+- In allowlist mode (`ALLOW_SELECTED`), every newly installed third-party app enters the managed inventory and is blocked until explicitly approved.
+- In blocklist mode (`BLOCK_SELECTED`), known blocked packages are blocked again, while an arbitrary new app remains allowed by definition.
+- If protection was not requested, the service does not apply blocking. A later activation performs a full scan rather than relying only on broadcast history.
 
-הפעולות מסודרות ב־executor יחיד ו־`apply()`/`pause()` מסונכרנות, כדי למנוע החלות מתחרות מאירוע התקנה, boot ומסך הניהול.
+Operations run through one executor, and `apply()`/`pause()` are synchronized to avoid concurrent reconciliation from installation, boot, and the administration UI.
 
-## מגבלה שנותרה
+## Remaining limitation
 
-`PACKAGE_ADDED` מתקבל לאחר שהחבילה כבר הותקנה. לכן קיימת אפשרות לחלון קצר בין השלמת התקנה לבין הסתרת האפליקציה. כדי להשיג התקנה אטומית לחלוטין יש לשלוט גם במסלול ההתקנה עצמו (למשל managed app distribution), ולא לאפשר ADB או installer חיצוני בזמן הגנה. ההגבלות הקיימות על חנות, מקורות לא מוכרים ושליטה באפליקציות מצמצמות את החלון במסלול המשתמש הרגיל.
+`PACKAGE_ADDED` arrives after installation completes, so a short interval can exist between installation and package hiding. Fully atomic enforcement requires control over the installation path itself, such as managed app distribution, with ADB and external installers unavailable while protection is active. Existing restrictions on stores, unknown sources, and app control reduce this interval on the normal user path.
 
-מקורות רשמיים: [`DeviceAdminService`](https://developer.android.com/reference/android/app/admin/DeviceAdminService), [חריגים והגבלות על implicit broadcasts](https://developer.android.com/develop/background-work/background-tasks/broadcasts/broadcast-exceptions), [`ACTION_PACKAGE_ADDED`](https://developer.android.com/reference/android/content/Intent#ACTION_PACKAGE_ADDED).
+Official references: [`DeviceAdminService`](https://developer.android.com/reference/android/app/admin/DeviceAdminService), [implicit broadcast exceptions](https://developer.android.com/develop/background-work/background-tasks/broadcasts/broadcast-exceptions), and [`ACTION_PACKAGE_ADDED`](https://developer.android.com/reference/android/content/Intent#ACTION_PACKAGE_ADDED).

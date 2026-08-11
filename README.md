@@ -1,31 +1,37 @@
-# Lockdown DPC
+# Device Guard DPC
 
-אפליקציית Android לניהול מכשיר במצב `Fully Managed / Device Owner`. היא מיועדת למכשירים ייעודיים שבהם מנהל מורשה קובע אילו אפליקציות זמינות ומגן על המדיניות באמצעות קוד מקומי.
+[![Android CI](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml/badge.svg)](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/about/versions/oreo)
 
-## יכולות
+Device Guard is an Android device-policy controller for fully managed, Device Owner deployments. It is designed for dedicated devices where an authorized administrator chooses which apps remain available and protects the policy with a local PIN.
 
-- חסימה לפי רשימה שחורה או רשימה לבנה מחמירה.
-- חסימה מובנית של דפדפנים, חנויות אפליקציות ורשתות חברתיות מוכרות.
-- הפניית קישורי HTTP/HTTPS למסך חסימה בזמן שההגנה פעילה.
-- קוד מנהל בן 6–12 ספרות עם האטה ונעילה לאחר ניסיונות כושלים.
-- קוד שחזור חד־פעמי שנשמר במכשיר כמאמת מוצפן בלבד.
-- השהיה וחידוש של המדיניות, כולל שחזור אפליקציות שהוסתרו.
-- החלת המדיניות מחדש לאחר אתחול, עדכון אפליקציה או התקנת חבילה חדשה. ב־Android 8+ נעשה שימוש ב־`DeviceAdminService` ובמקלט דינמי, בהתאם למסלול הייעודי של Android ל־DPC.
-- מלאי אפליקציות קבוע שמאפשר לנהל מחדש גם חבילות שכבר הוסתרו.
-- מצב מדיניות מאומת (`בתהליך / פעילה / נכשלה`) שאינו מציג הצלחה לאחר החלה חלקית.
-- אימות סינכרוני של restrictions, הסתרת חבילות, חסימת הסרה, WebView וניתוב קישורים; ב־Android 14+ מתקבלים גם דיווחי מערכת אסינכרוניים.
-- שמירת ספק WebView מערכתי פעיל תוך השעיית ממשק הדפדפן במכשירים שבהם Chrome מספק את המנוע.
-- שמירת אפליקציית הניהול ו־Tailscale זמינות ומוגנות מהסרה.
-- יומן פעולות ניהול מקומי.
-- ערוץ עדכון עצמי חתום: בדיקה יומית, אימות ECDSA למטא־דאטה, אימות hash/זהות/גרסה/חתימת APK והתקנה שקטה דרך Device Owner.
+The app interface is currently Hebrew-first. The source code, build documentation, security model, and contribution workflow are maintained in English.
 
-## דרישות
+## Features
 
-- Android 8.0 ומעלה (`minSdk 26`).
-- JDK 17 ו־Android SDK.
-- מכשיר בדיקה שניתן להגדיר כ־Device Owner.
+- Blocklist and strict allowlist operating modes.
+- Built-in blocking for known browsers, app stores, and social-media apps.
+- HTTP/HTTPS link interception while protection is active.
+- A 6–12 digit administrator PIN with progressive throttling and lockout.
+- A one-time recovery code stored only as a protected verifier.
+- Policy pause and resume, including restoration of hidden packages.
+- Automatic reconciliation after reboot, app update, or package installation. On Android 8+, a `DeviceAdminService` and dynamic package receiver follow Android's supported DPC lifecycle.
+- A persistent package inventory, so administrators can manage packages that are currently hidden.
+- Verified policy state (`applying`, `active`, or `failed`) that never reports success after a partial policy application.
+- Synchronous verification of restrictions, package visibility, uninstall blocking, WebView availability, and link routing; Android 14+ policy callbacks provide additional asynchronous confirmation.
+- Keeps the system WebView provider available while blocking its browser UI when Chrome supplies the WebView engine.
+- Keeps the management app and Tailscale available and protected from removal.
+- Local administrative audit log.
+- Signed self-update channel with daily checks, ECDSA metadata verification, APK hash/identity/version/signer verification, and silent Device Owner installation.
 
-## בנייה ובדיקות
+## Requirements
+
+- Android 8.0 or newer (`minSdk 26`).
+- JDK 17 and the Android SDK.
+- A test device that can be provisioned as Device Owner.
+
+## Build and test
 
 ```bash
 export JAVA_HOME="/path/to/jdk-17"
@@ -33,9 +39,9 @@ export ANDROID_HOME="/path/to/android-sdk"
 ./gradlew assembleDebug lintDebug test
 ```
 
-## התקנת פיתוח
+## Development provisioning
 
-הפקודה `set-device-owner` מיועדת למכשיר בדיקה נקי ולרוב דורשת איפוס להגדרות יצרן. אין להריץ אותה על מכשיר אישי או על מכשיר שמכיל נתונים חשובים.
+`set-device-owner` is intended for a clean test device and normally requires a factory reset. Never run it on a personal device or on a device that contains important data.
 
 ```bash
 adb install -t app/build/outputs/apk/debug/app-debug.apk
@@ -43,19 +49,24 @@ adb shell dpm set-device-owner \
   com.example.lockdowndpc/.admin.LockdownAdminReceiver
 ```
 
-לאחר ההתקנה פותחים את "מגן המכשיר", מגדירים קוד מנהל, שומרים את קוד השחזור, בוחרים שיטת חסימה ורשימת אפליקציות ומפעילים את ההגנה.
+Open Device Guard, set an administrator PIN, store the recovery code securely, select a policy mode and package list, then activate protection.
 
-## אבטחה ופריסה
+## Security and deployment
 
-תכנון מנגנון ההתקנות וה־fail-closed במצב רשימה לבנה מתועד ב־[`docs/package-reconciliation.md`](docs/package-reconciliation.md).
-תכנון, בנייה ופרסום של עדכונים מרחוק מתועדים ב־[`docs/secure-updates.md`](docs/secure-updates.md).
+The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md).
 
-- אין לשמור בריפוזיטורי מפתח חתימה, קוד מנהל, קוד שחזור או פרטי מכשיר.
-- בנייה רגילה נשארת חתומה בהגדרת הפיתוח לצורך תאימות למכשיר הניסוי בלבד. מסלול Production מפורש, עם application ID נפרד ומפתח חיצוני, מתועד ב־[`docs/production-release.md`](docs/production-release.md).
-- לפריסה מסחרית יש להשתמש ב־QR/USB provisioning לאחר איפוס ובתהליך עדכונים חתום ומתועד.
-- אין להפעיל `DISALLOW_DEBUGGING_FEATURES` לפני שנבדק ערוץ ניהול חלופי; אחרת אפשר לאבד את יכולת התחזוקה מרחוק.
-- איפוס דרך Recovery או צריבת מערכת יכולים להסיר כל DPC. יש להקשיח גם את שרשרת האתחול והגישה הפיזית בהתאם לאיום.
+- Never commit an APK-signing key, metadata-signing key, administrator PIN, recovery code, or device credential.
+- A normal build retains the pilot identity and development signer for compatibility with the existing test device. The explicit production identity and external-signing flow are documented in [`docs/production-release.md`](docs/production-release.md).
+- Commercial deployments should use QR or USB provisioning after a factory reset and a documented signed-update process.
+- Do not enable `DISALLOW_DEBUGGING_FEATURES` until an independent management path has been tested, or remote recovery may become impossible.
+- Recovery reset or firmware flashing can remove any DPC. A serious threat model must also cover boot-chain integrity and physical access.
 
-## סטטוס
+## Contributing
 
-גרסת פיילוט: `0.4.1`.
+Contributions are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request and report vulnerabilities according to [`SECURITY.md`](SECURITY.md), not through a public issue.
+
+Licensed under the [Apache License 2.0](LICENSE).
+
+## Status
+
+Pilot release: `0.4.1`.
