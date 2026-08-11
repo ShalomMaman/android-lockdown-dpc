@@ -1,0 +1,60 @@
+/*
+ * Applied only by production.init.gradle.kts. Normal Gradle invocations keep
+ * the existing pilot application ID and debug-compatible release signature.
+ * Groovy is used here because applied Kotlin scripts do not inherit AGP's typed
+ * extension classpath.
+ */
+
+def requiredProductionSetting = { String propertyName, String environmentName ->
+    def value = providers.gradleProperty(propertyName)
+        .orElse(providers.environmentVariable(environmentName))
+        .orNull
+        ?.trim()
+    if (!value) {
+        throw new GradleException(
+            "Missing production signing setting ${propertyName} " +
+                "(or environment variable ${environmentName})"
+        )
+    }
+    value
+}
+
+plugins.withId('com.android.application') {
+    def storePath = requiredProductionSetting(
+        'deviceGuardStoreFile',
+        'DEVICE_GUARD_STORE_FILE'
+    )
+    def storePasswordValue = requiredProductionSetting(
+        'deviceGuardStorePassword',
+        'DEVICE_GUARD_STORE_PASSWORD'
+    )
+    def keyAliasValue = requiredProductionSetting(
+        'deviceGuardKeyAlias',
+        'DEVICE_GUARD_KEY_ALIAS'
+    )
+    def keyPasswordValue = requiredProductionSetting(
+        'deviceGuardKeyPassword',
+        'DEVICE_GUARD_KEY_PASSWORD'
+    )
+
+    android {
+        defaultConfig {
+            applicationId 'il.co.shalommaman.deviceguard'
+        }
+        signingConfigs {
+            production {
+                storeFile file(storePath)
+                storePassword storePasswordValue
+                keyAlias keyAliasValue
+                keyPassword keyPasswordValue
+                enableV1Signing true
+                enableV2Signing true
+            }
+        }
+        buildTypes {
+            release {
+                signingConfig signingConfigs.production
+            }
+        }
+    }
+}
