@@ -36,6 +36,58 @@ plugins.withId('com.android.application') {
         'deviceGuardKeyPassword',
         'DEVICE_GUARD_KEY_PASSWORD'
     )
+    def updateManifestUrlValue = requiredProductionSetting(
+        'deviceGuardUpdateManifestUrl',
+        'DEVICE_GUARD_UPDATE_MANIFEST_URL'
+    )
+    def updatePublicKeyValue = requiredProductionSetting(
+        'deviceGuardUpdatePublicKey',
+        'DEVICE_GUARD_UPDATE_PUBLIC_KEY'
+    )
+    def updatePublicKeySha256Value = requiredProductionSetting(
+        'deviceGuardUpdatePublicKeySha256',
+        'DEVICE_GUARD_UPDATE_PUBLIC_KEY_SHA256'
+    ).replace(':', '').toLowerCase(java.util.Locale.ROOT)
+    try {
+        def updateUri = new java.net.URI(updateManifestUrlValue)
+        if (!'https'.equalsIgnoreCase(updateUri.scheme)
+                || !updateUri.host
+                || updateUri.userInfo
+                || updateUri.fragment) {
+            throw new IllegalArgumentException('unclean HTTPS URL')
+        }
+    } catch (Exception ignored) {
+        throw new GradleException('Production update manifest URL must be a clean HTTPS URL')
+    }
+    def publicKeyBytes
+    try {
+        publicKeyBytes = java.util.Base64.decoder.decode(updatePublicKeyValue)
+        def parsedPublicKey = java.security.KeyFactory.getInstance('EC').generatePublic(
+            new java.security.spec.X509EncodedKeySpec(publicKeyBytes)
+        )
+        def expectedParameters = java.security.AlgorithmParameters.getInstance('EC')
+        expectedParameters.init(new java.security.spec.ECGenParameterSpec('secp256r1'))
+        def expectedP256 = expectedParameters.getParameterSpec(
+            java.security.spec.ECParameterSpec
+        )
+        if (!(parsedPublicKey instanceof java.security.interfaces.ECPublicKey)
+                || parsedPublicKey.params.curve != expectedP256.curve
+                || parsedPublicKey.params.generator != expectedP256.generator
+                || parsedPublicKey.params.order != expectedP256.order
+                || parsedPublicKey.params.cofactor != expectedP256.cofactor) {
+            throw new IllegalArgumentException('metadata key must use P-256')
+        }
+    } catch (Exception ignored) {
+        throw new GradleException('Production update public key must be EC X.509 encoded as Base64')
+    }
+    def actualFingerprint = java.security.MessageDigest.getInstance('SHA-256')
+        .digest(publicKeyBytes)
+        .collect { String.format('%02x', it & 0xff) }
+        .join('')
+    if (!(updatePublicKeySha256Value ==~ /[0-9a-f]{64}/)
+            || actualFingerprint != updatePublicKeySha256Value) {
+        throw new GradleException('Production update public-key SHA-256 does not match')
+    }
 
     android {
         defaultConfig {

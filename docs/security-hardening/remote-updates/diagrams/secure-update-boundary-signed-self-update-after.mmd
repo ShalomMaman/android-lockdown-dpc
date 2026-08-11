@@ -1,0 +1,8 @@
+flowchart LR
+  Publisher[Offline release publisher] -->|signed envelope + APK| Host[HTTPS release host]
+  Host -->|untrusted bytes| Verify[DPC update verifier]
+  Key[Embedded metadata public key] --> Verify
+  Installed[Installed APK signer] --> Verify
+  Verify -->|verified higher self-update only| PI[PackageInstaller]
+  PI --> DPC[Updated DPC]
+  DPC --> Policy[Policy reconciliation]

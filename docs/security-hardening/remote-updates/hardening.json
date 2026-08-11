@@ -1,0 +1,105 @@
+{
+  "documentType": "codex-security.hardening-analysis",
+  "schemaVersion": "1.0",
+  "analysisId": "hardening_20260811_remote_updates",
+  "sourceEvidence": {
+    "kind": "source_and_platform_documentation",
+    "label": "Device Guard source and Android Device Owner installer contract",
+    "collectionSha256": "394a60a344fd7e9622c484a780daa84555ebf9e4e8c62181eefabbc9c931cc9a",
+    "artifactCount": 5,
+    "targetRevision": "482e0235aeaa18afc6921e3996c9345c32049ec5",
+    "sourceDrift": "none"
+  },
+  "assessment": {
+    "outcome": "opportunities_identified",
+    "summary": "A signed self-update boundary can remove routine ADB dependence without trusting the release host to authorize code."
+  },
+  "constraints": {
+    "profile": "balanced",
+    "changeHorizons": ["incremental", "medium_term"],
+    "nonNegotiables": ["Android 9 support", "fail closed", "same package and APK signer", "protection remains active on update failure"],
+    "assumptions": ["Small initial fleet", "No production release endpoint or metadata key has been selected yet"]
+  },
+  "opportunities": [
+    {
+      "opportunityId": "secure-update-boundary",
+      "title": "Own the remote-update trust boundary",
+      "summary": "Authorize immutable self-updates with offline-signed metadata and platform signer checks.",
+      "diagnosis": "Routine patch delivery currently depends on a temporary privileged ADB transport whose lifetime does not survive reboot.",
+      "evidence": [
+        {"claimType": "observed", "sourceKind": "source", "evidenceId": "E001", "path": "app/src/main", "claim": "The DPC contains no update client."},
+        {"claimType": "observed", "sourceKind": "source", "evidenceId": "E002", "path": "app/build.gradle.kts", "claim": "Update compatibility is bound to application ID and signing certificate."},
+        {"claimType": "observed", "sourceKind": "document", "evidenceId": "E003", "path": "docs/security-hardening/remote-updates/context.md", "claim": "Android permits a Device Owner to install through PackageInstaller without user interaction."},
+        {"claimType": "observed", "sourceKind": "experiment", "evidenceId": "E005", "path": "docs/security-hardening/remote-updates/context.md", "claim": "ADB TCP was closed after the Android 9 device rebooted."}
+      ],
+      "desiredInvariants": [
+        "A release host cannot authorize code without the offline metadata key.",
+        "Only a higher version of the current package with the current APK signer reaches PackageInstaller.",
+        "Update failure never weakens protection."
+      ],
+      "proposalPath": "proposals/secure-update-boundary.md",
+      "options": [
+        {
+          "optionId": "manual-adb",
+          "title": "Manual ADB updates",
+          "kind": "baseline",
+          "summary": "Keep technician-driven updates over a temporary debug transport.",
+          "diagramPaths": {"before": "diagrams/secure-update-boundary-before.mmd", "after": "diagrams/secure-update-boundary-manual-adb-after.mmd"},
+          "evidenceCoverage": [{"evidenceId": "E005", "effect": "unaffected", "tacticalFixRequired": true, "rationale": "ADB still needs reopening after reboot."}],
+          "tradeoffs": [
+            {"dimension": "security", "direction": "neutral", "confidence": "high", "basis": "source-derived", "assessment": "No new client surface, but privileged ADB remains necessary during maintenance.", "validationPlan": "Audit every update session and verify ADB is closed afterward."},
+            {"dimension": "performance", "direction": "neutral", "confidence": "high", "basis": "source-derived", "assessment": "No background work.", "validationPlan": "Not applicable beyond install duration."},
+            {"dimension": "memory", "direction": "neutral", "confidence": "high", "basis": "source-derived", "assessment": "No client allocation.", "validationPlan": "Not applicable."},
+            {"dimension": "reliability", "direction": "regresses", "confidence": "high", "basis": "measured", "assessment": "The update path was unavailable after reboot until local ADB reactivation.", "validationPlan": "Repeat reboot connectivity checks."},
+            {"dimension": "operability", "direction": "regresses", "confidence": "high", "basis": "measured", "assessment": "A nearby computer is required.", "validationPlan": "Track technician touches per update."},
+            {"dimension": "migration", "direction": "neutral", "confidence": "high", "basis": "source-derived", "assessment": "No migration.", "validationPlan": "Continue the current runbook."}
+          ],
+          "residualRisks": ["Delayed patch delivery", "Temporary debug exposure"],
+          "implementationReadiness": {"affectedComponents": [], "workPackages": [], "acceptanceCriteria": ["ADB update remains documented"], "migrationNotes": [], "rollback": "Not applicable"}
+        },
+        {
+          "optionId": "signed-self-update",
+          "title": "Signed self-update",
+          "kind": "structural",
+          "summary": "Verify offline-signed metadata and the APK signer before a Device Owner PackageInstaller session.",
+          "diagramPaths": {"before": "diagrams/secure-update-boundary-before.mmd", "after": "diagrams/secure-update-boundary-signed-self-update-after.mmd"},
+          "evidenceCoverage": [
+            {"evidenceId": "E001", "effect": "addresses", "tacticalFixRequired": true, "rationale": "Adds the missing update boundary while retaining ADB as break-glass."},
+            {"evidenceId": "E005", "effect": "addresses", "tacticalFixRequired": false, "rationale": "Routine updates no longer depend on ADB TCP lifetime."}
+          ],
+          "tradeoffs": [
+            {"dimension": "security", "direction": "improves", "confidence": "high", "basis": "source-derived", "assessment": "Metadata and APK signer checks separate release authorization from hosting.", "validationPlan": "Run tampering, downgrade, digest, package, and signer negative cases."},
+            {"dimension": "performance", "direction": "regresses", "confidence": "medium", "basis": "hypothetical", "assessment": "Periodic metadata I/O and update-only APK download are added.", "validationPlan": "Measure bytes and wall time for no-update and update checks."},
+            {"dimension": "memory", "direction": "neutral", "confidence": "medium", "basis": "source-derived", "assessment": "Streaming avoids buffering an APK in memory.", "validationPlan": "Measure peak RSS during a representative update."},
+            {"dimension": "reliability", "direction": "improves", "confidence": "medium", "basis": "source-derived", "assessment": "Checks retry independently of ADB; endpoint/key availability become dependencies.", "validationPlan": "Test offline, interruption, reboot, and retry behavior."},
+            {"dimension": "operability", "direction": "improves", "confidence": "medium", "basis": "source-derived", "assessment": "Routine technician touches disappear, with new key/release duties.", "validationPlan": "Dry-run the publisher and record one full rollout."},
+            {"dimension": "migration", "direction": "regresses", "confidence": "high", "basis": "source-derived", "assessment": "One ADB bootstrap and endpoint/key configuration are required.", "validationPlan": "Complete a one-device canary rollout and recovery drill."}
+          ],
+          "residualRisks": ["APK signing-key compromise", "Metadata-key compromise or loss", "Host availability", "Vendor PackageInstaller behavior"],
+          "implementationReadiness": {"affectedComponents": ["app/build.gradle.kts", "app/src/main/AndroidManifest.xml", "app/src/main/java/com/example/lockdowndpc/updates", "app/src/main/java/com/example/lockdowndpc/ui/MainActivity.kt"], "workPackages": ["Verifier", "Downloader", "Installer", "Scheduler", "Admin UI", "Publisher"], "acceptanceCriteria": ["Unauthorized APK never reaches PackageInstaller", "Valid higher same-signer APK self-installs on Android 9"], "migrationNotes": ["Pilot and production identities remain separate"], "rollback": "Publish a higher corrective release or use ADB break-glass"}
+        },
+        {
+          "optionId": "managed-play-emm",
+          "title": "Managed Google Play/EMM",
+          "kind": "foundational",
+          "summary": "Delegate distribution, rollout, inventory, and administrative identity to an enterprise control plane.",
+          "diagramPaths": {"before": "diagrams/secure-update-boundary-before.mmd", "after": "diagrams/secure-update-boundary-emm-after.mmd"},
+          "evidenceCoverage": [{"evidenceId": "E005", "effect": "addresses", "tacticalFixRequired": false, "rationale": "Managed distribution replaces ADB for routine releases."}],
+          "tradeoffs": [
+            {"dimension": "security", "direction": "improves", "confidence": "medium", "basis": "analogous", "assessment": "Enterprise administrator identity and managed distribution reduce bespoke control ownership.", "validationPlan": "Review selected EMM identity, audit, and app-signing model."},
+            {"dimension": "performance", "direction": "unknown", "confidence": "low", "basis": "hypothetical", "assessment": "Vendor agent behavior is not selected.", "validationPlan": "Measure on a trial enrollment."},
+            {"dimension": "memory", "direction": "unknown", "confidence": "low", "basis": "hypothetical", "assessment": "Vendor agent footprint is unknown.", "validationPlan": "Measure on a trial enrollment."},
+            {"dimension": "reliability", "direction": "improves", "confidence": "medium", "basis": "analogous", "assessment": "Fleet rollout tooling is mature but service-dependent.", "validationPlan": "Run staged update and outage exercises."},
+            {"dimension": "operability", "direction": "improves", "confidence": "medium", "basis": "analogous", "assessment": "Central inventory and rollout replace bespoke operations.", "validationPlan": "Pilot the operator workflow."},
+            {"dimension": "migration", "direction": "regresses", "confidence": "high", "basis": "source-derived", "assessment": "Current identity/provisioning may require reset and re-enrollment.", "validationPlan": "Document and test one full migration."}
+          ],
+          "residualRisks": ["Vendor dependency", "Enrollment migration", "Subscription and account operations"],
+          "implementationReadiness": {"affectedComponents": ["Provisioning and release operations"], "workPackages": ["Select EMM", "Pilot enrollment", "Migrate signing identity"], "acceptanceCriteria": ["Staged managed update succeeds"], "migrationNotes": ["May require device reset"], "rollback": "Return pilot devices to the documented ADB/self-update path after re-provisioning"}
+        }
+      ],
+      "recommendedOptionId": "signed-self-update",
+      "recommendation": "Use signed self-update for the current small fleet and move to EMM when centralized governance justifies re-provisioning."
+    }
+  ],
+  "openQuestions": ["Production HTTPS endpoint", "Offline metadata private-key storage and backup"]
+}

@@ -69,6 +69,7 @@
     <string name="admin_section_protection">הגדרות הגנה</string>
     <string name="admin_section_access">אבטחת גישה</string>
     <string name="admin_section_records">תיעוד ובקרה</string>
+    <string name="admin_section_updates">עדכוני מערכת</string>
     <string name="admin_mode_row">שיטת החסימה</string>
     <string name="admin_choose_allow">בחירת אפליקציות מותרות</string>
     <string name="admin_choose_block">בחירת אפליקציות לחסימה</string>
@@ -80,6 +81,13 @@
     <string name="admin_new_recovery_supporting">הקוד הקודם יתבטל מיד</string>
     <string name="admin_audit">יומן פעולות ניהול</string>
     <string name="admin_lock">נעילת מסך הניהול</string>
+    <string name="update_check_title">בדיקת עדכון מאובטח</string>
+    <string name="update_checking_title">בודק עדכון חתום…</string>
+    <string name="update_installing_title">מתקין עדכון מאומת…</string>
+    <string name="update_failed_title">בדיקת העדכון נכשלה</string>
+    <string name="update_ready_supporting">הבדיקה מתבצעת אוטומטית פעם ביום, וניתן להפעיל אותה גם עכשיו.</string>
+    <string name="update_disabled_title">עדכונים מרחוק אינם מוגדרים</string>
+    <string name="update_disabled_supporting">יש להגדיר כתובת עדכונים ומפתח אימות בזמן בניית גרסת השירות.</string>
     <string name="admin_help_allow">Tailscale ורכיבי המערכת החיוניים נשמרים תמיד. אפליקציה חדשה תיחסם עד לאישור מנהל.</string>
     <string name="admin_help_block">Tailscale ורכיבי המערכת החיוניים נשמרים תמיד. התקנות חדשות דורשות אישור מנהל.</string>
     <string name="admin_error_recovery">לא ניתן ליצור קוד שחזור במכשיר.</string>

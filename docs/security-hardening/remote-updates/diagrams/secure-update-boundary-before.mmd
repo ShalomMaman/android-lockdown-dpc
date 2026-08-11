@@ -1,0 +1,5 @@
+flowchart LR
+  Operator -->|USB or temporary ADB TCP| ADB[Android debug bridge]
+  ADB -->|install APK| PM[Package Manager]
+  PM --> DPC[Device Guard DPC]
+  DPC --> Policy[Local policy enforcement]

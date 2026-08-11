@@ -38,6 +38,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.heading
@@ -338,6 +339,7 @@ internal fun ActionRow(
     modifier: Modifier = Modifier,
     supporting: String? = null,
     showDivider: Boolean = false,
+    enabled: Boolean = true,
 ) {
     if (showDivider) {
         HorizontalDivider(
@@ -349,7 +351,8 @@ internal fun ActionRow(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(onClick = onClick)
+            .alpha(if (enabled) 1f else 0.62f)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

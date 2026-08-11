@@ -9,6 +9,7 @@ import android.os.Build;
 import android.util.Log;
 
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
+import com.example.lockdowndpc.updates.UpdateScheduler;
 
 /**
  * Keeps the device-owner process available for runtime-only package broadcasts.
@@ -59,6 +60,7 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
                 "device-admin-service-started",
                 null
         );
+        UpdateScheduler.schedule(getApplicationContext());
         Log.i(TAG, "Runtime package reconciliation receiver registered");
     }
 
