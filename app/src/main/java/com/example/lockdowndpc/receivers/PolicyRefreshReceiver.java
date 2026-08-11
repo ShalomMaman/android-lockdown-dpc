@@ -52,7 +52,11 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
             boolean system = (info.flags
                     & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
             if (!system && pm.getLaunchIntentForPackage(packageName) != null) {
-                AllowedAppsStore.addManagedPackage(context, packageName);
+                AllowedAppsStore.rememberManagedPackage(
+                        context,
+                        packageName,
+                        info.loadLabel(pm).toString()
+                );
             }
         } catch (PackageManager.NameNotFoundException ignored) {
             // The package disappeared before the broadcast was handled.

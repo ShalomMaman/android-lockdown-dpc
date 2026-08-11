@@ -336,18 +336,21 @@ public final class MainActivity extends Activity {
             return;
         }
         LockdownPolicyController.PolicyResult result = LockdownPolicyController.apply(this);
-        if (!result.applied()) {
+        if (!result.deviceOwner()) {
             showMessage(getString(R.string.not_device_owner), true);
             return;
         }
+        if (!result.applied()) {
+            renderAdminPanel();
+            showMessage(getString(
+                    R.string.policy_failed,
+                    result.errors().isEmpty() ? "שגיאה לא ידועה" : result.errors().get(0)
+            ), true);
+            return;
+        }
         AuditLog.append(this, "מדיניות ההגנה הופעלה או רועננה");
-        String feedback = result.errors().isEmpty()
-                ? getString(R.string.policy_applied, result.blockedPackages())
-                : getString(R.string.policy_applied_with_warnings,
-                        result.blockedPackages(), result.errors().size());
-        boolean hasWarnings = !result.errors().isEmpty();
         renderAdminPanel();
-        showMessage(feedback, hasWarnings);
+        showMessage(getString(R.string.policy_applied, result.blockedPackages()), false);
     }
 
     private void pauseProtection() {
@@ -356,17 +359,19 @@ public final class MainActivity extends Activity {
         }
         extendAdminSession();
         LockdownPolicyController.PolicyResult result = LockdownPolicyController.pause(this);
-        if (!result.applied()) {
+        if (!result.deviceOwner()) {
             showMessage(getString(R.string.not_device_owner), true);
             return;
         }
+        if (!result.applied()) {
+            renderAdminPanel();
+            showMessage("השהיית ההגנה לא אומתה: "
+                    + (result.errors().isEmpty() ? "שגיאה לא ידועה" : result.errors().get(0)), true);
+            return;
+        }
         AuditLog.append(this, "מדיניות ההגנה הושהתה");
-        String feedback = result.errors().isEmpty()
-                ? "ההגנה הושהתה. מסך הניהול נשאר נעול בקוד."
-                : "ההגנה הושהתה עם אזהרות תאימות.";
-        boolean hasWarnings = !result.errors().isEmpty();
         renderAdminPanel();
-        showMessage(feedback, hasWarnings);
+        showMessage("ההגנה הושהתה ואומתה. מסך הניהול נשאר נעול בקוד.", false);
     }
 
     private void showModePicker() {
@@ -418,12 +423,17 @@ public final class MainActivity extends Activity {
         }
         DevicePolicyManager dpm = getSystemService(DevicePolicyManager.class);
         boolean owner = dpm != null && dpm.isDeviceOwnerApp(getPackageName());
-        boolean enabled = AllowedAppsStore.isProtectionEnabled(this);
         boolean configured = AllowedAppsStore.isAllowlistConfigured(this);
+        String policyStatus = switch (AllowedAppsStore.getPolicyState(this)) {
+            case ACTIVE -> getString(R.string.policy_state_active);
+            case APPLYING -> getString(R.string.policy_state_applying);
+            case FAILED -> getString(R.string.policy_state_failed);
+            case INACTIVE -> getString(R.string.not_enabled);
+        };
         status.setText(getString(
                 R.string.status_format_with_allowlist,
                 getString(owner ? R.string.active : R.string.not_configured),
-                getString(enabled ? R.string.active : R.string.not_enabled),
+                policyStatus,
                 getString(configured ? R.string.configured : R.string.configuration_required)
         ));
     }
