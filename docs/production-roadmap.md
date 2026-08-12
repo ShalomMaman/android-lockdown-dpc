@@ -4,6 +4,23 @@ This document records the product boundary after Pilot 0.5.1 and the planned
 work for the next managed-device release. It is intentionally explicit about
 what the administrator console can and cannot configure today.
 
+## Execution tracking
+
+The public [Device Guard Production Roadmap](https://github.com/users/ShalomMaman/projects/3)
+is the execution source of truth. This document preserves the rationale and
+security boundary; the linked Issues own scope, priority and acceptance:
+
+- **Pilot 0.5.2:** [system-application inventory](https://github.com/ShalomMaman/android-lockdown-dpc/issues/18),
+  [verified system controls](https://github.com/ShalomMaman/android-lockdown-dpc/issues/20),
+  [timed maintenance mode](https://github.com/ShalomMaman/android-lockdown-dpc/issues/26), and
+  [management-package identity pins](https://github.com/ShalomMaman/android-lockdown-dpc/issues/27).
+- **Pilot 0.5.3:** [real signed self-update drill](https://github.com/ShalomMaman/android-lockdown-dpc/issues/19),
+  [physical kiosk validation](https://github.com/ShalomMaman/android-lockdown-dpc/issues/22),
+  [Android/OEM matrix](https://github.com/ShalomMaman/android-lockdown-dpc/issues/23), and
+  [repeatable Device Owner provisioning](https://github.com/ShalomMaman/android-lockdown-dpc/issues/28).
+- **1.0:** [final production identity and signing](https://github.com/ShalomMaman/android-lockdown-dpc/issues/25)
+  and [privacy-preserving fleet health](https://github.com/ShalomMaman/android-lockdown-dpc/issues/24).
+
 ## What Pilot 0.5.1 does today
 
 The application picker is a **third-party application picker**. It enumerates
