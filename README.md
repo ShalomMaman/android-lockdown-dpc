@@ -11,7 +11,7 @@ The app interface is fully bilingual: English is the default locale and Hebrew i
 ## Features
 
 - Three explicit operating profiles: managed app filtering, single-app kiosk, and single-site kiosk. Kiosk is opt-in — an upgrade or a reboot never turns it on. See [`docs/kiosk-mode.md`](docs/kiosk-mode.md).
-- Blocklist and strict allowlist operating modes.
+- Blocklist and strict allowlist operating modes. Each keeps its own saved app list, so switching between them is reversible and never discards a curated selection.
 - Built-in blocking for known browsers, app stores, and social-media apps.
 - HTTP/HTTPS link interception while protection is active.
 - A 6–12 digit administrator PIN with progressive throttling and lockout.
@@ -62,7 +62,7 @@ Open Device Guard, set an administrator PIN, store the recovery code securely, s
 
 ## Security and deployment
 
-The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md).
+The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md). What an independent UI, localization and kiosk-administration review found, what changed, and what remains unproven without hardware are recorded in [`docs/ui-qa-remediation.md`](docs/ui-qa-remediation.md).
 
 - Never commit an APK-signing key, metadata-signing key, administrator PIN, recovery code, or device credential.
 - A normal build retains the pilot identity and development signer for compatibility with the existing test device. The explicit production identity and external-signing flow are documented in [`docs/production-release.md`](docs/production-release.md).

@@ -27,6 +27,15 @@
         <item quantity="other">ההגנה פעילה ומאומתת. נחסמו %1$d אפליקציות.</item>
     </plurals>
     <string name="policy_failed">ההגנה לא הופעלה במלואה ולכן אינה מסומנת כפעילה.\nפרט ראשון: %1$s</string>
+    <!--
+        The four status values below are two gendered pairs, and each pair agrees
+        with a different subject. Keep them together and keep the gender:
+        "מוגדרת" / "נדרשת הגדרה" agree with the feminine "רשימת אפליקציות"
+        (status_label_apps); "פעיל" / "לא מוגדר" agree with the masculine
+        "ניהול מערכת" (status_label_admin). A new row that pairs one of these with
+        the other subject is ungrammatical, and no parity check can see it — add a
+        gender-tagged key instead of reusing one of these.
+    -->
     <string name="configured">מוגדרת</string>
     <string name="configuration_required">נדרשת הגדרה</string>
     <string name="active">פעיל</string>
@@ -121,10 +130,16 @@
 
     <!-- Mode picker -->
     <string name="mode_dialog_title">בחירת שיטת חסימה</string>
-    <string name="mode_option_block">חסום רק אפליקציות שסומנו</string>
-    <string name="mode_option_allow">אפשר רק אפליקציות שסומנו</string>
+    <!--
+        Impersonal, like the rest of this file: the two options were imperatives
+        ("חסום" / "אפשר"), which are also masculine singular. A management console
+        addresses nobody in particular.
+    -->
+    <string name="mode_option_block">חסימת האפליקציות שסומנו בלבד</string>
+    <string name="mode_option_allow">מתן גישה לאפליקציות שסומנו בלבד</string>
     <string name="mode_label_allow">רק אפליקציות מותרות</string>
     <string name="mode_label_block">חסימת אפליקציות מסומנות</string>
+    <string name="mode_dialog_note">לכל שיטה יש רשימת אפליקציות משלה. מעבר בין השיטות אינו מוחק את הרשימה השמורה לשיטה האחרת.</string>
 
     <!-- Display language -->
     <string name="language_row_title">שפת התצוגה</string>
@@ -138,6 +153,9 @@
     <string name="recovery_warning">הקוד יוצג רק במסך הזה. לאחר שימוש בו יהיה חובה להגדיר קוד מנהל חדש.</string>
     <string name="recovery_ack">רשמתי את הקוד</string>
     <string name="recovery_code_description">קוד שחזור: %1$s</string>
+    <string name="recovery_rotate_title">ליצור קוד שחזור חדש?</string>
+    <string name="recovery_rotate_body">קוד השחזור הקיים מפסיק לפעול ברגע שנוצר קוד חדש. כל עותק שנשמר מחוץ למכשיר — במזכירות בית הספר או בתיק השירות — הופך לחסר תועלת. יש להמשיך רק אם אפשר לרשום את הקוד החדש עכשיו.</string>
+    <string name="recovery_rotate_confirm">יצירת קוד חדש</string>
 
     <!-- Allowed apps -->
     <string name="apps_title_allow">בחירת אפליקציות מותרות</string>
@@ -149,7 +167,13 @@
     <plurals name="apps_selected_count">
         <item quantity="one">נבחרה אפליקציה אחת מתוך %2$d</item>
         <item quantity="two">נבחרו שתי אפליקציות מתוך %2$d</item>
-        <item quantity="other">נבחרו %1$d מתוך %2$d</item>
+        <!--
+            The `other` branch names the noun too. It is the branch every count
+            from 0 and from 3 upward selects — almost always — and the counter
+            sits in the save bar with no adjacent noun, so "נבחרו 7 מתוך 42" left
+            nothing saying what had been selected.
+        -->
+        <item quantity="other">נבחרו %1$d אפליקציות מתוך %2$d</item>
     </plurals>
     <string name="apps_save">שמירת הרשימה</string>
     <string name="apps_loading">טוען את רשימת האפליקציות…</string>
@@ -193,11 +217,15 @@
     <string name="kiosk_action_choose_site">הגדרת האתר הנעול</string>
     <string name="kiosk_action_activate">נעילת המכשיר עכשיו</string>
     <string name="kiosk_action_exit">יציאה מקיוסק ושחזור הסינון המנוהל</string>
+    <string name="kiosk_action_exit_supporting">שחרור הנעילה והחזרת סינון האפליקציות המנוהל לתוקף</string>
     <string name="kiosk_action_clear">הסרת תצורת הקיוסק</string>
     <string name="kiosk_action_working">מחיל את פרופיל הקיוסק…</string>
+    <string name="kiosk_profile_state_summary">%1$s · %2$s</string>
     <string name="kiosk_back">חזרה לניהול</string>
     <string name="kiosk_recovery_title">כיצד מנהל חוזר פנימה</string>
-    <string name="kiosk_recovery_body">יש להקיש שבע פעמים תוך שלוש שניות על פינת המסך העליונה בצד שממנו מתחיל הטקסט. פעולה זו פותחת את מסך הניהול הזה בשלב הזנת הקוד בלבד — היא אינה משחררת דבר בעצמה. יציאה מקיוסק או שינוי שלו תמיד דורשים את קוד המנהל, ולכן יש לשמור את קוד השחזור במקום בטוח. בלי קוד המנהל ובלי קוד השחזור, רק אתחול והקצאה מחדש של המכשיר יסירו את הקיוסק.</string>
+    <string name="kiosk_recovery_body">במסך הקיוסק של ⁦Device Guard⁩ יש להקיש שבע פעמים תוך שלוש שניות על פינת המסך העליונה בצד שממנו מתחיל הטקסט. פעולה זו פותחת את מסך הניהול הזה בשלב הזנת הקוד בלבד — היא אינה משחררת דבר בעצמה. יציאה מקיוסק או שינוי שלו תמיד דורשים את קוד המנהל, ולכן יש לשמור את קוד השחזור במקום בטוח. בלי קוד המנהל ובלי קוד השחזור, רק אתחול והקצאה מחדש של המכשיר יסירו את הקיוסק.</string>
+    <string name="kiosk_recovery_single_app">ב־⁦Android 9⁩ ואילך לחצן הבית מחזיר לאותו מסך של ⁦Device Guard⁩, ולכן המחווה נשארת נגישה גם כאשר האפליקציה הנעולה אינה נסגרת לעולם. ב־⁦Android 8⁩ המסך נגיש רק לאחר שהאפליקציה הנעולה נסגרת מעצמה.</string>
+    <string name="kiosk_recovery_single_site">בקיוסק אתר יחיד המסך הזה הוא תצוגת הדפדפן עצמה, ולכן המחווה זמינה תמיד.</string>
 
     <!-- Kiosk profile: app picker -->
     <string name="kiosk_app_title">בחירת האפליקציה הנעולה</string>
@@ -219,8 +247,8 @@
     <!-- Kiosk profile: activation confirmation -->
     <string name="kiosk_confirm_title">לנעול את המכשיר?</string>
     <string name="kiosk_confirm_subtitle">ההפעלה נכנסת לתוקף מיד, על המסך של מי שמחזיק את המכשיר ברגע זה.</string>
-    <string name="kiosk_confirm_app">המכשיר יציג רק את %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות, מסך הנעילה ותפריט ההפעלה מושבתים כל עוד הנעילה מחזיקה.</string>
-    <string name="kiosk_confirm_site">המכשיר יציג רק את האתר בכתובת %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות, מסך הנעילה ותפריט ההפעלה מושבתים כל עוד הנעילה מחזיקה.</string>
+    <string name="kiosk_confirm_app">המכשיר יציג רק את %1$s. מסך הסקירה, מגירת ההתראות ומסך הנעילה מושבתים כל עוד הנעילה מחזיקה, וב־⁦Android 9⁩ ואילך גם תפריט ההפעלה. לחצן הבית מחזיר למסך הקיוסק של ⁦Device Guard⁩, שבו מנהל מזדהה; הוא אינו מגיע לאף אפליקציה אחרת.</string>
+    <string name="kiosk_confirm_site">המכשיר יציג רק את האתר בכתובת %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות ומסך הנעילה מושבתים כל עוד הנעילה מחזיקה, וב־⁦Android 9⁩ ואילך גם תפריט ההפעלה.</string>
     <string name="kiosk_confirm_reboot">אתחול מחזיר ליעד הקיוסק ולא למסך בית רגיל, ולכן הפעלה מחדש של המכשיר אינה דרך יציאה.</string>
     <string name="kiosk_confirm_cancel">עדיין לא לנעול</string>
 
@@ -261,7 +289,15 @@
     <string name="kiosk_host_blocked_navigation">נחסם: היעד נמצא מחוץ לאתר שהוגדר.</string>
     <string name="kiosk_host_download_blocked">הורדות חסומות במצב קיוסק.</string>
     <string name="kiosk_host_renderer_gone">תצוגת הדפדפן הפסיקה להגיב ונסגרה באופן בטוח. יש לנסות שוב.</string>
-    <string name="kiosk_host_retry">נסו שוב</string>
+    <!--
+        Impersonal like the rest of the file. This is the one string a student
+        reads, on the locked screen, so a second-person plural imperative
+        ("נסו שוב") was the most visible place for the register to slip.
+    -->
+    <string name="kiosk_host_retry">ניסיון חוזר</string>
+    <string name="kiosk_home_title">קיוסק ⁦Device Guard⁩</string>
+    <string name="kiosk_home_body">המכשיר נעול על %1$s.</string>
+    <string name="kiosk_home_resume">חזרה לאפליקציה</string>
 
     <!-- Management connectivity -->
     <string name="management_dialog_title">קישוריות ניהול</string>

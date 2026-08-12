@@ -24,12 +24,74 @@ public final class AllowedAppsStore {
 
     private AllowedAppsStore() {}
 
+    /**
+     * The saved selection of the blocking method that is currently in force.
+     *
+     * <p>Each method keeps its own list. "Block the apps I select" and "allow only
+     * the apps I select" are different sets, and up to 0.5.0 changing the method
+     * deleted the stored one outright — an administrator who had hand-picked
+     * thirty packages and then tapped the other radio button to read what it does
+     * lost all thirty on Save, with no warning anywhere. Switching is now
+     * reversible: neither list is touched, and the one belonging to the chosen
+     * method comes back exactly as it was left.
+     */
     public static Set<String> getAllowedPackages(Context context) {
-        Set<String> stored = prefs(context).getStringSet(KEY_ALLOWED, Collections.emptySet());
+        SharedPreferences preferences = prefs(context);
+        ProtectionMode mode = currentMode(preferences);
+        migrateLegacySelection(preferences, mode);
+        Set<String> stored =
+                preferences.getStringSet(allowedKey(mode), Collections.emptySet());
         HashSet<String> result = new HashSet<>(stored);
         result.add(context.getPackageName());
         result.addAll(LockdownPackages.managementPackageNames());
         return result;
+    }
+
+    private static String allowedKey(ProtectionMode mode) {
+        return KEY_ALLOWED + ":" + mode.name();
+    }
+
+    private static String configuredKey(ProtectionMode mode) {
+        return KEY_ALLOWLIST_CONFIGURED + ":" + mode.name();
+    }
+
+    private static ProtectionMode currentMode(SharedPreferences preferences) {
+        String stored = preferences.getString(KEY_MODE, ProtectionMode.BLOCK_SELECTED.name());
+        try {
+            return ProtectionMode.valueOf(stored);
+        } catch (IllegalArgumentException ignored) {
+            return ProtectionMode.BLOCK_SELECTED;
+        }
+    }
+
+    /**
+     * Moves the older single selection onto the method it was saved under.
+     *
+     * <p>Runs before every read and write of the per-method entries, and only
+     * while the legacy entry is still present, so an upgrade keeps the list an
+     * administrator already curated instead of asking them to rebuild it.
+     * {@code commit} rather than {@code apply}: the very next statement of the
+     * caller reads the keys this writes.
+     */
+    private static void migrateLegacySelection(
+            SharedPreferences preferences,
+            ProtectionMode mode
+    ) {
+        if (!preferences.contains(KEY_ALLOWED) && !preferences.contains(KEY_ALLOWLIST_CONFIGURED)) {
+            return;
+        }
+        SharedPreferences.Editor editor = preferences.edit();
+        if (!preferences.contains(allowedKey(mode))) {
+            editor.putStringSet(
+                    allowedKey(mode),
+                    new HashSet<>(preferences.getStringSet(KEY_ALLOWED, Collections.emptySet()))
+            );
+            editor.putBoolean(
+                    configuredKey(mode),
+                    preferences.getBoolean(KEY_ALLOWLIST_CONFIGURED, false)
+            );
+        }
+        editor.remove(KEY_ALLOWED).remove(KEY_ALLOWLIST_CONFIGURED).commit();
     }
 
     /**
@@ -93,15 +155,19 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
+    /** Saves the selection against the blocking method it was made under. */
     public static void setAllowedPackages(
             Context context,
             Set<String> packages,
             Set<String> managedPackages
     ) {
-        prefs(context).edit()
-                .putStringSet(KEY_ALLOWED, new HashSet<>(packages))
+        SharedPreferences preferences = prefs(context);
+        ProtectionMode mode = currentMode(preferences);
+        migrateLegacySelection(preferences, mode);
+        preferences.edit()
+                .putStringSet(allowedKey(mode), new HashSet<>(packages))
                 .putStringSet(KEY_MANAGED_PACKAGES, new HashSet<>(managedPackages))
-                .putBoolean(KEY_ALLOWLIST_CONFIGURED, true)
+                .putBoolean(configuredKey(mode), true)
                 .apply();
     }
 
@@ -132,26 +198,29 @@ public final class AllowedAppsStore {
         return prefs(context).getString(KEY_LABEL_PREFIX + packageName, packageName);
     }
 
+    /** Whether the method currently in force has a saved selection of its own. */
     public static boolean isAllowlistConfigured(Context context) {
-        return prefs(context).getBoolean(KEY_ALLOWLIST_CONFIGURED, false);
+        SharedPreferences preferences = prefs(context);
+        ProtectionMode mode = currentMode(preferences);
+        migrateLegacySelection(preferences, mode);
+        return preferences.getBoolean(configuredKey(mode), false);
     }
 
     public static ProtectionMode getProtectionMode(Context context) {
-        String stored = prefs(context).getString(KEY_MODE, ProtectionMode.BLOCK_SELECTED.name());
-        try {
-            return ProtectionMode.valueOf(stored);
-        } catch (IllegalArgumentException ignored) {
-            return ProtectionMode.BLOCK_SELECTED;
-        }
+        return currentMode(prefs(context));
     }
 
+    /**
+     * Records the blocking method. Non-destructive: the selection saved under the
+     * method being left stays exactly where it is, and the one saved under the
+     * method being entered comes back untouched.
+     */
     public static void setProtectionMode(Context context, ProtectionMode mode) {
-        ProtectionMode current = getProtectionMode(context);
-        SharedPreferences.Editor editor = prefs(context).edit().putString(KEY_MODE, mode.name());
-        if (current != mode) {
-            editor.remove(KEY_ALLOWED).putBoolean(KEY_ALLOWLIST_CONFIGURED, false);
-        }
-        editor.apply();
+        SharedPreferences preferences = prefs(context);
+        // Bind a legacy single selection to the method it was saved under before
+        // the current method moves off it.
+        migrateLegacySelection(preferences, currentMode(preferences));
+        preferences.edit().putString(KEY_MODE, mode.name()).apply();
     }
 
     public static boolean isProtectionEnabled(Context context) {

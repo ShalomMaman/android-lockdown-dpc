@@ -115,6 +115,7 @@
     <string name="mode_option_allow">Allow only the apps I select</string>
     <string name="mode_label_allow">Allowed apps only</string>
     <string name="mode_label_block">Block the selected apps</string>
+    <string name="mode_dialog_note">Each method keeps its own app list. Switching methods does not delete the list saved for the other one.</string>
 
     <!-- Display language -->
     <string name="language_row_title">Display language</string>
@@ -134,6 +135,9 @@
     <string name="recovery_warning">The code is shown on this screen only. After it is used, a new administrator PIN has to be set.</string>
     <string name="recovery_ack">I have written the code down</string>
     <string name="recovery_code_description">Recovery code: %1$s</string>
+    <string name="recovery_rotate_title">Generate a new recovery code?</string>
+    <string name="recovery_rotate_body">The recovery code currently on file stops working the moment a new one is generated. Any copy kept outside this device — with the school office, in a service record — becomes useless. Only continue if you can write the new code down now.</string>
+    <string name="recovery_rotate_confirm">Generate a new code</string>
 
     <!-- Allowed apps -->
     <string name="apps_title_allow">Select the allowed apps</string>
@@ -188,11 +192,15 @@
     <string name="kiosk_action_choose_site">Set the locked website</string>
     <string name="kiosk_action_activate">Lock this device now</string>
     <string name="kiosk_action_exit">Exit kiosk and restore managed filtering</string>
+    <string name="kiosk_action_exit_supporting">Releases the lock and puts managed app filtering back in force</string>
     <string name="kiosk_action_clear">Remove the kiosk configuration</string>
     <string name="kiosk_action_working">Applying the kiosk profile…</string>
+    <string name="kiosk_profile_state_summary">%1$s · %2$s</string>
     <string name="kiosk_back">Back to management</string>
     <string name="kiosk_recovery_title">How an administrator gets back in</string>
-    <string name="kiosk_recovery_body">Tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
+    <string name="kiosk_recovery_body">On the Device Guard kiosk screen, tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
+    <string name="kiosk_recovery_single_app">On Android 9 and later the Home button returns to that Device Guard screen, so the gesture stays reachable even when the locked app never closes. On Android 8 the screen is only reachable once the locked app closes itself.</string>
+    <string name="kiosk_recovery_single_site">In a single-site kiosk that screen is the browser view itself, so the gesture is always reachable.</string>
 
     <!-- Kiosk profile: app picker -->
     <string name="kiosk_app_title">Choose the locked app</string>
@@ -214,8 +222,8 @@
     <!-- Kiosk profile: activation confirmation -->
     <string name="kiosk_confirm_title">Lock this device?</string>
     <string name="kiosk_confirm_subtitle">Activation takes effect immediately on the screen in front of whoever is holding this device.</string>
-    <string name="kiosk_confirm_app">The device will show only %1$s. Home, Overview, the notification shade, the keyguard and the power menu are suppressed while the lock holds.</string>
-    <string name="kiosk_confirm_site">The device will show only the website at %1$s. Home, Overview, the notification shade, the keyguard and the power menu are suppressed while the lock holds.</string>
+    <string name="kiosk_confirm_app">The device will show only %1$s. Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu. Home returns to the Device Guard kiosk screen, which is where an administrator signs in; it reaches no other app.</string>
+    <string name="kiosk_confirm_site">The device will show only the website at %1$s. Home, Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu.</string>
     <string name="kiosk_confirm_reboot">A reboot returns to this kiosk target instead of to a launcher, so restarting the device is not a way out.</string>
     <string name="kiosk_confirm_cancel">Do not lock yet</string>
 
@@ -257,6 +265,9 @@
     <string name="kiosk_host_download_blocked">Downloads are blocked in kiosk mode.</string>
     <string name="kiosk_host_renderer_gone">The browser view stopped responding and was closed safely. Try again.</string>
     <string name="kiosk_host_retry">Try again</string>
+    <string name="kiosk_home_title">Device Guard kiosk</string>
+    <string name="kiosk_home_body">This device is locked to %1$s.</string>
+    <string name="kiosk_home_resume">Return to the app</string>
 
     <!-- Management connectivity -->
     <string name="management_dialog_title">Management connectivity</string>

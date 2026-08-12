@@ -23,7 +23,15 @@ still apply.
 Specifically in scope:
 
 - A student cannot reach another application, the launcher, Overview, the
-  notification shade, the keyguard, or the power menu while Lock Task holds.
+  notification shade, or the keyguard while Lock Task holds. On API 28+ the power
+  menu is suppressed too; on API 26–27 there is no feature selector, so the
+  platform's legacy behaviour decides and the power menu is not claimed.
+- In a **single-app** kiosk on API 28+ the Home key is deliberately enabled and
+  returns to `KioskHostActivity`, never to a launcher: `KioskHostActivity` is the
+  registered HOME activity and Lock Task refuses to start any activity outside the
+  allowlist, so a vendor launcher that won the preference race cannot be reached
+  either. What Home buys is the contained kiosk home surface, and with it the
+  administrator gesture. It grants nothing — see "Administrator entry" below.
 - A student cannot navigate the single-site WebView off the configured origin,
   open a popup, follow an `intent://` link into another app, download a file, or
   proceed through a TLS error.
@@ -91,6 +99,15 @@ to the PIN screen on resume if the three-minute administrator session has
 expired. That check is a courtesy: `KioskController` reads `AdminSession` itself,
 so a screen cannot assert that it is authenticated.
 
+The console's own **dialogs** re-check the session at *save*, not only when they
+were opened. `AdminSession` expires on wall time rather than on interaction, so a
+console left on a desk with the blocking-method or display-language dialog open
+could otherwise be saved by whoever picked the device up three minutes later —
+and that write commits before the console drops back to the PIN screen. Rotating
+the recovery code goes through a confirmation dialog for the same reason it is
+routed through `requireSession` again: it revokes a standing credential a school
+holds off-device, and the row directly above it is "Change the administrator PIN".
+
 The **display-language picker stays in the authenticated console** (Display →
 Display language) and is deliberately absent from the locked kiosk surface. The
 kiosk host still renders in the chosen language: it extends `AppCompatActivity`
@@ -106,14 +123,65 @@ claim the device has not made yet.
 
 ### Administrator entry from inside kiosk
 
-`AdminEntryGesture` — seven taps within three seconds on an unlabeled 56 dp
-target in the **top corner on the side the text starts from** (top-left in
-English, top-right in Hebrew) — starts the existing console through
-`KioskAdminEntry.consoleIntent`. That intent is always **explicit** (it names
-`ui.MainActivity`), carries no authority, and lands on the locked PIN screen.
-There is no secret code path and no hardcoded PIN; the gesture buys an
-opportunity to authenticate, nothing more. The DPC package stays on the Lock Task
-allowlist precisely so this recovery route works.
+`AdminEntryGesture` — seven taps within three seconds in the **top corner on the
+side the text starts from** (top-left in English, top-right in Hebrew) — starts
+the existing console through `KioskAdminEntry.consoleIntent`. That intent is
+always **explicit** (it names `ui.MainActivity`), carries no authority, and lands
+on the locked PIN screen. There is no secret code path and no hardcoded PIN; the
+gesture buys an opportunity to authenticate, nothing more. The DPC package stays
+on the Lock Task allowlist precisely so this recovery route works.
+
+The counter observes `KioskHostActivity.dispatchTouchEvent` and **forwards the
+event untouched**. Up to 0.5.0 it was an invisible, click-consuming 56 dp `View`
+laid over the surface, which swallowed every touch in the one square where a
+school portal puts its logo, its home link or its hamburger menu — in either
+direction, because the target mirrors with the layout. The hit test itself is
+pure (`AdminEntryCorner`) and unit tested in both directions.
+
+#### Reaching the gesture in a single-app kiosk
+
+The gesture only helps if the screen it lives on is reachable. In 0.5.0 it was
+not: single-app mode handed the display to the pinned package and pinned Lock Task
+to `LOCK_TASK_FEATURE_NONE`, so a target that traps Back — a full-screen player,
+an exam client, a signage app — left `KioskHostActivity` unreachable for as long
+as it ran. The console promised a recovery path that did not exist, and
+re-provisioning (a wiped classroom device) became the first resort rather than the
+last.
+
+The supported Device Owner shape is used instead. `KioskRecoveryPolicy` decides
+two things, both pure and unit tested:
+
+| Decision | Rule |
+| --- | --- |
+| `allowHomeKey(mode, homeRegistered)` | `LOCK_TASK_FEATURE_HOME` is set **only** for `SINGLE_APP`, and **only** once `addPersistentPreferredActivity` has actually made this DPC the HOME host. Single-site needs nothing — its host *is* the foreground activity. |
+| `surfaceFor(mode, configValid, targetLaunched)` | The first pass of a single-app host starts the target. Every later resume — the Home key, or a target that closed itself — renders the **contained kiosk home** instead of relaunching. |
+
+The contained kiosk home names the locked application and offers one action,
+"Return to the app", plus the corner gesture every surface of this activity
+carries. It is not an exit: the console it can reach still opens on its PIN screen,
+and `KioskController` re-derives `AdminSession` for every transition regardless.
+
+`KioskController.reconcile` therefore enables the host component and registers the
+HOME preference **before** applying the feature set that depends on them. If the
+platform refuses `LOCK_TASK_FEATURE_HOME`, the minimal set is reapplied and
+`kiosk-lock-task-home-unavailable` is recorded, so the console reports "recorded,
+but the device did not confirm every step" rather than implying a recovery route
+that is not there. On **API 26–27** there is no feature selector at all, so Home
+is not available and the gesture is reachable only once the pinned app closes;
+`kiosk_recovery_single_app` says exactly that, in both languages.
+
+Because nothing relaunches on its own any more, the 1.5 s relaunch cooldown is
+gone: there is no loop left for it to break, and a target that bounces straight
+back now lands on the kiosk home instead of an error screen claiming the app is
+unavailable.
+
+**The trade-off, stated.** A single-app target that closes *itself* now shows the
+kiosk home rather than being relaunched automatically. The host could tell the two
+apart by watching `onNewIntent` for the HOME intent and auto-relaunching otherwise
+— but if any build did not deliver that intent, the host would relaunch over the
+recovery surface and the P1 would be back. This fails toward reachability
+deliberately: the cost is one tap on "Return to the app", the alternative is an
+unrecoverable classroom device.
 
 **Administrator note.** The target is invisible and its hit area is one 56 dp
 square out of a full display, so it is not something a student finds by pressing
@@ -129,15 +197,20 @@ corner.
 
 - `setLockTaskPackages(admin, {dpcPackage} ∪ {target if SINGLE_APP})` and verifies
   each entry with `isLockTaskPermitted`.
-- `setLockTaskFeatures(admin, LOCK_TASK_FEATURE_NONE)` on **API 28+**. This is the
-  minimal set: no Home, no Overview, no notifications, no system info area, no
-  global actions, no keyguard. The visible cost is that the power-button menu is
-  unavailable while kiosk holds; a device is still powered down by holding the
-  power button. On **API 26–27** there is no feature selector at all and Lock Task
-  uses the platform's legacy behaviour.
 - The kiosk HOME preference: an `ACTION_MAIN` + `CATEGORY_HOME` persistent
   preferred activity pointing at `KioskHostActivity`, plus enabling that
-  component. Both are removed on exit.
+  component. Both are removed on exit. This is applied **before** the feature set,
+  because the feature set can depend on it.
+- `setLockTaskFeatures` on **API 28+**, per profile:
+  `LOCK_TASK_FEATURE_NONE` for single-site and for a fault state under managed
+  filtering — no Home, no Overview, no notifications, no system info area, no
+  global actions, no keyguard — and `LOCK_TASK_FEATURE_HOME` for single-app, where
+  Home is the route back to the DPC's own kiosk home and to the administrator
+  gesture (see above). Everything else stays suppressed either way. The visible
+  cost is that the power-button menu is unavailable while kiosk holds; a device is
+  still powered down by holding the power button. On **API 26–27** there is no
+  feature selector at all and Lock Task uses the platform's legacy behaviour, so
+  neither the power-menu claim nor the Home route applies there.
 
 `KioskHostActivity` is declared `android:enabled="false"` in the manifest, so the
 HOME component simply does not exist on a device that never enabled kiosk. HOME
@@ -323,8 +396,27 @@ mirrors under RTL without per-direction rules. Package names, URLs and origins
 are wrapped in U+2066/U+2069 (`ltrIsolated`) so they stay visually
 left-to-right inside a Hebrew paragraph; third-party application labels use
 first-strong isolation (`bidiIsolated`) because their language is unknown at
-build time. Neither icon used in this flow — a padlock, a globe — is
-directional, so neither is mirrored.
+build time — including the label the activation row and the confirmation card
+name as "the target", which up to 0.5.0 was forced left-to-right and rendered a
+Hebrew label such as `סרטונים (בטא)` with its parentheses resolved against the
+wrong base. The Java kiosk host has the same two helpers in `kiosk/BidiText.java`,
+pinned to the Kotlin pair by `BidiTextParityTest`. Neither icon used in this flow
+— a padlock, a globe — is directional, so neither is mirrored.
+
+Free-text fields resolve their own direction rather than inheriting the page's:
+the website editor is pinned left-to-right (a URL is almost entirely neutral and
+weak characters, so an RTL paragraph displaces its punctuation and port and makes
+the caret jump), and the two app searches use content direction, the platform
+equivalent of `dir="auto"`.
+
+The layout direction itself comes from `R.bool.use_rtl_layout`, answered by the
+same resource folder the strings came from, rather than from
+`Configuration#getLayoutDirection`. Device Guard ships two translations, so a
+device set to a third right-to-left language with the display language on "System
+default" used to resolve English strings into a fully mirrored layout — which also
+moved the administrator corner away from "the side the text starts from", the
+wording both recovery notes use. `LockdownTheme` and `KioskHostActivity` read the
+same bool, so text and layout cannot disagree.
 
 ## Package and system-app policy
 
@@ -429,8 +521,8 @@ be installed.
 
 | API | Behaviour |
 | --- | --- |
-| 26–27 (8.0–8.1) | Lock Task via `startLockTask()`; **no** `setLockTaskFeatures`, so the platform's legacy feature set applies. Single-app targets inherit the host's locked task. |
-| 28+ (9) | `setLockTaskFeatures(LOCK_TASK_FEATURE_NONE)` and verification via `getLockTaskFeatures`. `ActivityOptions.setLockTaskEnabled(true)` for single-app launch. Signer digests read from `SigningInfo`. |
+| 26–27 (8.0–8.1) | Lock Task via `startLockTask()`; **no** `setLockTaskFeatures`, so the platform's legacy feature set applies and Home is not available as a recovery route. Single-app targets inherit the host's locked task. |
+| 28+ (9) | `setLockTaskFeatures` — `LOCK_TASK_FEATURE_NONE`, or `LOCK_TASK_FEATURE_HOME` for single-app — verified via `getLockTaskFeatures`, with a fall back to the minimal set if HOME is refused. `ActivityOptions.setLockTaskEnabled(true)` for single-app launch. Signer digests read from `SigningInfo`. |
 | < 28 | Signer digests read from the deprecated `PackageInfo.signatures`. |
 | 33+ (13) | `PackageManager` queries use the `…Flags.of` overloads, matching the rest of the policy engine. |
 | 34+ (14) | Policy application is asynchronous; the existing bounded-retry verification in `configureBlockedBrowser` and `PolicyUpdateAuditReceiver` still apply. Kiosk adds no new assumption here. |
@@ -472,6 +564,24 @@ by the unit tests in this change:
 - That `startLockTask()` actually holds, and that `LOCK_TASK_FEATURE_NONE`
   suppresses Home, Overview, the shade, global actions and the keyguard on a
   given OEM build.
+- **That `LOCK_TASK_FEATURE_HOME` is accepted at all**, given that this DPC
+  registers `KioskHostActivity` as the persistent preferred HOME activity in the
+  same pass. The platform rejects the flag when it sees no launcher it can use;
+  the code applies it after the registration, verifies with
+  `getLockTaskFeatures`, and falls back to the minimal set while recording
+  `kiosk-lock-task-home-unavailable`, so a refusal is safe and visible rather than
+  silent — but the accepting case is unverified here. This is the **first** thing
+  to check for this change on the pilot handset (scenario K-3).
+- That pressing Home in an active single-app kiosk resumes `KioskHostActivity`
+  rather than reaching a launcher or a resolver, on a given OEM build, and that
+  the contained kiosk home is what appears rather than an immediate relaunch of
+  the target.
+- That Overview, the shade, the keyguard and (API 28+) the power menu remain
+  suppressed once `LOCK_TASK_FEATURE_HOME` is the applied feature set — the flag
+  is documented as additive, but only a device shows it.
+- That observing corner taps in `dispatchTouchEvent` still completes the gesture
+  over a live `WebView`, and that the portal's own top-corner control now
+  responds.
 - That the HOME persistent preferred activity survives reboot on a given OEM
   build and that no vendor launcher wins the race.
 - That a single-app target genuinely enters Lock Task through

@@ -6,9 +6,14 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.example.lockdowndpc.R
 
 /**
  * The console keeps the trustworthy blue-on-white language of the shipped build.
@@ -74,22 +79,33 @@ private val LockdownTypography = Typography().let { base ->
 }
 
 /**
- * The theme deliberately does not touch `LocalLayoutDirection`. An earlier build
- * shipped only Hebrew and pinned the root layout to RTL; now that English is the
- * default locale, the direction has to follow the resolved locale instead.
+ * The layout direction follows the *resolved strings*, not the system locale.
  *
- * Compose seeds `LocalLayoutDirection` from the activity configuration, and
- * `android:supportsRtl="true"` in the manifest lets that configuration report RTL,
- * so Hebrew mirrors the whole console and English does not. Screens that host a
- * single left-to-right value still override the direction locally; the console
- * never forces a direction globally.
+ * Compose seeds `LocalLayoutDirection` from the activity configuration, which
+ * reports RTL for any right-to-left system locale. Device Guard ships two
+ * translations, so a device set to a third right-to-left language with the
+ * display language left on "System default" resolved English strings into a fully
+ * mirrored layout — including the auto-mirrored back arrow and the side the kiosk
+ * recovery note points at. `R.bool.use_rtl_layout` is answered by the same
+ * resource folder the strings came from, so text and layout can no longer
+ * disagree: Hebrew mirrors, everything else does not.
+ *
+ * Screens that host a single left-to-right value still override the direction
+ * locally; nothing below this point forces a direction globally.
  */
 @Composable
 fun LockdownTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = LockdownColorScheme,
-        typography = LockdownTypography,
-        shapes = LockdownShapes,
-        content = content,
-    )
+    val direction = if (booleanResource(R.bool.use_rtl_layout)) {
+        LayoutDirection.Rtl
+    } else {
+        LayoutDirection.Ltr
+    }
+    CompositionLocalProvider(LocalLayoutDirection provides direction) {
+        MaterialTheme(
+            colorScheme = LockdownColorScheme,
+            typography = LockdownTypography,
+            shapes = LockdownShapes,
+            content = content,
+        )
+    }
 }

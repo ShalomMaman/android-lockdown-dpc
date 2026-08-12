@@ -4,6 +4,7 @@ import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.http.SslError;
 import android.os.Build;
@@ -12,6 +13,7 @@ import android.os.SystemClock;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.CookieManager;
@@ -47,7 +49,12 @@ import com.example.lockdowndpc.policy.AuditLog;
  *       system launches HOME and the kiosk HOME preference points here.</li>
  *   <li>For single-site, host a WebView whose navigation is confined to the
  *       configured origin by {@link KioskNavigationGuard}.</li>
- *   <li>For single-app, launch exactly the configured, validated package.</li>
+ *   <li>For single-app, launch exactly the configured, validated package, and
+ *       stay reachable afterwards: the HOME key comes back here (see
+ *       {@link KioskRecoveryPolicy}) and lands on the contained kiosk home, which
+ *       is where the administrator gesture lives. Coming back is not leaving —
+ *       nothing here unlocks anything, and the PIN remains the only authority
+ *       that changes or exits kiosk.</li>
  * </ol>
  *
  * <p>The component is disabled in the manifest and enabled by
@@ -62,20 +69,29 @@ import com.example.lockdowndpc.policy.AuditLog;
 public final class KioskHostActivity extends AppCompatActivity {
 
     private static final String TAG = "KioskHost";
-    private static final long RELAUNCH_COOLDOWN_MILLIS = 1_500L;
     private static final long NOTICE_MILLIS = 4_000L;
 
     private final AdminEntryGesture adminEntryGesture = new AdminEntryGesture();
+    private final int[] rootLocation = new int[2];
 
     private FrameLayout root;
     private WebView webView;
     private LinearLayout errorView;
     private TextView errorMessage;
+    private LinearLayout homeView;
+    private TextView homeMessage;
     private TextView notice;
 
     private KioskOrigin origin;
     private String siteUrl = "";
-    private long lastTargetLaunchAt;
+    /**
+     * Whether this host instance has already started its single-app target. It is
+     * what turns every later resume — the HOME key, or a target that closed
+     * itself — into the contained kiosk home instead of an immediate relaunch.
+     * Per instance on purpose: a reboot or a process restart builds a fresh host,
+     * which is the pass that must go straight back to the configured target.
+     */
+    private boolean targetLaunched;
     private boolean lockTaskRequested;
 
     @Override
@@ -131,18 +147,64 @@ public final class KioskHostActivity extends AppCompatActivity {
             // an administrator sees why in the audit log.
             KioskController.reportFault(this, String.join(", ", validation.errors()));
         }
-        if (settings.state() == KioskState.FAULT || !validation.valid()) {
-            showError(settings.config().mode() == KioskMode.SINGLE_SITE
-                    ? getString(R.string.kiosk_host_site_unavailable)
-                    : getString(R.string.kiosk_host_target_unavailable));
+        boolean usable = validation.valid() && settings.state() != KioskState.FAULT;
+        KioskMode mode = settings.config().mode();
+        switch (KioskRecoveryPolicy.surfaceFor(mode, usable, targetLaunched)) {
+            case SITE -> showSite(validation);
+            case LAUNCH_TARGET -> launchTarget(settings.config().targetPackage());
+            case RECOVERY_HOME -> showKioskHome(settings.config().targetPackage());
+            default -> showError(errorTextFor(mode, usable));
+        }
+    }
+
+    private String errorTextFor(KioskMode mode, boolean usable) {
+        if (usable) {
+            // A valid configuration that resolves to no surface at all can only be
+            // a mode this build does not render.
+            return getString(R.string.kiosk_host_not_configured);
+        }
+        return mode == KioskMode.SINGLE_SITE
+                ? getString(R.string.kiosk_host_site_unavailable)
+                : getString(R.string.kiosk_host_target_unavailable);
+    }
+
+    /**
+     * Counts administrator corner taps without consuming them.
+     *
+     * <p>0.5.0 laid an invisible, click-consuming 56 dp view over the top of the
+     * leading edge, which is exactly where a school portal puts its logo or its
+     * hamburger menu — in either direction, because the target mirrors with the
+     * layout. Observing the dispatch and forwarding the event leaves the page's
+     * own controls working and the gesture unchanged.
+     */
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getActionMasked() == MotionEvent.ACTION_DOWN && root != null) {
+            root.getLocationInWindow(rootLocation);
+            boolean rightToLeft = root.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+            if (AdminEntryCorner.contains(
+                    event.getX() - rootLocation[0],
+                    event.getY() - rootLocation[1],
+                    root.getWidth(),
+                    dp(AdminEntryCorner.SIZE_DP),
+                    rightToLeft)) {
+                onAdminCornerTap();
+            }
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    /**
+     * The deliberate local admin-entry affordance. Completing the gesture only
+     * starts the existing console, which begins on its locked PIN screen. See
+     * {@link KioskAdminEntry}.
+     */
+    private void onAdminCornerTap() {
+        if (!adminEntryGesture.onTap(SystemClock.elapsedRealtime())) {
             return;
         }
-
-        switch (settings.config().mode()) {
-            case SINGLE_SITE -> showSite(validation);
-            case SINGLE_APP -> launchTarget(settings.config().targetPackage());
-            default -> showError(getString(R.string.kiosk_host_not_configured));
-        }
+        AuditLog.append(this, getString(R.string.audit_kiosk_admin_entry));
+        startActivity(KioskAdminEntry.consoleIntent(this, KioskAdminEntry.SOURCE_KIOSK_GESTURE));
     }
 
     @Override
@@ -160,6 +222,15 @@ public final class KioskHostActivity extends AppCompatActivity {
     private void buildViews() {
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.parseColor("#F6F8FC"));
+        // The direction follows the *resolved* strings, not the system locale. On
+        // a device set to another right-to-left language with the display
+        // language left on "System default", resources fall back to English while
+        // the configuration still reports RTL; mirroring an English kiosk screen
+        // would also move the administrator corner away from "the side the text
+        // starts from", which is how both languages describe it.
+        root.setLayoutDirection(getResources().getBoolean(R.bool.use_rtl_layout)
+                ? View.LAYOUT_DIRECTION_RTL
+                : View.LAYOUT_DIRECTION_LTR);
         setContentView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -189,37 +260,49 @@ public final class KioskHostActivity extends AppCompatActivity {
         root.addView(errorView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        homeView = new LinearLayout(this);
+        homeView.setOrientation(LinearLayout.VERTICAL);
+        homeView.setGravity(Gravity.CENTER);
+        homeView.setPadding(padding, padding, padding, padding);
+        homeView.setVisibility(View.GONE);
+
+        TextView homeTitle = new TextView(this);
+        homeTitle.setText(R.string.kiosk_home_title);
+        homeTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
+        homeTitle.setGravity(Gravity.CENTER);
+        homeView.addView(homeTitle);
+
+        homeMessage = new TextView(this);
+        homeMessage.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f);
+        homeMessage.setGravity(Gravity.CENTER);
+        homeMessage.setPadding(0, dp(12), 0, dp(20));
+        homeView.addView(homeMessage);
+
+        Button resume = new Button(this);
+        resume.setText(R.string.kiosk_home_resume);
+        resume.setOnClickListener(view -> {
+            targetLaunched = false;
+            render();
+        });
+        homeView.addView(resume);
+
+        root.addView(homeView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         notice = new TextView(this);
         notice.setVisibility(View.GONE);
         notice.setGravity(Gravity.CENTER);
         notice.setBackgroundColor(Color.parseColor("#174EA6"));
         notice.setTextColor(Color.WHITE);
         notice.setPadding(padding, dp(12), padding, dp(12));
+        // A blocked link or download appears in place with no focus change, so a
+        // screen reader is told to read it rather than being left silent.
+        notice.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
+        errorMessage.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         root.addView(notice, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.BOTTOM));
-
-        root.addView(adminEntryTarget(), new FrameLayout.LayoutParams(
-                dp(56), dp(56), Gravity.TOP | Gravity.START));
-    }
-
-    /**
-     * The deliberate local admin-entry affordance: an unlabeled corner target that
-     * only opens the existing console. See {@link KioskAdminEntry}.
-     */
-    private View adminEntryTarget() {
-        View target = new View(this);
-        target.setBackgroundColor(Color.TRANSPARENT);
-        target.setContentDescription(null);
-        target.setOnClickListener(view -> {
-            if (adminEntryGesture.onTap(SystemClock.elapsedRealtime())) {
-                AuditLog.append(this, getString(R.string.audit_kiosk_admin_entry));
-                startActivity(KioskAdminEntry.consoleIntent(
-                        this, KioskAdminEntry.SOURCE_KIOSK_GESTURE));
-            }
-        });
-        return target;
     }
 
     /** Terminal state for this render pass: no target, no site, no fallback. */
@@ -228,8 +311,41 @@ public final class KioskHostActivity extends AppCompatActivity {
             webView.setVisibility(View.GONE);
         }
         notice.setVisibility(View.GONE);
+        homeView.setVisibility(View.GONE);
         errorMessage.setText(message);
         errorView.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * The contained kiosk home of a single-app kiosk.
+     *
+     * <p>What the HOME key lands on once the target has been started. It offers
+     * exactly two things: a way back into the pinned application, and the
+     * administrator corner gesture that every surface of this activity carries.
+     * It grants nothing — the console it can reach still opens on its PIN screen.
+     */
+    private void showKioskHome(String packageName) {
+        if (webView != null) {
+            webView.setVisibility(View.GONE);
+        }
+        notice.setVisibility(View.GONE);
+        errorView.setVisibility(View.GONE);
+        // The label comes from the target's own manifest, so its language is
+        // unknown here and it is isolated without a forced direction.
+        homeMessage.setText(getString(
+                R.string.kiosk_home_body, BidiText.bidiIsolated(targetLabel(packageName))));
+        homeView.setVisibility(View.VISIBLE);
+    }
+
+    /** Best-effort display name for the pinned target; the package name otherwise. */
+    private String targetLabel(String packageName) {
+        try {
+            PackageManager pm = getPackageManager();
+            CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0));
+            return label == null || label.length() == 0 ? packageName : label.toString();
+        } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
+            return packageName;
+        }
     }
 
     /**
@@ -251,6 +367,7 @@ public final class KioskHostActivity extends AppCompatActivity {
         origin = validation.origin();
         String target = validation.normalizedSiteUrl();
         errorView.setVisibility(View.GONE);
+        homeView.setVisibility(View.GONE);
         if (webView == null) {
             webView = createHardenedWebView();
             root.addView(webView, 0, new FrameLayout.LayoutParams(
@@ -368,21 +485,23 @@ public final class KioskHostActivity extends AppCompatActivity {
 
     // ------------------------------------------------------------- single app
 
+    /**
+     * Starts the pinned target exactly once per host instance.
+     *
+     * <p>There is no relaunch cooldown any more, because there is no relaunch: a
+     * target that comes straight back leaves {@link #targetLaunched} set, so the
+     * next render lands on the contained kiosk home rather than trying again. That
+     * removes the loop the cooldown existed to break, and replaces an error screen
+     * claiming the app is unavailable with a screen that says what is true.
+     */
     private void launchTarget(String packageName) {
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastTargetLaunchAt < RELAUNCH_COOLDOWN_MILLIS) {
-            // The target came straight back to us: treat it as unavailable rather
-            // than spinning in a relaunch loop.
-            showError(getString(R.string.kiosk_host_target_unavailable));
-            return;
-        }
         Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
         if (launch == null) {
             showError(getString(R.string.kiosk_host_target_unavailable));
             return;
         }
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        lastTargetLaunchAt = now;
+        targetLaunched = true;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 // API 28+ starts the target directly into lock task.
@@ -395,8 +514,10 @@ public final class KioskHostActivity extends AppCompatActivity {
                 startActivity(launch);
             }
             errorView.setVisibility(View.GONE);
+            homeView.setVisibility(View.GONE);
         } catch (RuntimeException exception) {
             Log.e(TAG, "Kiosk target launch failed", exception);
+            targetLaunched = false;
             showError(getString(R.string.kiosk_host_target_unavailable));
         }
     }

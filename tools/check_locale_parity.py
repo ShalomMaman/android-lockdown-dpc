@@ -16,7 +16,8 @@ It validates, for each translated locale:
   them;
 * the CLDR plural categories each language actually requires;
 * that the default locale holds no Hebrew and the Hebrew locale holds no
-  untranslated value;
+  untranslated value -- skipping values that hold no word at all, such as a
+  separator built only from placeholders and punctuation;
 * that ``translatable="false"`` keys are never translated.
 
 The same rules are asserted from Gradle by
@@ -109,6 +110,17 @@ def declared_placeholders(items):
 
 def contains_hebrew(text):
     return any(HEBREW_BLOCK[0] <= ord(char) <= HEBREW_BLOCK[1] for char in text)
+
+
+def has_translatable_letters(text):
+    """Whether ``text`` holds a word at all.
+
+    A value that is only placeholders, punctuation and spacing -- ``%1$s . %2$s``,
+    the separator the console assembles a kiosk summary from -- has nothing for a
+    translator to translate, so "holds no Hebrew" says nothing about it. The
+    placeholders are removed first, because ``%1$s`` itself contains a letter.
+    """
+    return any(char.isalpha() for char in PLACEHOLDER.sub("", text))
 
 
 def _report_missing(problems, folder, kind, missing, extra):
@@ -228,12 +240,14 @@ def check_language_content(default, translations):
         if translation.folder not in HEBREW_FOLDERS:
             continue
         for key, text in sorted(translation.strings.items()):
-            if not contains_hebrew(text):
+            if has_translatable_letters(text) and not contains_hebrew(text):
                 problems.append(
                     "%s: string/%s holds no Hebrew, so it was probably never translated"
                     % (translation.folder, key)
                 )
         for key, items in sorted(translation.plurals.items()):
+            if not any(has_translatable_letters(text) for text in items.values()):
+                continue
             if not any(contains_hebrew(text) for text in items.values()):
                 problems.append(
                     "%s: plurals/%s holds no Hebrew, so it was probably never translated"

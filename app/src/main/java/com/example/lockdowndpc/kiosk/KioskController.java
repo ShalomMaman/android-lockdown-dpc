@@ -397,9 +397,19 @@ public final class KioskController {
             return disableKiosk(context, dpm, admin, errors);
         }
         applyLockTaskPackages(context, dpm, admin, settings, errors);
-        applyLockTaskFeatures(dpm, admin, errors);
+        // Order matters: the HOME component and the kiosk HOME preference are
+        // installed before the feature set that depends on them. The platform
+        // refuses LOCK_TASK_FEATURE_HOME when no launcher is available to it, and
+        // enabling HOME before this DPC owns HOME would be the one configuration
+        // in which the key could land somewhere we did not choose.
         setHostComponentEnabled(context, true, errors);
-        registerHome(context, dpm, admin, errors);
+        boolean homeRegistered = registerHome(context, dpm, admin, errors);
+        applyLockTaskFeatures(
+                dpm,
+                admin,
+                KioskRecoveryPolicy.allowHomeKey(settings.config().mode(), homeRegistered),
+                errors
+        );
         return false;
     }
 
@@ -410,6 +420,17 @@ public final class KioskController {
             List<String> errors
     ) {
         boolean cleared = false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                // Drop the feature set first, while the lock-task allowlist and the
+                // kiosk HOME preference are both still in place. Single-app kiosk
+                // may have HOME enabled, and HOME must never outlive the launcher
+                // registration it depends on.
+                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE);
+            } catch (RuntimeException ignored) {
+                // Features are only meaningful while packages are allowlisted.
+            }
+        }
         if (KioskConfigStore.isHomeRegistered(context)) {
             try {
                 // Persistent preferred activities can only be cleared per package,
@@ -428,13 +449,6 @@ public final class KioskController {
             }
         } catch (RuntimeException exception) {
             errors.add("kiosk-lock-task-release:" + exception.getClass().getSimpleName());
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE);
-            } catch (RuntimeException ignored) {
-                // Features are only meaningful while packages are allowlisted.
-            }
         }
         setHostComponentEnabled(context, false, errors);
         return cleared;
@@ -470,28 +484,60 @@ public final class KioskController {
         }
     }
 
+    /**
+     * Applies the minimal lock-task feature set, plus HOME where
+     * {@link KioskRecoveryPolicy#allowHomeKey} says the recovery route needs it.
+     *
+     * <p>Never leaves the device on an unknown feature set. If the platform
+     * refuses HOME — the documented outcome when it sees no launcher it can use —
+     * the minimal set is reapplied and the refusal is reported, so the console
+     * says the profile was recorded but not fully confirmed rather than implying
+     * a recovery route that is not there.
+     */
     private static void applyLockTaskFeatures(
             DevicePolicyManager dpm,
             ComponentName admin,
+            boolean allowHome,
             List<String> errors
     ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
             // Android 8.0/8.1 have no feature selector; lock task uses the legacy
             // behaviour (no Home, no Overview, no notification shade expansion).
+            // Single-app recovery there is only reachable once the pinned app is
+            // closed, which is what kiosk_recovery_single_app says in as many words.
             return;
         }
-        int features = DevicePolicyManager.LOCK_TASK_FEATURE_NONE;
+        int desired = allowHome
+                ? DevicePolicyManager.LOCK_TASK_FEATURE_HOME
+                : DevicePolicyManager.LOCK_TASK_FEATURE_NONE;
         try {
-            dpm.setLockTaskFeatures(admin, features);
-            if (dpm.getLockTaskFeatures(admin) != features) {
-                errors.add("kiosk-lock-task-features-unverified");
+            dpm.setLockTaskFeatures(admin, desired);
+            if (dpm.getLockTaskFeatures(admin) == desired) {
+                return;
             }
+            errors.add("kiosk-lock-task-features-unverified");
+        } catch (RuntimeException exception) {
+            errors.add("kiosk-lock-task-features:" + exception.getClass().getSimpleName());
+        }
+        if (desired == DevicePolicyManager.LOCK_TASK_FEATURE_NONE) {
+            return;
+        }
+        errors.add("kiosk-lock-task-home-unavailable");
+        try {
+            dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE);
         } catch (RuntimeException exception) {
             errors.add("kiosk-lock-task-features:" + exception.getClass().getSimpleName());
         }
     }
 
-    private static void registerHome(
+    /**
+     * Installs the kiosk HOME preference.
+     *
+     * @return {@code true} when this DPC is now the persistent HOME host, which is
+     *         the precondition {@link KioskRecoveryPolicy#allowHomeKey} checks
+     *         before the HOME key is handed back to a single-app kiosk
+     */
+    private static boolean registerHome(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
@@ -504,8 +550,10 @@ public final class KioskController {
             filter.addCategory(Intent.CATEGORY_DEFAULT);
             dpm.addPersistentPreferredActivity(admin, filter, host);
             KioskConfigStore.setHomeRegistered(context, true);
+            return true;
         } catch (RuntimeException exception) {
             errors.add("kiosk-home-register:" + exception.getClass().getSimpleName());
+            return false;
         }
     }
 

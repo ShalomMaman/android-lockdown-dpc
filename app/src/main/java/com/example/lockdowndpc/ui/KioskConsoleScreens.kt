@@ -30,6 +30,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -50,6 +51,8 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
@@ -87,11 +90,20 @@ internal data class KioskSnapshot(
 ) {
     val configValid: Boolean get() = problems.isEmpty()
 
-    /** What the confirmation screen and the status card name as "the target". */
-    val targetDescription: String
+    /**
+     * What the activation row and the confirmation card name as "the target",
+     * already isolated for the direction the value actually has.
+     *
+     * A single-app target is a third-party label whose language is unknown at
+     * build time, so it takes first-strong isolation: forcing it left-to-right
+     * made a Hebrew label such as `סרטונים (בטא)` resolve its parentheses against
+     * an L base and render visibly scrambled. An origin is a Latin identifier and
+     * genuinely is left-to-right.
+     */
+    val targetDisplay: String
         get() = when (mode) {
-            KioskMode.SINGLE_APP -> targetLabel.ifBlank { targetPackage }
-            KioskMode.SINGLE_SITE -> origin.ifBlank { siteUrl }
+            KioskMode.SINGLE_APP -> targetLabel.ifBlank { targetPackage }.bidiIsolated()
+            KioskMode.SINGLE_SITE -> origin.ifBlank { siteUrl }.ltrIsolated()
             else -> ""
         }
 
@@ -240,7 +252,11 @@ internal fun KioskProfileScreen(
                     ActionRow(
                         icon = Icons.Rounded.LockOpen,
                         title = stringResource(R.string.kiosk_action_exit),
-                        supporting = stringResource(R.string.kiosk_exited),
+                        // What this row *will* do. `kiosk_exited` is the result
+                        // message for the transition, and reading it here — a few
+                        // dp under a status card that says "Active — the device is
+                        // locked" — asserted the opposite of the card.
+                        supporting = stringResource(R.string.kiosk_action_exit_supporting),
                         enabled = !busy,
                         onClick = onExit,
                     )
@@ -248,7 +264,7 @@ internal fun KioskProfileScreen(
                     ActionRow(
                         icon = Icons.Rounded.Lock,
                         title = stringResource(R.string.kiosk_action_activate),
-                        supporting = snapshot.targetDescription.ltrIsolated(),
+                        supporting = snapshot.targetDisplay,
                         enabled = !busy,
                         onClick = onActivate,
                     )
@@ -261,7 +277,7 @@ internal fun KioskProfileScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        RecoveryNote()
+        RecoveryNote(snapshot.mode)
 
         Spacer(Modifier.height(24.dp))
         SecondaryAction(text = stringResource(R.string.kiosk_back), onClick = onBack)
@@ -373,8 +389,17 @@ private fun KioskProblemList(problems: List<String>) {
     }
 }
 
+/**
+ * How an administrator gets back in, stated per profile.
+ *
+ * The shared paragraph describes the gesture; the profile-specific sentence says
+ * where that screen actually is, because the answer differs. A single-site kiosk
+ * *is* the Device Guard screen. A single-app kiosk hands the display to another
+ * package, and the way back is the HOME key returning to this DPC — which the
+ * platform only offers from API 28 up.
+ */
 @Composable
-private fun RecoveryNote() {
+private fun RecoveryNote(mode: KioskMode) {
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
@@ -394,6 +419,18 @@ private fun RecoveryNote() {
                 text = stringResource(R.string.kiosk_recovery_body),
                 style = MaterialTheme.typography.bodyMedium,
             )
+            val perProfile = when (mode) {
+                KioskMode.SINGLE_APP -> R.string.kiosk_recovery_single_app
+                KioskMode.SINGLE_SITE -> R.string.kiosk_recovery_single_site
+                else -> null
+            }
+            if (perProfile != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(perProfile),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
         }
     }
 }
@@ -446,6 +483,11 @@ internal fun KioskAppPickerScreen(
                     }
                 }
             },
+            // A query is as likely to be a package-name fragment as a Hebrew
+            // label, so the field resolves its own direction from what was typed
+            // rather than inheriting the page's. The platform equivalent of
+            // `dir="auto"` on an input.
+            textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
             modifier = Modifier.fillMaxWidth(),
         )
         Spacer(Modifier.height(16.dp))
@@ -585,6 +627,16 @@ internal fun KioskSiteScreen(
                 keyboardType = KeyboardType.Uri,
                 imeAction = ImeAction.Done,
             ),
+            // The field is pinned left-to-right while the page keeps mirroring.
+            // A URL is almost entirely neutral and weak characters — `:` `/` `.`
+            // and the port digits — so in a right-to-left paragraph the
+            // punctuation and the port are displaced and the caret jumps while
+            // typing. The three preview lines below are already isolated, and the
+            // field is the one place an operator checks their own typing.
+            textStyle = LocalTextStyle.current.copy(
+                textDirection = TextDirection.Ltr,
+                textAlign = TextAlign.Left,
+            ),
             isError = preview.entered && preview.problem != null,
             modifier = Modifier.fillMaxWidth(),
         )
@@ -679,7 +731,7 @@ internal fun KioskConfirmScreen(
                             } else {
                                 R.string.kiosk_confirm_app
                             },
-                            snapshot.targetDescription.ltrIsolated(),
+                            snapshot.targetDisplay,
                         ),
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -693,7 +745,7 @@ internal fun KioskConfirmScreen(
         }
 
         Spacer(Modifier.height(20.dp))
-        RecoveryNote()
+        RecoveryNote(snapshot.mode)
 
         if (message != null) {
             Spacer(Modifier.height(16.dp))

@@ -245,6 +245,7 @@ private fun AdminConsole(
     var modePickerVisible by remember { mutableStateOf(false) }
     var languagePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
+    var recoveryRotateVisible by remember { mutableStateOf(false) }
     var managementVisible by remember { mutableStateOf(false) }
     var policyOperationInProgress by remember { mutableStateOf(false) }
     var updateOperationInProgress by remember { mutableStateOf(false) }
@@ -588,7 +589,7 @@ private fun AdminConsole(
                     screen = ConsoleScreen.PIN_SETUP
                 }
             },
-            onNewRecoveryCode = ::rotateRecoveryCode,
+            onNewRecoveryCode = { if (requireSession()) recoveryRotateVisible = true },
             onOpenAuditLog = { if (requireSession()) auditLogVisible = true },
             onCheckUpdate = ::checkForUpdates,
             onPickLanguage = { if (requireSession()) languagePickerVisible = true },
@@ -687,18 +688,26 @@ private fun AdminConsole(
             onDismiss = { modePickerVisible = false },
             onSave = { chosen ->
                 modePickerVisible = false
-                AllowedAppsStore.setProtectionMode(context, chosen)
-                AuditLog.append(
-                    context,
-                    context.getString(
-                        if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
-                            R.string.audit_mode_allow
-                        } else {
-                            R.string.audit_mode_block
-                        }
-                    ),
-                )
-                showAdmin()
+                // The session is re-checked here, not only when the dialog was
+                // opened. `AdminSession` expires on wall time rather than on
+                // interaction, so a console left on a desk with this dialog open
+                // could otherwise be saved by whoever picked the device up three
+                // minutes later — and the write commits before `showAdmin` drops
+                // back to the PIN screen.
+                if (requireSession()) {
+                    AllowedAppsStore.setProtectionMode(context, chosen)
+                    AuditLog.append(
+                        context,
+                        context.getString(
+                            if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
+                                R.string.audit_mode_allow
+                            } else {
+                                R.string.audit_mode_block
+                            }
+                        ),
+                    )
+                    showAdmin()
+                }
             },
         )
     }
@@ -709,11 +718,42 @@ private fun AdminConsole(
             onDismiss = { languagePickerVisible = false },
             onSave = { chosen ->
                 languagePickerVisible = false
-                // Android recreates this activity to apply the new resources, and
-                // `initialScreen` drops the admin session on every recreation. That
-                // is the shipped fail-closed behaviour, so the picker says so
-                // instead of the console quietly holding the session open.
-                AppLocales.apply(chosen)
+                // Same re-check as the mode picker, for the same reason.
+                if (requireSession()) {
+                    // Android recreates this activity to apply the new resources,
+                    // and `initialScreen` drops the admin session on every
+                    // recreation. That is the shipped fail-closed behaviour, so the
+                    // picker says so instead of the console quietly holding the
+                    // session open.
+                    AppLocales.apply(chosen)
+                }
+            },
+        )
+    }
+
+    if (recoveryRotateVisible) {
+        // Revoking the standing recovery credential is at least as hard to undo as
+        // activating kiosk, which gets a confirmation screen of its own — and the
+        // row directly above this one is "Change the administrator PIN", so a
+        // mistap lands here. A 64 dp subtitle is not the place to disclose it.
+        AlertDialog(
+            onDismissRequest = { recoveryRotateVisible = false },
+            title = { Text(stringResource(R.string.recovery_rotate_title)) },
+            text = { Text(stringResource(R.string.recovery_rotate_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        recoveryRotateVisible = false
+                        rotateRecoveryCode()
+                    }
+                ) {
+                    Text(stringResource(R.string.recovery_rotate_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { recoveryRotateVisible = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
@@ -1005,9 +1045,14 @@ private fun AdminScreen(
                 },
                 title = stringResource(R.string.admin_kiosk_row),
                 // Profile first, then state: an administrator glancing at this
-                // row needs to know whether the device is locked right now.
-                supporting = stringResource(KioskLabels.profile(kiosk.mode)) + " · " +
+                // row needs to know whether the device is locked right now. The
+                // separator lives in strings.xml rather than in this expression,
+                // so it is visible to a translator and to the parity check.
+                supporting = stringResource(
+                    R.string.kiosk_profile_state_summary,
+                    stringResource(KioskLabels.profile(kiosk.mode)),
                     stringResource(KioskLabels.state(kiosk.state)),
+                ),
                 onClick = onOpenKiosk,
             )
             ActionRow(
@@ -1142,6 +1187,16 @@ private fun ModePickerDialog(
                         )
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    // Each method keeps its own saved list, so this dialog can say
+                    // plainly that switching costs nothing. Up to 0.5.0 saving a
+                    // different method deleted the curated list outright, with no
+                    // warning on this screen or anywhere else.
+                    text = stringResource(R.string.mode_dialog_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = {

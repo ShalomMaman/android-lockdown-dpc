@@ -128,6 +128,31 @@ class LocaleParityFixtureTest(unittest.TestCase):
             any("was probably never translated" in problem for problem in problems), problems
         )
 
+    def test_a_value_holding_no_word_is_not_reported_as_untranslated(self) -> None:
+        # A separator assembled only from placeholders and punctuation -- the kiosk
+        # profile/state summary -- is identical in both locales because there is
+        # nothing in it to translate.
+        separator = '    <string name="summary">%1$s · %2$s</string>\n</resources>'
+        self.assertEqual(
+            [],
+            self.check(
+                default=DEFAULT_XML.replace("</resources>", separator),
+                hebrew=HEBREW_XML.replace("</resources>", separator),
+            ),
+        )
+
+    def test_a_value_that_still_holds_a_word_is_reported(self) -> None:
+        # The exemption is narrow: one letter outside a placeholder makes the
+        # value translatable again.
+        sentence = '    <string name="summary">%1$s and %2$s</string>\n</resources>'
+        problems = self.check(
+            default=DEFAULT_XML.replace("</resources>", sentence),
+            hebrew=HEBREW_XML.replace("</resources>", sentence),
+        )
+        self.assertTrue(
+            any("was probably never translated" in problem for problem in problems), problems
+        )
+
     def test_blank_value_is_reported(self) -> None:
         hebrew = HEBREW_XML.replace("<string name=\"greeting\">שלום</string>", '<string name="greeting"> </string>')
         problems = self.check(hebrew=hebrew)

@@ -132,8 +132,15 @@ class LocaleParityTest {
     fun hebrewTranslationIsActuallyHebrew() {
         // A key copied over from the default and never translated is the other half
         // of the same mistake, and it is invisible until a Hebrew device shows it.
-        val latinOnly = hebrew.strings.filterValues { !containsHebrew(it) }.keys +
-            hebrew.plurals.filterValues { items -> items.values.none { containsHebrew(it) } }.keys
+        // A value that holds no word at all — `%1$s · %2$s`, the separator the
+        // kiosk summary is assembled from — is exempt: there is nothing in it to
+        // translate, so "holds no Hebrew" says nothing about it.
+        val latinOnly = hebrew.strings
+            .filterValues { hasTranslatableLetters(it) && !containsHebrew(it) }.keys +
+            hebrew.plurals.filterValues { items ->
+                items.values.any { hasTranslatableLetters(it) } &&
+                    items.values.none { containsHebrew(it) }
+            }.keys
         assertEquals(
             "values-iw/strings.xml holds no Hebrew for these keys",
             emptySet<String>(),
@@ -197,6 +204,14 @@ private fun declaredPlaceholders(items: Map<String, String>): Set<String> =
     items.values.flatMapTo(sortedSetOf<String>()) { placeholdersOf(it) }
 
 private fun containsHebrew(text: String): Boolean = text.any { it in HEBREW_BLOCK }
+
+/**
+ * Whether [text] holds a word at all. The placeholders are removed first, because
+ * `%1$s` itself contains a letter; what is left of a pure separator is punctuation
+ * and spacing, which no translator can act on.
+ */
+private fun hasTranslatableLetters(text: String): Boolean =
+    PLACEHOLDER.replace(text, "").any { it.isLetter() }
 
 /** The `app` module directory, found from wherever the test runner was started. */
 private fun moduleDir(): File {
