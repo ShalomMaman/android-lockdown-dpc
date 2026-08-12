@@ -5,7 +5,6 @@ import android.content.Context;
 import android.content.Intent;
 
 import com.example.lockdowndpc.policy.AllowedAppsStore;
-import com.example.lockdowndpc.policy.LockdownPolicyController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.updates.UpdateScheduler;
 import com.example.lockdowndpc.updates.SecureUpdateManager;
@@ -23,17 +22,30 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             SecureUpdateManager.onPackageReplaced(context.getApplicationContext());
         }
-        if (AllowedAppsStore.isProtectionEnabled(context)) {
-            PendingResult pendingResult = goAsync();
-            PolicyReconciliationCoordinator.reconcileAsync(
-                    context,
-                    action,
-                    pendingResult::finish
-            );
-        } else if (Intent.ACTION_BOOT_COMPLETED.equals(action)
-                || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
-            // Reconcile stale hidden-package state while protection is paused.
-            LockdownPolicyController.pause(context);
+        // Both branches enumerate packages and make many DevicePolicyManager
+        // calls, so neither may run on the broadcast thread.
+        PendingResult pendingResult = goAsync();
+        boolean dispatched = false;
+        try {
+            if (AllowedAppsStore.isProtectionEnabled(context)) {
+                PolicyReconciliationCoordinator.reconcileAsync(
+                        context,
+                        action,
+                        pendingResult::finish
+                );
+            } else {
+                // Reconcile stale hidden-package state while protection is paused.
+                PolicyReconciliationCoordinator.pauseAsync(
+                        context,
+                        action,
+                        pendingResult::finish
+                );
+            }
+            dispatched = true;
+        } finally {
+            if (!dispatched) {
+                pendingResult.finish();
+            }
         }
     }
 }

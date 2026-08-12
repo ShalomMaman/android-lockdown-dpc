@@ -2,6 +2,8 @@ package com.example.lockdowndpc.security;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
+import android.provider.Settings;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
@@ -18,12 +20,26 @@ import javax.crypto.SecretKey;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
 
+/**
+ * Stores and verifies the administrator PIN and the one-time recovery code.
+ *
+ * <p>Throttling state is evaluated by {@link PinLockoutPolicy}, which measures an
+ * active penalty with monotonic time so that changing the device clock cannot
+ * shorten it. Every write that carries failed-attempt or recovery state is
+ * committed synchronously: an asynchronous {@code apply()} can be lost if the
+ * device reboots (or is rebooted deliberately) right after a failed attempt.
+ */
 public final class AdminPinStore {
     private static final String PREFS = "admin_security";
     private static final String KEY_SALT = "pin_salt";
     private static final String KEY_VERIFIER = "pin_verifier";
     private static final String KEY_FAILURES = "pin_failures";
+    /** Legacy wall-clock deadline; still written for downgrade compatibility. */
     private static final String KEY_LOCKOUT_UNTIL = "pin_lockout_until";
+    private static final String KEY_LOCKOUT_BOOT_KIND = "pin_lockout_boot_kind";
+    private static final String KEY_LOCKOUT_BOOT_VALUE = "pin_lockout_boot_value";
+    private static final String KEY_LOCKOUT_ELAPSED_UNTIL = "pin_lockout_elapsed_until";
+    private static final String KEY_LOCKOUT_PENALTY = "pin_lockout_penalty";
     private static final String KEY_RECOVERY_SALT = "recovery_salt";
     private static final String KEY_RECOVERY_VERIFIER = "recovery_verifier";
     private static final String KEYSTORE = "AndroidKeyStore";
@@ -46,12 +62,12 @@ public final class AdminPinStore {
             byte[] salt = new byte[16];
             new SecureRandom().nextBytes(salt);
             byte[] verifier = createVerifier(pin, salt, getOrCreateHmacKey());
-            prefs(context).edit()
-                    .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-                    .putString(KEY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP))
-                    .putInt(KEY_FAILURES, 0)
-                    .putLong(KEY_LOCKOUT_UNTIL, 0L)
-                    .apply();
+            putLockout(
+                    prefs(context).edit()
+                            .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
+                            .putString(KEY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP)),
+                    PinLockoutPolicy.LockoutState.CLEARED
+            ).commit();
         } catch (Exception exception) {
             throw new SecurityException("לא ניתן לשמור את קוד המנהל", exception);
         }
@@ -70,7 +86,7 @@ public final class AdminPinStore {
             prefs(context).edit()
                     .putString(KEY_RECOVERY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                     .putString(KEY_RECOVERY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP))
-                    .apply();
+                    .commit();
             return code.substring(0, 4) + "-" + code.substring(4, 8) + "-" + code.substring(8);
         } catch (Exception exception) {
             throw new SecurityException("לא ניתן ליצור קוד שחזור", exception);
@@ -83,16 +99,26 @@ public final class AdminPinStore {
         }
 
         SharedPreferences prefs = prefs(context);
-        long remaining = prefs.getLong(KEY_LOCKOUT_UNTIL, 0L) - System.currentTimeMillis();
-        if (remaining > 0) {
-            return new Verification(Status.LOCKED, remaining, false);
+        PinLockoutPolicy.BootId boot = currentBootId(context);
+        PinLockoutPolicy.Evaluation evaluation = PinLockoutPolicy.evaluate(
+                readLockout(prefs),
+                boot,
+                SystemClock.elapsedRealtime(),
+                System.currentTimeMillis()
+        );
+        if (evaluation.persistRequired()) {
+            // Re-armed, migrated or served: record it before the attempt is judged.
+            putLockout(prefs.edit(), evaluation.state()).commit();
+        }
+        if (evaluation.locked()) {
+            return new Verification(Status.LOCKED, evaluation.remainingMillis(), false);
         }
 
         try {
             SecretKey hmacKey = getOrCreateHmacKey();
             if (matches(pin, prefs.getString(KEY_SALT, ""),
                     prefs.getString(KEY_VERIFIER, ""), hmacKey)) {
-                prefs.edit().putInt(KEY_FAILURES, 0).putLong(KEY_LOCKOUT_UNTIL, 0L).apply();
+                putLockout(prefs.edit(), PinLockoutPolicy.LockoutState.CLEARED).commit();
                 return new Verification(Status.SUCCESS, 0L, false);
             }
 
@@ -101,22 +127,26 @@ public final class AdminPinStore {
             String normalizedRecovery = pin == null ? "" : pin.replace("-", "").replace(" ", "");
             if (recoverySalt != null && recoveryVerifier != null
                     && matches(normalizedRecovery, recoverySalt, recoveryVerifier, hmacKey)) {
-                prefs.edit()
-                        .remove(KEY_RECOVERY_SALT)
-                        .remove(KEY_RECOVERY_VERIFIER)
-                        .putInt(KEY_FAILURES, 0)
-                        .putLong(KEY_LOCKOUT_UNTIL, 0L)
-                        .apply();
+                putLockout(
+                        prefs.edit()
+                                .remove(KEY_RECOVERY_SALT)
+                                .remove(KEY_RECOVERY_VERIFIER),
+                        PinLockoutPolicy.LockoutState.CLEARED
+                ).commit();
                 return new Verification(Status.SUCCESS, 0L, true);
             }
         } catch (Exception exception) {
             return new Verification(Status.ERROR, 0L, false);
         }
 
-        int failures = prefs.getInt(KEY_FAILURES, 0) + 1;
-        long delay = lockoutDelayMillis(failures);
-        long until = delay == 0 ? 0L : System.currentTimeMillis() + delay;
-        prefs.edit().putInt(KEY_FAILURES, failures).putLong(KEY_LOCKOUT_UNTIL, until).apply();
+        PinLockoutPolicy.LockoutState next = PinLockoutPolicy.afterFailure(
+                evaluation.state(),
+                boot,
+                SystemClock.elapsedRealtime(),
+                System.currentTimeMillis()
+        );
+        putLockout(prefs.edit(), next).commit();
+        long delay = next.penaltyMillis();
         return new Verification(delay == 0 ? Status.INVALID : Status.LOCKED, delay, false);
     }
 
@@ -173,20 +203,72 @@ public final class AdminPinStore {
         return generator.generateKey();
     }
 
-    private static long lockoutDelayMillis(int failures) {
-        if (failures < 5) {
+    /**
+     * Identifies the running boot. {@code BOOT_COUNT} is a secure setting that an
+     * unprivileged local user cannot change. When it is unavailable the boot is
+     * identified by the wall time it started at; a clock change then looks like a
+     * reboot, which re-arms the penalty instead of shortening it.
+     */
+    private static PinLockoutPolicy.BootId currentBootId(Context context) {
+        try {
+            return PinLockoutPolicy.BootId.ofBootCount(
+                    Settings.Global.getInt(context.getContentResolver(), Settings.Global.BOOT_COUNT)
+            );
+        } catch (Settings.SettingNotFoundException | RuntimeException unavailable) {
+            return PinLockoutPolicy.BootId.ofBootWallTime(
+                    System.currentTimeMillis() - SystemClock.elapsedRealtime()
+            );
+        }
+    }
+
+    private static PinLockoutPolicy.LockoutState readLockout(SharedPreferences prefs) {
+        PinLockoutPolicy.BootKind kind = PinLockoutPolicy.BootKind.NONE;
+        try {
+            kind = PinLockoutPolicy.BootKind.valueOf(
+                    prefs.getString(KEY_LOCKOUT_BOOT_KIND, PinLockoutPolicy.BootKind.NONE.name())
+            );
+        } catch (IllegalArgumentException | NullPointerException | ClassCastException unusable) {
+            // Unreadable identity: treated as a different boot, which re-arms.
+        }
+        return new PinLockoutPolicy.LockoutState(
+                readInt(prefs, KEY_FAILURES),
+                new PinLockoutPolicy.BootId(kind, readLong(prefs, KEY_LOCKOUT_BOOT_VALUE)),
+                readLong(prefs, KEY_LOCKOUT_ELAPSED_UNTIL),
+                readLong(prefs, KEY_LOCKOUT_PENALTY),
+                readLong(prefs, KEY_LOCKOUT_UNTIL)
+        );
+    }
+
+    private static SharedPreferences.Editor putLockout(
+            SharedPreferences.Editor editor,
+            PinLockoutPolicy.LockoutState state
+    ) {
+        return editor
+                .putInt(KEY_FAILURES, state.failures())
+                .putString(KEY_LOCKOUT_BOOT_KIND, state.armedBoot().kind().name())
+                .putLong(KEY_LOCKOUT_BOOT_VALUE, state.armedBoot().value())
+                .putLong(KEY_LOCKOUT_ELAPSED_UNTIL, state.armedElapsedDeadline())
+                .putLong(KEY_LOCKOUT_PENALTY, state.penaltyMillis())
+                // Supplemental evidence only: read for migration from versions
+                // that stored nothing else, and honoured by an older version if
+                // this build is ever replaced by one.
+                .putLong(KEY_LOCKOUT_UNTIL, state.wallDeadline());
+    }
+
+    private static int readInt(SharedPreferences prefs, String key) {
+        try {
+            return prefs.getInt(key, 0);
+        } catch (ClassCastException unusable) {
+            return 0;
+        }
+    }
+
+    private static long readLong(SharedPreferences prefs, String key) {
+        try {
+            return prefs.getLong(key, 0L);
+        } catch (ClassCastException unusable) {
             return 0L;
         }
-        if (failures == 5) {
-            return 60_000L;
-        }
-        if (failures == 6) {
-            return 5 * 60_000L;
-        }
-        if (failures == 7) {
-            return 30 * 60_000L;
-        }
-        return 60 * 60_000L;
     }
 
     private static SharedPreferences prefs(Context context) {
