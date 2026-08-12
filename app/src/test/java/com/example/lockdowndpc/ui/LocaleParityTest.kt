@@ -185,8 +185,12 @@ private val PLACEHOLDER = Regex("""%(?:\d+\$)?[a-zA-Z]""")
 
 private val HEBREW_BLOCK = '֐'..'׿'
 
+// `findAll` yields a Sequence, and `Sequence.sorted()` returns another Sequence
+// rather than a List. It has to be collected before it is sorted, otherwise this
+// file does not compile and the whole parity guard is silently absent from the
+// test run.
 private fun placeholdersOf(text: String): List<String> =
-    PLACEHOLDER.findAll(text).map { it.value }.sorted()
+    PLACEHOLDER.findAll(text).map { it.value }.toList().sorted()
 
 /** Every placeholder any quantity of one plural declares. */
 private fun declaredPlaceholders(items: Map<String, String>): Set<String> =

@@ -22,8 +22,11 @@ android {
         applicationId = "com.example.lockdowndpc"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.4.1"
+        // Pilot compatibility: the applicationId and the release signing config
+        // below are deliberately unchanged, so this build updates the already
+        // provisioned pilot device in place. Only the version identity moves.
+        versionCode = 9
+        versionName = "0.5.0"
         buildConfigField("String", "UPDATE_MANIFEST_URL", updateManifestUrl.get().asBuildConfigString())
         buildConfigField("String", "UPDATE_PUBLIC_KEY", updatePublicKey.get().asBuildConfigString())
     }

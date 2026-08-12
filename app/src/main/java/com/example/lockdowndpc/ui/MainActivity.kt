@@ -71,6 +71,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.kiosk.KioskConfig
+import com.example.lockdowndpc.kiosk.KioskController
+import com.example.lockdowndpc.kiosk.KioskLabels
+import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -86,6 +90,8 @@ import com.example.lockdowndpc.updates.UpdateStateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Administrator console. The screen sequence, the three minute admin session and
@@ -145,13 +151,34 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-private enum class ConsoleScreen(val secure: Boolean) {
+/**
+ * @param secure          keep the screen out of screenshots and the recents thumbnail
+ * @param requiresSession the screen may only be shown while an administrator
+ *                        session is valid, and is abandoned for the PIN screen
+ *                        the moment it is not — including on resume, so a
+ *                        console left open on a kiosk configuration screen
+ *                        cannot be picked up later by whoever finds the device
+ */
+private enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
     ENROLLMENT(false),
     PIN_SETUP(true),
     LOCKED(true),
-    ADMIN(false),
-    RECOVERY(true),
+    ADMIN(false, requiresSession = true),
+    RECOVERY(true, requiresSession = true),
+    KIOSK(false, requiresSession = true),
+    KIOSK_APPS(false, requiresSession = true),
+    KIOSK_SITE(false, requiresSession = true),
+    KIOSK_CONFIRM(false, requiresSession = true),
 }
+
+/**
+ * How long the console waits for the serialized policy pass a kiosk transition
+ * queued. Leaving kiosk clears this package's persistent preferred activities,
+ * which takes the managed-filtering link handlers with it, and that pass is what
+ * puts them back — so reporting "managed filtering is in force again" before it
+ * finishes would be a claim the device has not made yet.
+ */
+private const val KIOSK_POLICY_PASS_TIMEOUT_SECONDS = 30L
 
 private data class ConsoleStatus(
     val deviceOwner: Boolean,
@@ -218,9 +245,13 @@ private fun AdminConsole(
     var modePickerVisible by remember { mutableStateOf(false) }
     var languagePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
+    var managementVisible by remember { mutableStateOf(false) }
     var policyOperationInProgress by remember { mutableStateOf(false) }
     var updateOperationInProgress by remember { mutableStateOf(false) }
+    var kioskOperationInProgress by remember { mutableStateOf(false) }
     var updateSnapshot by remember { mutableStateOf(UpdateStateStore.read(context)) }
+    var kiosk by remember { mutableStateOf(KioskSnapshot.Empty) }
+    var managementEntries by remember { mutableStateOf(emptyList<ManagementEntry>()) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val status = remember(screen, statusRevision) { readStatus(context) }
@@ -422,16 +453,79 @@ private fun AdminConsole(
         }
     }
 
+    fun refreshKiosk() {
+        coroutineScope.launch {
+            val app = context.applicationContext
+            kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
+            managementEntries = withContext(Dispatchers.IO) { readManagementEntries(app) }
+        }
+    }
+
+    /**
+     * Runs one kiosk transition and reports what the device actually did.
+     *
+     * Authorization is not decided here. [KioskController] reads `AdminSession`
+     * itself, so this session check is a UI courtesy that avoids a pointless
+     * round trip — a stale session is still refused by the controller and lands
+     * the console back on the PIN screen.
+     */
+    fun runKioskAction(
+        successMessage: Int,
+        request: (Context, Runnable) -> KioskController.Result,
+    ) {
+        if (kioskOperationInProgress || !requireSession()) {
+            return
+        }
+        AdminSession.extend()
+        kioskOperationInProgress = true
+        message = null
+        coroutineScope.launch {
+            val app = context.applicationContext
+            val result = withContext(Dispatchers.IO) {
+                val reconciled = CountDownLatch(1)
+                val outcome = request(app, Runnable { reconciled.countDown() })
+                reconciled.await(KIOSK_POLICY_PASS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                outcome
+            }
+            kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
+            kioskOperationInProgress = false
+            statusRevision++
+            if (isKioskSuccessReason(result.reason())) {
+                screen = ConsoleScreen.KIOSK
+                message = if (result.allowed()) {
+                    UiMessage(context.getString(successMessage), isError = false)
+                } else {
+                    // The transition was authorized and recorded, but the device
+                    // did not confirm every step. Saying so is the whole point of
+                    // the verified-policy model; a green message here would be a
+                    // claim nothing checked.
+                    UiMessage(kioskApplyErrorMessage(context, result.errors()), isError = true)
+                }
+                return@launch
+            }
+            val text = kioskFailureMessage(context, result.reason(), result.errors())
+            if (kioskFailureOf(result.reason()) == KioskFailure.AUTH_REQUIRED) {
+                showLocked()
+            } else {
+                screen = ConsoleScreen.KIOSK
+            }
+            message = UiMessage(text, isError = true)
+        }
+    }
+
     LaunchedEffect(screen) { onSecureScreen(screen.secure) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         when {
-            screen == ConsoleScreen.ADMIN && !AdminSession.isUnlocked() -> showLocked()
+            // Every session-bound screen, including the kiosk configuration
+            // flow, drops to the PIN screen the moment the session is gone.
+            screen.requiresSession && !AdminSession.isUnlocked() -> showLocked()
             screen == ConsoleScreen.ADMIN -> {
                 statusRevision++
                 updateSnapshot = UpdateStateStore.read(context)
+                refreshKiosk()
             }
-            screen == ConsoleScreen.RECOVERY && !AdminSession.isUnlocked() -> showLocked()
+            screen == ConsoleScreen.KIOSK -> refreshKiosk()
             screen == ConsoleScreen.ENROLLMENT && isDeviceOwner(context) -> {
                 message = null
                 replacingPin = false
@@ -441,6 +535,10 @@ private fun AdminConsole(
             else -> Unit
         }
     }
+
+    // The admin console shows the current kiosk profile in its status row, so the
+    // first read has to happen without waiting for a resume event.
+    LaunchedEffect(Unit) { refreshKiosk() }
 
     when (screen) {
         ConsoleScreen.ENROLLMENT -> EnrollmentScreen()
@@ -460,12 +558,22 @@ private fun AdminConsole(
 
         ConsoleScreen.ADMIN -> AdminScreen(
             status = status,
+            kiosk = kiosk,
             policyOperationInProgress = policyOperationInProgress,
             updateOperationInProgress = updateOperationInProgress,
             updateSnapshot = updateSnapshot,
             message = message,
             onApply = ::applyProtection,
             onPause = ::pauseProtection,
+            onOpenKiosk = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    refreshKiosk()
+                    screen = ConsoleScreen.KIOSK
+                }
+            },
+            onOpenManagement = { if (requireSession()) managementVisible = true },
             onPickMode = { if (requireSession()) modePickerVisible = true },
             onChooseApps = {
                 if (requireSession()) {
@@ -490,6 +598,86 @@ private fun AdminConsole(
         ConsoleScreen.RECOVERY -> RecoveryScreen(
             code = recoveryCode,
             onAcknowledge = { if (requireSession()) showAdmin() },
+        )
+
+        ConsoleScreen.KIOSK -> KioskProfileScreen(
+            snapshot = kiosk,
+            busy = kioskOperationInProgress,
+            message = message,
+            onConfigureApp = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_APPS
+                }
+            },
+            onConfigureSite = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_SITE
+                }
+            },
+            onClear = {
+                runKioskAction(R.string.kiosk_cleared) { appContext, done ->
+                    KioskController.requestClear(appContext, done)
+                }
+            },
+            onActivate = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_CONFIRM
+                }
+            },
+            onExit = {
+                runKioskAction(R.string.kiosk_exited) { appContext, done ->
+                    KioskController.requestExit(appContext, done)
+                }
+            },
+            onBack = { if (requireSession()) showAdmin() },
+        )
+
+        ConsoleScreen.KIOSK_APPS -> KioskAppPickerScreen(
+            busy = kioskOperationInProgress,
+            onSelect = { packageName ->
+                // Saving only arms the profile. KioskController re-resolves the
+                // package against the device and re-runs the same eligibility
+                // rule the picker filtered with, so a target that was uninstalled
+                // between listing and tapping is refused rather than stored.
+                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                    KioskController.requestConfigure(
+                        appContext, KioskConfig.singleApp(packageName), done
+                    )
+                }
+            },
+            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+        )
+
+        ConsoleScreen.KIOSK_SITE -> KioskSiteScreen(
+            initialUrl = kiosk.siteUrl,
+            busy = kioskOperationInProgress,
+            message = message,
+            onSave = { url ->
+                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                    KioskController.requestConfigure(
+                        appContext, KioskConfig.singleSite(url), done
+                    )
+                }
+            },
+            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+        )
+
+        ConsoleScreen.KIOSK_CONFIRM -> KioskConfirmScreen(
+            snapshot = kiosk,
+            busy = kioskOperationInProgress,
+            message = message,
+            onConfirm = {
+                runKioskAction(R.string.kiosk_activated) { appContext, done ->
+                    KioskController.requestEnter(appContext, done)
+                }
+            },
+            onCancel = { if (requireSession()) screen = ConsoleScreen.KIOSK },
         )
     }
 
@@ -532,6 +720,13 @@ private fun AdminConsole(
 
     if (auditLogVisible) {
         AuditLogDialog(onDismiss = { auditLogVisible = false })
+    }
+
+    if (managementVisible) {
+        ManagementPackagesDialog(
+            entries = managementEntries,
+            onDismiss = { managementVisible = false },
+        )
     }
 }
 
@@ -662,12 +857,15 @@ private fun LockedScreen(
 @Composable
 private fun AdminScreen(
     status: ConsoleStatus,
+    kiosk: KioskSnapshot,
     policyOperationInProgress: Boolean,
     updateOperationInProgress: Boolean,
     updateSnapshot: UpdateSnapshot,
     message: UiMessage?,
     onApply: () -> Unit,
     onPause: () -> Unit,
+    onOpenKiosk: () -> Unit,
+    onOpenManagement: () -> Unit,
     onPickMode: () -> Unit,
     onChooseApps: () -> Unit,
     onChangePin: () -> Unit,
@@ -796,11 +994,30 @@ private fun AdminScreen(
             )
         }
 
-        // Kiosk integration point: the kiosk agent's controls belong in a
-        // SectionCard added here, between "Display" and "Records and monitoring",
-        // built from ActionRow entries with keys named `admin_kiosk_*` in
-        // res/values/strings.xml and res/values-iw/strings.xml. See the branch
-        // notes for the rationale.
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.admin_section_kiosk)) {
+            ActionRow(
+                // A padlock is not a directional glyph, so it is never mirrored.
+                icon = if (kiosk.state == KioskState.ACTIVE) {
+                    Icons.Rounded.Lock
+                } else {
+                    Icons.Rounded.LockOpen
+                },
+                title = stringResource(R.string.admin_kiosk_row),
+                // Profile first, then state: an administrator glancing at this
+                // row needs to know whether the device is locked right now.
+                supporting = stringResource(KioskLabels.profile(kiosk.mode)) + " · " +
+                    stringResource(KioskLabels.state(kiosk.state)),
+                onClick = onOpenKiosk,
+            )
+            ActionRow(
+                icon = Icons.Rounded.VpnKey,
+                title = stringResource(R.string.admin_management_row),
+                supporting = stringResource(R.string.admin_management_supporting),
+                onClick = onOpenManagement,
+                showDivider = true,
+            )
+        }
 
         Spacer(Modifier.height(20.dp))
         SectionCard(title = stringResource(R.string.admin_section_records)) {

@@ -22,6 +22,14 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             SecureUpdateManager.onPackageReplaced(context.getApplicationContext());
         }
+        // An active kiosk is re-asserted first so lock task, the lock-task
+        // feature set and the kiosk HOME preference are back before the package
+        // sweep runs. This is queued on the shared policy executor rather than
+        // performed here: it is DevicePolicyManager work and must not touch the
+        // broadcast thread. It cannot enter, leave or change a kiosk profile —
+        // it only restores a state that was already persisted as active.
+        PolicyReconciliationCoordinator.restoreKioskAsync(context, action);
+
         // Both branches enumerate packages and make many DevicePolicyManager
         // calls, so neither may run on the broadcast thread.
         PendingResult pendingResult = goAsync();

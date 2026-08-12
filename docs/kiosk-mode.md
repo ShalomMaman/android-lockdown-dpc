@@ -64,18 +64,64 @@ only from a persisted `ACTIVE`, and it can never reach `ARMED` or `OFF`. A reboo
 is therefore not a way out of kiosk.
 
 `KioskController` is a backend surface: nothing in it is exported, and no
-component exposes an intent that changes kiosk state. Console wiring lands in a
-later change.
+component exposes an intent that changes kiosk state.
+
+### Console flow
+
+The operator-facing flow lives inside the authenticated `MainActivity` console,
+under **Kiosk profile → Operating profile**. It is four screens, and the split is
+the point: no single tap can take a classroom device away from the person holding
+it.
+
+| Screen | What it does | Authorization |
+| --- | --- | --- |
+| Operating profile | Shows the current profile, state and target; offers the three profiles as a radio group | `AdminSession` |
+| Choose the locked app | Searchable list of eligible single-app targets | `AdminSession` |
+| Set the locked website | HTTPS editor with a live normalized address and allowed origin | `AdminSession` |
+| Lock this device? | Confirmation and recovery explanation, then activation | `AdminSession` |
+
+Selecting a profile is a *pending* choice. Saving it calls
+`KioskController.requestConfigure`, which only reaches `ARMED` — nothing an end
+user can see changes. Locking is a separate, confirmed step
+(`requestEnter`). Exiting (`requestExit`) and removing the configuration
+(`requestClear`) are equally explicit.
+
+Every one of those four screens is marked `requiresSession`, so the console drops
+to the PIN screen on resume if the three-minute administrator session has
+expired. That check is a courtesy: `KioskController` reads `AdminSession` itself,
+so a screen cannot assert that it is authenticated.
+
+The **display-language picker stays in the authenticated console** (Display →
+Display language) and is deliberately absent from the locked kiosk surface. The
+kiosk host still renders in the chosen language: it extends `AppCompatActivity`
+for exactly that reason, which is what applies the persisted per-app locale below
+API 33.
+
+A console caller waits for the serialized policy pass that a kiosk transition
+queues (`KioskController.requestX(context, onPolicyReconciled)`), because leaving
+kiosk clears this package's persistent preferred activities — taking the
+managed-filtering link handlers with it — and that pass is what puts them back.
+Reporting "managed filtering is in force again" before it finishes would be a
+claim the device has not made yet.
 
 ### Administrator entry from inside kiosk
 
 `AdminEntryGesture` — seven taps within three seconds on an unlabeled 56 dp
-target in the top-start corner of the kiosk host — starts the existing console
-through `KioskAdminEntry.consoleIntent`. That intent is always **explicit** (it
-names `ui.MainActivity`), carries no authority, and lands on the locked PIN
-screen. There is no secret code path and no hardcoded PIN; the gesture buys an
+target in the **top corner on the side the text starts from** (top-left in
+English, top-right in Hebrew) — starts the existing console through
+`KioskAdminEntry.consoleIntent`. That intent is always **explicit** (it names
+`ui.MainActivity`), carries no authority, and lands on the locked PIN screen.
+There is no secret code path and no hardcoded PIN; the gesture buys an
 opportunity to authenticate, nothing more. The DPC package stays on the Lock Task
 allowlist precisely so this recovery route works.
+
+**Administrator note.** The target is invisible and its hit area is one 56 dp
+square out of a full display, so it is not something a student finds by pressing
+the screen; it is something you have to know about and aim at. The three-second
+window means a slow, exploratory tap sequence does *not* complete it. Brief every
+person who is expected to service these devices, and treat the gesture as a
+convenience rather than as a secret: the security boundary is the PIN, not the
+corner.
 
 ## Lock Task
 
@@ -111,9 +157,38 @@ active kiosk keeps its HOME preference even while managed filtering is paused.
 
 A target is accepted only when it is explicitly selected and
 `KioskConfigValidator` confirms it is installed, enabled, launchable, not the DPC
-itself, and not an essential system component. The resolver
+itself, and not a protected package. The resolver
 (`KioskController.resolveTarget`) reads `PackageManager`; the decision is pure and
 unit tested.
+
+**Protected** is decided by `KioskAppCatalog.isProtectedFromKiosk`, which is the
+single rule the console picker filters with *and* the resolver feeds into the
+validator. It covers three classes:
+
+| Class | Why it may not be pinned |
+| --- | --- |
+| `ESSENTIAL_SYSTEM_PACKAGE` | Taking over system UI, settings or an IME is not repairable from the console. |
+| `MANAGEMENT` | Pinning the management transport would trade remote access for containment. |
+| `KIOSK_ESCAPE_SURFACE` | A file manager or documents picker *is* the way out. Hiding it everywhere else and then pinning it as "the one allowed app" would be self-defeating. |
+
+The escape-surface exclusion is the one a picker built on "installed and
+launchable" alone gets wrong: `com.android.documentsui` passes every device
+check. `KioskAppCatalogTest` pins every entry of `KIOSK_ESCAPE_SURFACES`,
+`ESSENTIAL_SYSTEM` and the management records as non-selectable.
+
+Classification uses an **empty** administrator-selected system set on purpose: an
+operator opting a system app into ordinary allow/block management must not
+thereby make an escape surface eligible as the pinned kiosk application.
+
+The picker lists installed, launchable applications **including ones this policy
+currently hides**, and including remembered packages the DPC has managed before.
+Hidden packages are invisible to `getLaunchIntentForPackage`, so both the picker
+and `resolveTarget` resolve launchability with `queryIntentActivities` under
+`MATCH_UNINSTALLED_PACKAGES | MATCH_DISABLED_COMPONENTS`. Pinning a hidden app is
+legitimate: `applyPackagePolicy` unhides the kiosk target on the next pass. Each
+row shows the application label and the package name, the label isolated without
+a forced direction and the package name isolated left-to-right so its
+dot-separated segments keep their order inside a Hebrew page.
 
 Launch mechanism by API level:
 
@@ -140,6 +215,23 @@ The containment unit is the **origin** — scheme, host, effective port.
 `https://portal.school.example` does not imply `https://mail.school.example`,
 `https://school.example`, or `https://portal.school.example:8443`.
 
+The console editor normalizes as you type and shows **both** the opening address
+and the derived allowed origin before anything is stored, because those are
+different things and an operator has to see which containment they just asked
+for. It also states, on the same screen, that links leaving the origin are
+blocked and that this is not a network firewall. Both values are rendered
+left-to-right isolated so a Hebrew console does not reorder a URL. The same
+`KioskUrl.normalize` rule runs in the editor and on the device, so nothing is
+accepted in the console that the device would then refuse.
+
+`KioskNavigationGuard` is consulted from `shouldOverrideUrlLoading`, which
+Android calls for **subframe navigations as well as top-level ones** on API 24+.
+The guard therefore blocks a cross-origin iframe navigation too. That is a
+deliberate fail-closed choice and a real compatibility cost: a portal that embeds
+a third-party widget by navigating an iframe cross-origin will show the blocked
+notice. Sub-resource loads — scripts, fonts, images, XHR — are *not* filtered, so
+the containment remains navigation containment rather than a network control.
+
 WebView configuration in `KioskHostActivity`:
 
 | Setting | Value | Why |
@@ -156,11 +248,83 @@ WebView configuration in `KioskHostActivity`:
 | Geolocation, form data, autoplay | off | |
 | WebContents debugging | only in debuggable builds | Off in release. |
 | Long-press | consumed | Removes the "Web search" escape from the text selection menu. |
+| `onRenderProcessGone` | detach, destroy, show the error state | Without it a renderer crash kills the process — and that process is HOME while kiosk holds, so the device would sit in a crash loop with no launcher behind it. |
+| Back | `OnBackPressedCallback`, permanently enabled | Goes back inside the WebView when it can, and is swallowed otherwise. Registered on the dispatcher rather than by overriding `onBackPressed`, which at `targetSdk 33+` is no longer invoked for a back *gesture* — only for the legacy button. |
 
 A blocked navigation or download shows a transient notice and leaves the page
 intact; it never throws away a session the user legitimately started. Network
 failures, TLS failures, and an unusable configuration show the full error state
 with a retry — never another browser or launcher.
+
+## Reboot and package-update lifecycle
+
+`PolicyRefreshReceiver` handles `BOOT_COMPLETED` and `MY_PACKAGE_REPLACED`. It
+performs **no** policy work inline; it queues, in order, on the single
+reconciliation thread owned by `PolicyReconciliationCoordinator`:
+
+1. `restoreKioskAsync` — re-asserts an already-active kiosk (lock task, the
+   lock-task feature set, the HOME preference) via
+   `KioskController.restoreAfterBootOnce`.
+2. `reconcileAsync` or `pauseAsync` — the existing full package pass, whose
+   `PendingResult` finishes the broadcast.
+
+Restoration is one-directional and unauthenticated by design: `BOOT_RESTORE` is
+reachable only from a persisted `ACTIVE`, so this path can never enter, leave or
+change a kiosk profile. A reboot is neither a way in nor a way out.
+
+`KioskHostActivity.onCreate` calls the same `restoreAfterBootOnce`. The flag is
+per process, so whichever of the two runs first does the work and the other
+no-ops. On a device where kiosk is `OFF`, `restoreKioskAsync` short-circuits
+before touching `DevicePolicyManager`, so managed filtering behaves exactly as it
+did in 0.4.
+
+## Audit events
+
+Kiosk writes to the same `AuditLog` as the rest of the console:
+
+| Event | When |
+| --- | --- |
+| `audit_kiosk_configured_off` / `_app` / `_site` | A profile was saved |
+| `audit_kiosk_activated` | Lock task was entered |
+| `audit_kiosk_activation_failed` | An activation request was refused, with the machine reason |
+| `audit_kiosk_exited` | Lock task was left and managed filtering restored |
+| `audit_kiosk_cleared` | The configuration was removed |
+| `audit_kiosk_restored` / `audit_kiosk_restore_failed` | Reboot or update reconciliation |
+| `audit_kiosk_fault` | The runtime could not honour the stored configuration |
+| `audit_kiosk_admin_entry` | The corner gesture opened the console |
+
+What is deliberately **not** logged: administrator PINs and recovery codes (they
+never reach this layer at all), and the path, query and fragment of a single-site
+target. A single-site configure event records the **origin** only — scheme, host
+and effective port. Query strings routinely carry tokens, and the audit log is
+readable from the console by anyone holding the administrator PIN.
+
+## Localization
+
+Every operator-facing kiosk string lives in `res/values/strings.xml` (English,
+the default locale) and `res/values-iw/strings.xml` (Hebrew), including the text
+on the locked surface itself. `LocaleParityTest.kt` and
+`tools/check_locale_parity.py` enforce key, plural-category and placeholder
+parity across both, so a kiosk string added to one locale and forgotten in the
+other is a build failure rather than an English sentence in the middle of a
+Hebrew screen.
+
+Machine-readable reasons are *not* strings.xml entries. `KioskStateMachine`,
+`KioskConfigValidator` and `KioskController.reconcile` emit stable codes
+(`admin-authentication-required`, `target:not-installed`,
+`kiosk-lock-task-features-unverified`); `ui/KioskConsoleLogic.kt` classifies them
+purely and the composable maps the classification to a resource. That keeps the
+codes language-neutral for logs and support, and keeps every displayed word under
+the parity check. An unrecognised code is shown verbatim rather than mapped onto
+a reassuring bucket.
+
+Layout uses Compose's logical `start`/`end` padding and `TextAlign.End`, so it
+mirrors under RTL without per-direction rules. Package names, URLs and origins
+are wrapped in U+2066/U+2069 (`ltrIsolated`) so they stay visually
+left-to-right inside a Hebrew paragraph; third-party application labels use
+first-strong isolation (`bidiIsolated`) because their language is unknown at
+build time. Neither icon used in this flow — a padlock, a globe — is
+directional, so neither is mirrored.
 
 ## Package and system-app policy
 
@@ -187,6 +351,41 @@ and the result is verified through the same `setApplicationHidden` /
 enabled kiosk on exactly the 0.4 code path, while guaranteeing one reconciliation
 pass that restores those packages after kiosk is switched off. The flag is only
 cleared after a pass that completed without errors.
+
+### Deferred: an administrator UI for `ADMIN_SELECTED_SYSTEM`
+
+`AllowedAppsStore.setAdminSelectedSystemPackages` exists, filters
+`ESSENTIAL_SYSTEM` on write, and is exercised by the policy engine. A console
+screen that writes it is nonetheless **deferred to a later release**, and 0.5
+ships no such screen.
+
+The backend guard is necessary but not sufficient. `ESSENTIAL_SYSTEM` is a
+curated catalogue of packages we know must survive; it is not, and cannot be, an
+exhaustive list of every package a given OEM build needs. Handing an
+administrator a list of *all* system packages with checkboxes invites hiding a
+vendor launcher, a vendor telephony shim, or an OEM-specific settings provider
+that is absent from the catalogue — and the resulting device is not repairable
+from the console, which is the exact failure mode the conservative model exists
+to prevent. Until there is a way to establish which system packages are safe on a
+given build, the honest answer is to keep the model conservative rather than to
+ship a screen whose worst case is a bricked classroom device.
+
+Operators who need a specific system app under allow/block control today can have
+the record written by a build that calls `setAdminSelectedSystemPackages`
+directly, with the risk accepted deliberately.
+
+### Management connectivity is presented, not configured
+
+The console has one read-only **Management connectivity** view. It lists each
+`ManagementPackage` record and states its pin status in as many words:
+*signing certificate pinned*, *no certificate pinned — trusted by name only*, or
+*not installed on this device*. The shipped Tailscale default is unpinned, and
+the view says so rather than implying the package was authenticated. Writing
+pins remains `AllowedAppsStore.setManagementCertificatePins`; the console does
+not expose it, because a mistyped digest fails closed and hides the management
+transport. `AllowedAppsActivity` now reads the excluded management packages from
+`LockdownPackages.managementPackageNames()` instead of a package-name literal, so
+the app list, the policy engine and the kiosk target rules exclude the same set.
 
 ## Critical management packages
 
@@ -236,7 +435,36 @@ be installed.
 | 33+ (13) | `PackageManager` queries use the `…Flags.of` overloads, matching the rest of the policy engine. |
 | 34+ (14) | Policy application is asynchronous; the existing bounded-retry verification in `configureBlockedBrowser` and `PolicyUpdateAuditReceiver` still apply. Kiosk adds no new assumption here. |
 
+## Recovery
+
+Before enabling kiosk on a device you cannot easily reach, make sure all three of
+these are true:
+
+1. The administrator PIN is known to more than one person.
+2. A current recovery code is stored somewhere outside the device.
+3. Somebody who will be near the device knows the corner gesture.
+
+Kiosk is not a state the device leaves on its own. A reboot returns to the kiosk
+target, an app update reasserts it, and every exit path requires an authenticated
+`AdminSession`. **Without the PIN and without the recovery code, the only way out
+is re-provisioning the device** — normally management removal or a factory reset
+followed by fresh provisioning, which destroys local data. That is the intended
+property, and it is why the activation screen is separate, confirmed, and states
+it before locking.
+
+If kiosk is active but its configuration has gone stale (target uninstalled, site
+policy tightened), the host lands in `FAULT` and shows a safe error screen rather
+than a launcher. The corner gesture still works there, because the error state is
+still the kiosk host and the DPC package is still on the Lock Task allowlist.
+
 ## What is not proven without a device
+
+Everything in this section is **unverified on real hardware**. Kiosk mode has not
+been tested on a Device Owner-provisioned handset, and no OEM build has been
+checked. Do not read the unit tests as hardware verification: they prove the
+pure rules — the state machine, the URL and origin rules, the target eligibility
+rules, the console's classification of every refusal — and nothing about what
+Android actually does when asked.
 
 The following require a Device Owner-provisioned handset and are **not** verified
 by the unit tests in this change:
@@ -252,4 +480,21 @@ by the unit tests in this change:
   and that no vendor-specific escape surface is missing from the catalogue.
 - That no OEM shortcut, gesture, or accessibility surface escapes Lock Task.
 - Real-world WebView behaviour of the containment rules against a specific school
-  portal, including whether the site works with third-party cookies disabled.
+  portal, including whether the site works with third-party cookies disabled, and
+  whether blocking cross-origin *subframe* navigation breaks it.
+- That `queryIntentActivities` under `MATCH_UNINSTALLED_PACKAGES |
+  MATCH_DISABLED_COMPONENTS` really does resolve a launcher entry point for a
+  package this DPC has hidden, on a given OEM build. The picker and the validator
+  both depend on it; if a build disagrees, a hidden app is refused as
+  `target:not-launchable` rather than being pinned incorrectly, so the failure is
+  safe but visible.
+- That `dpm.isLockTaskPermitted(dpcPackage)` returns false after
+  `setLockTaskPackages(admin, {})` on a given build. If some build reports the
+  device owner as implicitly permitted, `disableKiosk` would record
+  `kiosk-lock-task-release-unverified` on every policy pass of a kiosk-off
+  device, turning ordinary managed filtering into a reported failure. This is the
+  first thing to check on the pilot handset.
+- That the administrator corner gesture is reachable and that seven taps in three
+  seconds is the right balance on a real classroom display.
+- That `onRenderProcessGone` recovery leaves the kiosk host usable rather than
+  wedged.

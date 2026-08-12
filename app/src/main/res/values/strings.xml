@@ -159,8 +159,126 @@
     <string name="browser_blocked_subtitle">The protection policy of this device prevents browsers and web links from opening.</string>
     <string name="browser_blocked_message">To change this setting, contact the device administrator and enter an administrator PIN.</string>
 
+    <!-- Kiosk profile: console -->
+    <string name="admin_section_kiosk">Kiosk profile</string>
+    <string name="admin_kiosk_row">Operating profile</string>
+    <string name="admin_management_row">Management connectivity</string>
+    <string name="admin_management_supporting">Packages that keep working while protection is on</string>
+    <string name="kiosk_title">Operating profile</string>
+    <string name="kiosk_subtitle">Choose how this device behaves. Kiosk mode is never turned on by an update or by a reboot; it takes an explicit choice on this screen and an administrator PIN.</string>
+    <string name="kiosk_section_profile">Choose a profile</string>
+    <string name="kiosk_section_actions">Activation</string>
+    <string name="kiosk_profile_off">Managed app filtering</string>
+    <string name="kiosk_profile_off_summary">The allow and block lists only. No lock task, and the home screen is left alone.</string>
+    <string name="kiosk_profile_single_app">Single-app kiosk</string>
+    <string name="kiosk_profile_single_app_summary">The device is locked to exactly one application you choose.</string>
+    <string name="kiosk_profile_single_site">Single-site kiosk</string>
+    <string name="kiosk_profile_single_site_summary">The device is locked to a built-in browser confined to one HTTPS origin.</string>
+    <string name="kiosk_state_off">Not configured</string>
+    <string name="kiosk_state_armed">Configured, not locked yet</string>
+    <string name="kiosk_state_active">Active — the device is locked</string>
+    <string name="kiosk_state_fault">Configured but not usable</string>
+    <string name="kiosk_status_label_profile">Profile</string>
+    <string name="kiosk_status_label_state">State</string>
+    <string name="kiosk_status_label_target">Locked app</string>
+    <string name="kiosk_status_label_origin">Allowed origin</string>
+    <string name="kiosk_status_none">None</string>
+    <string name="kiosk_status_detail">Reason: %1$s</string>
+    <string name="kiosk_action_choose_app">Choose the locked app</string>
+    <string name="kiosk_action_choose_site">Set the locked website</string>
+    <string name="kiosk_action_activate">Lock this device now</string>
+    <string name="kiosk_action_exit">Exit kiosk and restore managed filtering</string>
+    <string name="kiosk_action_clear">Remove the kiosk configuration</string>
+    <string name="kiosk_action_working">Applying the kiosk profile…</string>
+    <string name="kiosk_back">Back to management</string>
+    <string name="kiosk_recovery_title">How an administrator gets back in</string>
+    <string name="kiosk_recovery_body">Tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
+
+    <!-- Kiosk profile: app picker -->
+    <string name="kiosk_app_title">Choose the locked app</string>
+    <string name="kiosk_app_subtitle">Only installed apps that a person can actually open are listed, including apps this policy currently hides.</string>
+    <string name="kiosk_app_note">Device Guard itself, essential system components, the management transport, and known escape surfaces such as file managers and document pickers are never offered, because pinning one of those would hand over the way out.</string>
+    <string name="kiosk_app_empty_title">No eligible app</string>
+    <string name="kiosk_app_empty_body">This device has no installed, launchable app that may be pinned as a kiosk target.</string>
+    <string name="kiosk_app_row_description">%1$s, package name %2$s, choose as the locked app</string>
+
+    <!-- Kiosk profile: site editor -->
+    <string name="kiosk_site_title">Set the locked website</string>
+    <string name="kiosk_site_subtitle">Enter one HTTPS address. Internationalized domains have to be entered in their punycode form, which starts with xn--.</string>
+    <string name="kiosk_site_field">Website address</string>
+    <string name="kiosk_site_opens">Opening address: %1$s</string>
+    <string name="kiosk_site_origin">Allowed origin: %1$s</string>
+    <string name="kiosk_site_boundary">A link that leaves %1$s is blocked and a short notice is shown. This is navigation containment, not a network firewall: a page on the allowed origin can still load scripts, images and data from other hosts, and anything it embeds can render remote content.</string>
+    <string name="kiosk_site_save">Save the website</string>
+
+    <!-- Kiosk profile: activation confirmation -->
+    <string name="kiosk_confirm_title">Lock this device?</string>
+    <string name="kiosk_confirm_subtitle">Activation takes effect immediately on the screen in front of whoever is holding this device.</string>
+    <string name="kiosk_confirm_app">The device will show only %1$s. Home, Overview, the notification shade, the keyguard and the power menu are suppressed while the lock holds.</string>
+    <string name="kiosk_confirm_site">The device will show only the website at %1$s. Home, Overview, the notification shade, the keyguard and the power menu are suppressed while the lock holds.</string>
+    <string name="kiosk_confirm_reboot">A reboot returns to this kiosk target instead of to a launcher, so restarting the device is not a way out.</string>
+    <string name="kiosk_confirm_cancel">Do not lock yet</string>
+
+    <!-- Kiosk profile: results and refusals -->
+    <string name="kiosk_saved">The kiosk profile is saved. The device is not locked until you activate it.</string>
+    <string name="kiosk_activated">Kiosk is active and the device is locked to the configured target.</string>
+    <string name="kiosk_exited">Kiosk is off. Managed app filtering is in force again.</string>
+    <string name="kiosk_cleared">The kiosk configuration was removed. This device runs managed app filtering only.</string>
+    <string name="kiosk_error_auth">The administrator session expired. Enter the PIN again to change the kiosk profile.</string>
+    <string name="kiosk_error_invalid">The kiosk configuration cannot be used: %1$s</string>
+    <string name="kiosk_error_not_configured">Save a kiosk profile before activating it.</string>
+    <string name="kiosk_error_not_active">Kiosk is not active on this device.</string>
+    <string name="kiosk_error_apply">The kiosk profile was recorded, but the device did not confirm every step: %1$s</string>
+    <string name="kiosk_error_refused">The kiosk request was refused (%1$s).</string>
+    <string name="kiosk_problem_target_not_selected">No app has been chosen yet.</string>
+    <string name="kiosk_problem_target_invalid_name">The stored value is not a valid Android package name.</string>
+    <string name="kiosk_problem_target_unresolved">The chosen app could not be read from this device.</string>
+    <string name="kiosk_problem_target_mismatch">The device answered about a different package than the one chosen.</string>
+    <string name="kiosk_problem_target_device_guard">Device Guard cannot lock itself.</string>
+    <string name="kiosk_problem_target_protected">That app is an essential system component, the management transport, or a known escape surface, so it may not be pinned.</string>
+    <string name="kiosk_problem_target_not_installed">The chosen app is no longer installed.</string>
+    <string name="kiosk_problem_target_not_enabled">The chosen app is disabled on this device.</string>
+    <string name="kiosk_problem_target_not_launchable">The chosen app has no screen a person can open.</string>
+    <string name="kiosk_problem_site_missing">No website address has been entered.</string>
+    <string name="kiosk_problem_site_scheme">The address has to start with https, because a kiosk target may not travel unencrypted.</string>
+    <string name="kiosk_problem_site_credentials">The address must not carry a user name or a password.</string>
+    <string name="kiosk_problem_site_host">The host name cannot be used. Give an ASCII name that contains a dot; an internationalized domain has to be entered in its punycode form.</string>
+    <string name="kiosk_problem_site_port">The port number is outside the allowed range.</string>
+    <string name="kiosk_problem_site_malformed">The address could not be read as one absolute HTTPS address.</string>
+    <string name="kiosk_problem_unknown">Unusable configuration (%1$s).</string>
+
+    <!-- Kiosk profile: the locked surface -->
+    <string name="kiosk_host_error_title">Kiosk mode is unavailable</string>
+    <string name="kiosk_host_not_configured">No valid kiosk configuration is stored on this device.</string>
+    <string name="kiosk_host_target_unavailable">The app configured for kiosk mode is unavailable. Contact the device administrator.</string>
+    <string name="kiosk_host_site_unavailable">The configured website could not be loaded. Check the network connection and try again.</string>
+    <string name="kiosk_host_tls">The secure connection to the website failed, so access was blocked.</string>
+    <string name="kiosk_host_blocked_navigation">Blocked: that destination is outside the configured website.</string>
+    <string name="kiosk_host_download_blocked">Downloads are blocked in kiosk mode.</string>
+    <string name="kiosk_host_renderer_gone">The browser view stopped responding and was closed safely. Try again.</string>
+    <string name="kiosk_host_retry">Try again</string>
+
+    <!-- Management connectivity -->
+    <string name="management_dialog_title">Management connectivity</string>
+    <string name="management_dialog_note">These packages keep working while protection is on. A package with no pinned signing certificate is trusted by package name alone: any app installed under that name inherits the exemption. Pin the release certificate\'s SHA-256 digest to close that gap.</string>
+    <string name="management_status_pinned">Signing certificate pinned</string>
+    <string name="management_status_unpinned">No certificate pinned — trusted by name only</string>
+    <string name="management_status_absent">Not installed on this device</string>
+
     <!-- Audit log -->
     <string name="audit_dialog_title">Administration audit log</string>
+    <string name="audit_empty">No administrative actions have been recorded yet.</string>
+    <string name="audit_kiosk_configured_off">Kiosk profile saved: managed app filtering only</string>
+    <string name="audit_kiosk_configured_app">Kiosk profile saved: single-app kiosk, locked app %1$s</string>
+    <string name="audit_kiosk_configured_site">Kiosk profile saved: single-site kiosk, allowed origin %1$s</string>
+    <string name="audit_kiosk_activated">Kiosk was activated</string>
+    <string name="audit_kiosk_activation_failed">Kiosk activation was refused: %1$s</string>
+    <string name="audit_kiosk_exited">Kiosk was exited and managed filtering was restored</string>
+    <string name="audit_kiosk_cleared">The kiosk configuration was removed</string>
+    <string name="audit_kiosk_restored">Kiosk was restored after a restart</string>
+    <string name="audit_kiosk_restore_failed">Kiosk could not be restored: %1$s</string>
+    <string name="audit_kiosk_fault">Kiosk cannot be honoured: %1$s</string>
+    <string name="audit_kiosk_admin_entry">Administrator entry was requested from the kiosk screen</string>
     <string name="audit_pin_set">The administrator PIN was set</string>
     <string name="audit_pin_replaced">The administrator PIN was replaced</string>
     <string name="audit_apply">The protection policy was applied or refreshed</string>

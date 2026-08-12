@@ -7,21 +7,21 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Build;
 import android.util.Log;
 
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskAction;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.policy.AuditLog;
-import com.example.lockdowndpc.policy.LockdownPackages;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.security.AdminSession;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Device-side owner of kiosk mode: authorization, lock task, and the controlled
@@ -38,6 +38,15 @@ public final class KioskController {
 
     /** Kiosk host, referenced by name to keep this package free of UI coupling. */
     static final String HOST_ACTIVITY = "com.example.lockdowndpc.kiosk.KioskHostActivity";
+
+    /**
+     * Package queries include hidden and disabled entries. A package this DPC
+     * currently hides still reports {@code FLAG_INSTALLED}, and it has to stay
+     * resolvable so an administrator can pin it and have the next policy pass
+     * unhide it.
+     */
+    private static final long TARGET_QUERY_FLAGS =
+            PackageManager.MATCH_UNINSTALLED_PACKAGES | PackageManager.MATCH_DISABLED_COMPONENTS;
 
     /** Boot restoration runs once per process, not once per activity recreation. */
     private static boolean bootRestoreAttempted;
@@ -56,8 +65,22 @@ public final class KioskController {
 
     // ---------------------------------------------------------------- requests
 
-    /** Stores a configuration and arms kiosk. Requires an unlocked admin session. */
-    public static synchronized Result requestConfigure(Context context, KioskConfig config) {
+    /**
+     * Stores a configuration and arms kiosk. Requires an unlocked admin session.
+     *
+     * <p>Arming is deliberately not locking. A saved profile changes nothing an
+     * end user can see; only {@link #requestEnter} takes the device.
+     *
+     * @param onPolicyReconciled run once the serialized policy pass this request
+     *                           queued has finished, or immediately when the
+     *                           request was refused before queueing one. May be
+     *                           {@code null}.
+     */
+    public static synchronized Result requestConfigure(
+            Context context,
+            KioskConfig config,
+            Runnable onPolicyReconciled
+    ) {
         Context app = context.getApplicationContext();
         KioskConfigValidator.Validation validation =
                 KioskConfigValidator.validate(config, resolveTarget(app, config.targetPackage()));
@@ -69,37 +92,80 @@ public final class KioskController {
                 validation.valid()
         ));
         if (!outcome.allowed()) {
-            return new Result(false, from, outcome.reason(), validation.errors());
+            return settle(
+                    new Result(false, from, outcome.reason(), validation.errors()),
+                    onPolicyReconciled
+            );
         }
         KioskConfigStore.writeConfig(app, config, validation.normalizedSiteUrl());
         KioskConfigStore.writeState(app, outcome.state(), "");
-        AuditLog.append(app, "תצורת קיוסק נשמרה: " + config.mode().name());
-        return applyNow(app, outcome.state(), outcome.reason());
+        auditConfigured(app, config, validation);
+        return applyNow(app, outcome.state(), outcome.reason(), onPolicyReconciled);
+    }
+
+    public static Result requestConfigure(Context context, KioskConfig config) {
+        return requestConfigure(context, config, null);
     }
 
     /** Enters lock task. Requires an unlocked admin session and a valid config. */
-    public static synchronized Result requestEnter(Context context) {
-        return requestTransition(context, KioskAction.ENTER, "כניסה למצב קיוסק");
+    public static synchronized Result requestEnter(Context context, Runnable onPolicyReconciled) {
+        return requestTransition(context, KioskAction.ENTER, onPolicyReconciled);
+    }
+
+    public static Result requestEnter(Context context) {
+        return requestEnter(context, null);
     }
 
     /** Leaves lock task. Requires an unlocked admin session. */
-    public static synchronized Result requestExit(Context context) {
-        return requestTransition(context, KioskAction.EXIT, "יציאה ממצב קיוסק");
+    public static synchronized Result requestExit(Context context, Runnable onPolicyReconciled) {
+        return requestTransition(context, KioskAction.EXIT, onPolicyReconciled);
+    }
+
+    public static Result requestExit(Context context) {
+        return requestExit(context, null);
     }
 
     /** Drops the kiosk configuration and returns to managed filtering only. */
-    public static synchronized Result requestClear(Context context) {
+    public static synchronized Result requestClear(Context context, Runnable onPolicyReconciled) {
         Context app = context.getApplicationContext();
         KioskState from = KioskConfigStore.readState(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
                 from, KioskAction.CLEAR, AdminSession.isUnlocked(), true
         ));
         if (!outcome.allowed()) {
-            return Result.denied(from, outcome.reason());
+            return settle(Result.denied(from, outcome.reason()), onPolicyReconciled);
         }
         KioskConfigStore.clear(app);
-        AuditLog.append(app, "תצורת קיוסק נמחקה");
-        return applyNow(app, KioskState.OFF, outcome.reason());
+        AuditLog.append(app, app.getString(R.string.audit_kiosk_cleared));
+        return applyNow(app, KioskState.OFF, outcome.reason(), onPolicyReconciled);
+    }
+
+    public static Result requestClear(Context context) {
+        return requestClear(context, null);
+    }
+
+    /**
+     * Records what was configured without recording anything sensitive.
+     *
+     * <p>A package name and an origin (scheme, host, effective port) are the
+     * identifiers an administrator needs in order to audit a change. The path,
+     * query and fragment of a single-site target are never written to the log:
+     * they routinely carry tokens, and the audit log is readable from the
+     * console by anyone holding the administrator PIN.
+     */
+    private static void auditConfigured(
+            Context app,
+            KioskConfig config,
+            KioskConfigValidator.Validation validation
+    ) {
+        switch (config.mode()) {
+            case SINGLE_APP -> AuditLog.append(app, app.getString(
+                    R.string.audit_kiosk_configured_app, config.targetPackage()));
+            case SINGLE_SITE -> AuditLog.append(app, app.getString(
+                    R.string.audit_kiosk_configured_site,
+                    validation.origin() == null ? "" : validation.origin().value()));
+            default -> AuditLog.append(app, app.getString(R.string.audit_kiosk_configured_off));
+        }
     }
 
     /**
@@ -133,10 +199,13 @@ public final class KioskController {
             return Result.denied(settings.state(), outcome.reason());
         }
         if (outcome.state() == KioskState.FAULT) {
-            AuditLog.append(app, "שחזור קיוסק נכשל: " + String.join(", ", validation.errors()));
+            AuditLog.append(app, app.getString(
+                    R.string.audit_kiosk_restore_failed, String.join(", ", validation.errors())));
+        } else {
+            AuditLog.append(app, app.getString(R.string.audit_kiosk_restored));
         }
         KioskConfigStore.writeState(app, outcome.state(), faultReason(validation));
-        return applyNow(app, outcome.state(), outcome.reason());
+        return applyNow(app, outcome.state(), outcome.reason(), null);
     }
 
     /**
@@ -153,11 +222,15 @@ public final class KioskController {
             return Result.denied(from, outcome.reason());
         }
         KioskConfigStore.writeState(app, KioskState.FAULT, reason);
-        AuditLog.append(app, "מצב קיוסק לא תקין: " + reason);
+        AuditLog.append(app, app.getString(R.string.audit_kiosk_fault, reason));
         return new Result(true, KioskState.FAULT, outcome.reason(), List.of());
     }
 
-    private static Result requestTransition(Context context, KioskAction action, String auditEvent) {
+    private static Result requestTransition(
+            Context context,
+            KioskAction action,
+            Runnable onPolicyReconciled
+    ) {
         Context app = context.getApplicationContext();
         KioskConfigValidator.Validation validation = validate(app);
         KioskState from = KioskConfigStore.readState(app);
@@ -165,11 +238,31 @@ public final class KioskController {
                 from, action, AdminSession.isUnlocked(), validation.valid()
         ));
         if (!outcome.allowed()) {
-            return new Result(false, from, outcome.reason(), validation.errors());
+            // A refused activation is the interesting audit event: it is what an
+            // administrator sees after a target was uninstalled, a session
+            // expired, or a stored configuration went stale.
+            if (action == KioskAction.ENTER) {
+                AuditLog.append(app, app.getString(
+                        R.string.audit_kiosk_activation_failed, outcome.reason()));
+            }
+            return settle(
+                    new Result(false, from, outcome.reason(), validation.errors()),
+                    onPolicyReconciled
+            );
         }
         KioskConfigStore.writeState(app, outcome.state(), "");
-        AuditLog.append(app, auditEvent);
-        return applyNow(app, outcome.state(), outcome.reason());
+        AuditLog.append(app, app.getString(action == KioskAction.ENTER
+                ? R.string.audit_kiosk_activated
+                : R.string.audit_kiosk_exited));
+        return applyNow(app, outcome.state(), outcome.reason(), onPolicyReconciled);
+    }
+
+    /** Returns {@code result} after releasing a caller that is waiting on a pass. */
+    private static Result settle(Result result, Runnable onPolicyReconciled) {
+        if (onPolicyReconciled != null) {
+            onPolicyReconciled.run();
+        }
+        return result;
     }
 
     // ------------------------------------------------------------- validation
@@ -179,37 +272,67 @@ public final class KioskController {
         return KioskConfigValidator.validate(config, resolveTarget(context, config.targetPackage()));
     }
 
-    /** Resolves what the device reports about a candidate single-app target. */
+    /**
+     * Resolves what the device reports about a candidate single-app target.
+     *
+     * <p>The protected-package decision is delegated to {@link KioskAppCatalog},
+     * which is the same rule the console picker filters with. That is what stops
+     * a kiosk escape surface — a file manager, a documents picker, the setup
+     * wizard — from being pinned as "the one allowed app" through a stale
+     * preference or a caller that never went through the picker.
+     */
     public static KioskAppTarget resolveTarget(Context context, String packageName) {
         if (packageName == null || packageName.isEmpty()) {
             return null;
         }
         PackageManager pm = context.getPackageManager();
         boolean deviceGuardItself = packageName.equals(context.getPackageName());
-        boolean essential = LockdownPackages.classify(packageName, Set.of())
-                == LockdownPackages.PackageClass.ESSENTIAL_SYSTEM_PACKAGE
-                || LockdownPackages.isManagementPackage(packageName);
+        boolean protectedPackage = KioskAppCatalog.isProtectedFromKiosk(packageName);
         ApplicationInfo info;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                info = pm.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0));
+                info = pm.getApplicationInfo(
+                        packageName, PackageManager.ApplicationInfoFlags.of(TARGET_QUERY_FLAGS));
             } else {
                 //noinspection deprecation
-                info = pm.getApplicationInfo(packageName, 0);
+                info = pm.getApplicationInfo(packageName, (int) TARGET_QUERY_FLAGS);
             }
         } catch (PackageManager.NameNotFoundException ignored) {
-            return new KioskAppTarget(packageName, false, false, false, essential, deviceGuardItself);
+            return new KioskAppTarget(
+                    packageName, false, false, false, protectedPackage, deviceGuardItself);
         }
         boolean installed = (info.flags & ApplicationInfo.FLAG_INSTALLED) != 0;
-        boolean launchable = pm.getLaunchIntentForPackage(packageName) != null;
         return new KioskAppTarget(
                 packageName,
                 installed,
                 info.enabled,
-                launchable,
-                essential,
+                isLaunchable(pm, packageName),
+                protectedPackage,
                 deviceGuardItself
         );
+    }
+
+    /**
+     * Whether {@code packageName} has an entry point a person can open.
+     *
+     * <p>Deliberately not {@code getLaunchIntentForPackage}: a package this DPC
+     * currently hides is invisible to that call, and an administrator must be
+     * able to select an app that today's allow/block list hides — pinning it as
+     * the kiosk target is exactly what unhides it on the next policy pass.
+     */
+    static boolean isLaunchable(PackageManager pm, String packageName) {
+        Intent launcher = new Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setPackage(packageName);
+        List<ResolveInfo> matches;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            matches = pm.queryIntentActivities(
+                    launcher, PackageManager.ResolveInfoFlags.of(TARGET_QUERY_FLAGS));
+        } else {
+            //noinspection deprecation
+            matches = pm.queryIntentActivities(launcher, (int) TARGET_QUERY_FLAGS);
+        }
+        return matches != null && !matches.isEmpty();
     }
 
     public static boolean isActive(Context context) {
@@ -218,13 +341,18 @@ public final class KioskController {
 
     // ------------------------------------------------------------ enforcement
 
-    private static Result applyNow(Context context, KioskState state, String reason) {
+    private static Result applyNow(
+            Context context,
+            KioskState state,
+            String reason,
+            Runnable onPolicyReconciled
+    ) {
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         ArrayList<String> errors = new ArrayList<>();
         if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
-            errors.add("קיוסק דורש Device Owner");
-            return new Result(false, state, "not-device-owner", errors);
+            errors.add("not-device-owner");
+            return settle(new Result(false, state, "not-device-owner", errors), onPolicyReconciled);
         }
         reconcile(context, dpm, admin, errors);
         // Package hiding stays owned by the policy engine. Entering kiosk has to
@@ -232,7 +360,15 @@ public final class KioskController {
         // full pass to the existing serialized reconciler instead of duplicating
         // setApplicationHidden here. It no-ops while protection is paused, which is
         // also the only state in which those packages were never hidden.
-        PolicyReconciliationCoordinator.reconcileAsync(context, "kiosk-state-change", null);
+        //
+        // Leaving kiosk also clears this package's persistent preferred
+        // activities, which takes the managed-filtering link handlers with it, so
+        // the pass below is what puts them back. A console caller waits on
+        // onPolicyReconciled rather than reporting success while that is still in
+        // flight. runGuarded always runs the completion, including when the pass
+        // is skipped because protection is paused.
+        PolicyReconciliationCoordinator.reconcileAsync(
+                context, "kiosk-state-change", onPolicyReconciled);
         return new Result(errors.isEmpty(), KioskConfigStore.readState(context), reason, errors);
     }
 
@@ -282,16 +418,16 @@ public final class KioskController {
                 KioskConfigStore.setHomeRegistered(context, false);
                 cleared = true;
             } catch (RuntimeException exception) {
-                errors.add("ניקוי מסך הבית של הקיוסק: " + exception.getClass().getSimpleName());
+                errors.add("kiosk-home-clear:" + exception.getClass().getSimpleName());
             }
         }
         try {
             dpm.setLockTaskPackages(admin, new String[0]);
             if (dpm.isLockTaskPermitted(context.getPackageName())) {
-                errors.add("ביטול נעילת המשימה לא אומת");
+                errors.add("kiosk-lock-task-release-unverified");
             }
         } catch (RuntimeException exception) {
-            errors.add("ביטול נעילת המשימה: " + exception.getClass().getSimpleName());
+            errors.add("kiosk-lock-task-release:" + exception.getClass().getSimpleName());
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
@@ -324,12 +460,12 @@ public final class KioskController {
         try {
             dpm.setLockTaskPackages(admin, allowlist);
         } catch (RuntimeException exception) {
-            errors.add("רשימת נעילת המשימה: " + exception.getClass().getSimpleName());
+            errors.add("kiosk-lock-task-packages:" + exception.getClass().getSimpleName());
             return;
         }
         for (String packageName : allowlist) {
             if (!dpm.isLockTaskPermitted(packageName)) {
-                errors.add("נעילת המשימה עבור " + packageName + " לא אומתה");
+                errors.add("kiosk-lock-task-not-permitted:" + packageName);
             }
         }
     }
@@ -348,10 +484,10 @@ public final class KioskController {
         try {
             dpm.setLockTaskFeatures(admin, features);
             if (dpm.getLockTaskFeatures(admin) != features) {
-                errors.add("מאפייני נעילת המשימה לא אומתו");
+                errors.add("kiosk-lock-task-features-unverified");
             }
         } catch (RuntimeException exception) {
-            errors.add("מאפייני נעילת המשימה: " + exception.getClass().getSimpleName());
+            errors.add("kiosk-lock-task-features:" + exception.getClass().getSimpleName());
         }
     }
 
@@ -369,7 +505,7 @@ public final class KioskController {
             dpm.addPersistentPreferredActivity(admin, filter, host);
             KioskConfigStore.setHomeRegistered(context, true);
         } catch (RuntimeException exception) {
-            errors.add("מסך הבית של הקיוסק: " + exception.getClass().getSimpleName());
+            errors.add("kiosk-home-register:" + exception.getClass().getSimpleName());
         }
     }
 
@@ -387,11 +523,11 @@ public final class KioskController {
                     component, state, PackageManager.DONT_KILL_APP
             );
             if (context.getPackageManager().getComponentEnabledSetting(component) != state) {
-                errors.add("רכיב מסך הקיוסק לא אומת");
+                errors.add("kiosk-host-component-unverified");
             }
         } catch (RuntimeException exception) {
             Log.e(TAG, "Kiosk host component update failed", exception);
-            errors.add("רכיב מסך הקיוסק: " + exception.getClass().getSimpleName());
+            errors.add("kiosk-host-component:" + exception.getClass().getSimpleName());
         }
     }
 

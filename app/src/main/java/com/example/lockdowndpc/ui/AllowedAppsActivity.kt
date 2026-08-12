@@ -79,7 +79,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-private const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
 private const val ICON_SIZE_DP = 40
 
 /**
@@ -455,7 +454,12 @@ private fun AppIcon(icon: ImageBitmap?) {
 /**
  * Mirrors the inventory rules of the previous implementation: every package that
  * is installed for this user or that we have managed before, minus system
- * packages, this DPC, Tailscale and the packages that are always blocked.
+ * packages, this DPC, the management transport and the packages that are always
+ * blocked.
+ *
+ * The management transport is read from [LockdownPackages.managementPackageNames]
+ * rather than from a package-name literal, so this list, the policy engine and
+ * the kiosk target rules all exclude exactly the same set.
  */
 private fun loadManagedApps(
     context: Context,
@@ -463,6 +467,7 @@ private fun loadManagedApps(
     iconSizePx: Int,
 ): LoadedApps {
     val pm = context.packageManager
+    val managementPackages = LockdownPackages.managementPackageNames()
     val allowed = AllowedAppsStore.getAllowedPackages(context)
     val configured = AllowedAppsStore.isAllowlistConfigured(context)
     val managed = AllowedAppsStore.getManagedPackages(context)
@@ -496,7 +501,7 @@ private fun loadManagedApps(
         val info = installedByPackage[packageName] ?: loadApplicationInfo(pm, packageName)
         val system = info != null &&
             info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-        if (system || packageName == context.packageName || packageName == TAILSCALE_PACKAGE) {
+        if (system || packageName == context.packageName || packageName in managementPackages) {
             continue
         }
         if (packageName in LockdownPackages.ALWAYS_BLOCKED ||

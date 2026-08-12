@@ -1,6 +1,5 @@
 package com.example.lockdowndpc.kiosk;
 
-import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ActivityOptions;
 import android.content.Intent;
@@ -19,6 +18,7 @@ import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceError;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -28,6 +28,10 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AppCompatActivity;
+
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.policy.AuditLog;
 
@@ -48,8 +52,14 @@ import com.example.lockdowndpc.policy.AuditLog;
  *
  * <p>The component is disabled in the manifest and enabled by
  * {@link KioskController} only while kiosk is active.
+ *
+ * <p>The base class is {@code AppCompatActivity} for the same reason as the
+ * console: below API 33 that is what applies the administrator's chosen display
+ * language to this activity's resources. A school that runs the console in
+ * Hebrew must not get an English kiosk error screen, and the choice itself is
+ * only reachable from the authenticated console, never from here.
  */
-public final class KioskHostActivity extends Activity {
+public final class KioskHostActivity extends AppCompatActivity {
 
     private static final String TAG = "KioskHost";
     private static final long RELAUNCH_COOLDOWN_MILLIS = 1_500L;
@@ -72,6 +82,22 @@ public final class KioskHostActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         buildViews();
+        // Back is handled through the dispatcher rather than by overriding
+        // onBackPressed: at targetSdk 33+ that override is no longer invoked for
+        // a back *gesture*, only for the legacy button, so a kiosk that relied on
+        // it would let a swipe reach behaviour this activity never sanctioned.
+        // The callback is permanently enabled, so back is always consumed here.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (webView != null
+                        && webView.getVisibility() == View.VISIBLE
+                        && webView.canGoBack()) {
+                    webView.goBack();
+                }
+                // Otherwise the gesture is swallowed. Back never leaves the host.
+            }
+        });
         // After a reboot the system starts HOME, which is this activity while
         // kiosk is active. Re-asserting here is what returns the device to its
         // configured target without any administrator interaction.
@@ -107,25 +133,16 @@ public final class KioskHostActivity extends Activity {
         }
         if (settings.state() == KioskState.FAULT || !validation.valid()) {
             showError(settings.config().mode() == KioskMode.SINGLE_SITE
-                    ? KioskStrings.ERROR_SITE_UNAVAILABLE
-                    : KioskStrings.ERROR_TARGET_UNAVAILABLE);
+                    ? getString(R.string.kiosk_host_site_unavailable)
+                    : getString(R.string.kiosk_host_target_unavailable));
             return;
         }
 
         switch (settings.config().mode()) {
             case SINGLE_SITE -> showSite(validation);
             case SINGLE_APP -> launchTarget(settings.config().targetPackage());
-            default -> showError(KioskStrings.ERROR_NOT_CONFIGURED);
+            default -> showError(getString(R.string.kiosk_host_not_configured));
         }
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (webView != null && webView.getVisibility() == View.VISIBLE && webView.canGoBack()) {
-            webView.goBack();
-            return;
-        }
-        // Back never leaves the kiosk host.
     }
 
     @Override
@@ -153,7 +170,7 @@ public final class KioskHostActivity extends Activity {
         errorView.setPadding(padding, padding, padding, padding);
 
         TextView title = new TextView(this);
-        title.setText(KioskStrings.ERROR_TITLE);
+        title.setText(R.string.kiosk_host_error_title);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f);
         title.setGravity(Gravity.CENTER);
         errorView.addView(title);
@@ -165,7 +182,7 @@ public final class KioskHostActivity extends Activity {
         errorView.addView(errorMessage);
 
         Button retry = new Button(this);
-        retry.setText(KioskStrings.RETRY);
+        retry.setText(R.string.kiosk_host_retry);
         retry.setOnClickListener(view -> render());
         errorView.addView(retry);
 
@@ -197,7 +214,7 @@ public final class KioskHostActivity extends Activity {
         target.setContentDescription(null);
         target.setOnClickListener(view -> {
             if (adminEntryGesture.onTap(SystemClock.elapsedRealtime())) {
-                AuditLog.append(this, "בקשת כניסת מנהל ממסך הקיוסק");
+                AuditLog.append(this, getString(R.string.audit_kiosk_admin_entry));
                 startActivity(KioskAdminEntry.consoleIntent(
                         this, KioskAdminEntry.SOURCE_KIOSK_GESTURE));
             }
@@ -285,7 +302,7 @@ public final class KioskHostActivity extends Activity {
             }
         });
         view.setDownloadListener((url, agent, disposition, mime, length) ->
-                showNotice(KioskStrings.ERROR_DOWNLOAD_BLOCKED));
+                showNotice(getString(R.string.kiosk_host_download_blocked)));
         view.setLongClickable(false);
         view.setOnLongClickListener(v -> true);
         return view;
@@ -307,14 +324,35 @@ public final class KioskHostActivity extends Activity {
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
             // Fail closed: never proceed through a TLS error.
             handler.cancel();
-            showError(KioskStrings.ERROR_TLS);
+            showError(getString(R.string.kiosk_host_tls));
         }
 
         @Override
         public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
             if (request != null && request.isForMainFrame()) {
-                showError(KioskStrings.ERROR_SITE_UNAVAILABLE);
+                showError(getString(R.string.kiosk_host_site_unavailable));
             }
+        }
+
+        @Override
+        public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+            // Without this the renderer taking itself down kills the whole
+            // process — and this process is HOME while kiosk holds, so the
+            // device would sit in a crash loop with no launcher behind it.
+            // Detach and destroy the dead WebView, then show the safe error
+            // state with a retry that builds a fresh one.
+            Log.e(TAG, "Kiosk WebView renderer gone; crashed="
+                    + (detail != null && detail.didCrash()));
+            if (webView == view) {
+                root.removeView(webView);
+                webView.destroy();
+                webView = null;
+                siteUrl = "";
+            } else if (view != null) {
+                view.destroy();
+            }
+            showError(getString(R.string.kiosk_host_renderer_gone));
+            return true;
         }
 
         private boolean blockIfOutsideOrigin(String url) {
@@ -323,7 +361,7 @@ public final class KioskHostActivity extends Activity {
                 return false;
             }
             Log.i(TAG, "Blocked kiosk navigation: " + verdict.reason());
-            showNotice(KioskStrings.ERROR_BLOCKED_NAVIGATION);
+            showNotice(getString(R.string.kiosk_host_blocked_navigation));
             return true;
         }
     }
@@ -335,12 +373,12 @@ public final class KioskHostActivity extends Activity {
         if (now - lastTargetLaunchAt < RELAUNCH_COOLDOWN_MILLIS) {
             // The target came straight back to us: treat it as unavailable rather
             // than spinning in a relaunch loop.
-            showError(KioskStrings.ERROR_TARGET_UNAVAILABLE);
+            showError(getString(R.string.kiosk_host_target_unavailable));
             return;
         }
         Intent launch = getPackageManager().getLaunchIntentForPackage(packageName);
         if (launch == null) {
-            showError(KioskStrings.ERROR_TARGET_UNAVAILABLE);
+            showError(getString(R.string.kiosk_host_target_unavailable));
             return;
         }
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -359,7 +397,7 @@ public final class KioskHostActivity extends Activity {
             errorView.setVisibility(View.GONE);
         } catch (RuntimeException exception) {
             Log.e(TAG, "Kiosk target launch failed", exception);
-            showError(KioskStrings.ERROR_TARGET_UNAVAILABLE);
+            showError(getString(R.string.kiosk_host_target_unavailable));
         }
     }
 

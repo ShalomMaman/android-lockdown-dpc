@@ -164,8 +164,126 @@
     <string name="browser_blocked_subtitle">מדיניות ההגנה של המכשיר מונעת פתיחת דפדפנים וקישורי \u2066Web\u2069.</string>
     <string name="browser_blocked_message">כדי לשנות את ההגדרה יש לפנות למנהל המכשיר ולהזין קוד מנהל.</string>
 
+    <!-- Kiosk profile: console -->
+    <string name="admin_section_kiosk">פרופיל קיוסק</string>
+    <string name="admin_kiosk_row">פרופיל ההפעלה</string>
+    <string name="admin_management_row">קישוריות ניהול</string>
+    <string name="admin_management_supporting">חבילות שממשיכות לפעול גם כשההגנה פעילה</string>
+    <string name="kiosk_title">פרופיל ההפעלה</string>
+    <string name="kiosk_subtitle">כאן נקבע כיצד המכשיר מתנהג. מצב קיוסק לעולם אינו מופעל על ידי עדכון או אתחול; הוא דורש בחירה מפורשת במסך הזה וקוד מנהל.</string>
+    <string name="kiosk_section_profile">בחירת פרופיל</string>
+    <string name="kiosk_section_actions">הפעלה</string>
+    <string name="kiosk_profile_off">סינון אפליקציות מנוהל</string>
+    <string name="kiosk_profile_off_summary">רשימות היתר וחסימה בלבד. אין נעילת משימה, ומסך הבית נשאר כפי שהוא.</string>
+    <string name="kiosk_profile_single_app">קיוסק אפליקציה יחידה</string>
+    <string name="kiosk_profile_single_app_summary">המכשיר ננעל על אפליקציה אחת בלבד שתבחרו.</string>
+    <string name="kiosk_profile_single_site">קיוסק אתר יחיד</string>
+    <string name="kiosk_profile_single_site_summary">המכשיר ננעל על דפדפן מובנה המוגבל למקור ⁦HTTPS⁩ אחד.</string>
+    <string name="kiosk_state_off">לא מוגדר</string>
+    <string name="kiosk_state_armed">מוגדר, עדיין לא נעול</string>
+    <string name="kiosk_state_active">פעיל — המכשיר נעול</string>
+    <string name="kiosk_state_fault">מוגדר אך אינו שמיש</string>
+    <string name="kiosk_status_label_profile">פרופיל</string>
+    <string name="kiosk_status_label_state">מצב</string>
+    <string name="kiosk_status_label_target">האפליקציה הנעולה</string>
+    <string name="kiosk_status_label_origin">המקור המותר</string>
+    <string name="kiosk_status_none">אין</string>
+    <string name="kiosk_status_detail">סיבה: %1$s</string>
+    <string name="kiosk_action_choose_app">בחירת האפליקציה הנעולה</string>
+    <string name="kiosk_action_choose_site">הגדרת האתר הנעול</string>
+    <string name="kiosk_action_activate">נעילת המכשיר עכשיו</string>
+    <string name="kiosk_action_exit">יציאה מקיוסק ושחזור הסינון המנוהל</string>
+    <string name="kiosk_action_clear">הסרת תצורת הקיוסק</string>
+    <string name="kiosk_action_working">מחיל את פרופיל הקיוסק…</string>
+    <string name="kiosk_back">חזרה לניהול</string>
+    <string name="kiosk_recovery_title">כיצד מנהל חוזר פנימה</string>
+    <string name="kiosk_recovery_body">יש להקיש שבע פעמים תוך שלוש שניות על פינת המסך העליונה בצד שממנו מתחיל הטקסט. פעולה זו פותחת את מסך הניהול הזה בשלב הזנת הקוד בלבד — היא אינה משחררת דבר בעצמה. יציאה מקיוסק או שינוי שלו תמיד דורשים את קוד המנהל, ולכן יש לשמור את קוד השחזור במקום בטוח. בלי קוד המנהל ובלי קוד השחזור, רק אתחול והקצאה מחדש של המכשיר יסירו את הקיוסק.</string>
+
+    <!-- Kiosk profile: app picker -->
+    <string name="kiosk_app_title">בחירת האפליקציה הנעולה</string>
+    <string name="kiosk_app_subtitle">מוצגות רק אפליקציות מותקנות שאדם יכול לפתוח בפועל, כולל אפליקציות שהמדיניות הנוכחית מסתירה.</string>
+    <string name="kiosk_app_note">⁦Device Guard⁩ עצמה, רכיבי מערכת חיוניים, ערוץ הניהול ומשטחי בריחה מוכרים כגון מנהלי קבצים ובוררי מסמכים לעולם אינם מוצעים, משום שנעילה על אחד מהם הייתה מוסרת את דרך היציאה.</string>
+    <string name="kiosk_app_empty_title">אין אפליקציה מתאימה</string>
+    <string name="kiosk_app_empty_body">לא נמצאה במכשיר אפליקציה מותקנת וניתנת להפעלה שאפשר לנעול עליה את הקיוסק.</string>
+    <string name="kiosk_app_row_description">%1$s, מזהה חבילה %2$s, בחירה כאפליקציה הנעולה</string>
+
+    <!-- Kiosk profile: site editor -->
+    <string name="kiosk_site_title">הגדרת האתר הנעול</string>
+    <string name="kiosk_site_subtitle">יש להזין כתובת ⁦HTTPS⁩ אחת. דומיין בין־לאומי חייב להיות מוזן בצורת ה־⁦punycode⁩ שלו, המתחילה ב־⁦xn--⁩.</string>
+    <string name="kiosk_site_field">כתובת האתר</string>
+    <string name="kiosk_site_opens">כתובת הפתיחה: %1$s</string>
+    <string name="kiosk_site_origin">המקור המותר: %1$s</string>
+    <string name="kiosk_site_boundary">קישור שיוצא מ־%1$s נחסם ומוצגת הודעה קצרה. זהו ריסון ניווט ולא חומת אש רשתית: דף במקור המותר עדיין יכול לטעון סקריפטים, תמונות ונתונים ממארחים אחרים, וכל תוכן שהוא מטמיע יכול להציג מידע מרוחק.</string>
+    <string name="kiosk_site_save">שמירת האתר</string>
+
+    <!-- Kiosk profile: activation confirmation -->
+    <string name="kiosk_confirm_title">לנעול את המכשיר?</string>
+    <string name="kiosk_confirm_subtitle">ההפעלה נכנסת לתוקף מיד, על המסך של מי שמחזיק את המכשיר ברגע זה.</string>
+    <string name="kiosk_confirm_app">המכשיר יציג רק את %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות, מסך הנעילה ותפריט ההפעלה מושבתים כל עוד הנעילה מחזיקה.</string>
+    <string name="kiosk_confirm_site">המכשיר יציג רק את האתר בכתובת %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות, מסך הנעילה ותפריט ההפעלה מושבתים כל עוד הנעילה מחזיקה.</string>
+    <string name="kiosk_confirm_reboot">אתחול מחזיר ליעד הקיוסק ולא למסך בית רגיל, ולכן הפעלה מחדש של המכשיר אינה דרך יציאה.</string>
+    <string name="kiosk_confirm_cancel">עדיין לא לנעול</string>
+
+    <!-- Kiosk profile: results and refusals -->
+    <string name="kiosk_saved">תצורת הקיוסק נשמרה. המכשיר אינו ננעל עד להפעלה מפורשת.</string>
+    <string name="kiosk_activated">הקיוסק פעיל והמכשיר נעול על היעד שהוגדר.</string>
+    <string name="kiosk_exited">הקיוסק כבוי. סינון האפליקציות המנוהל שוב בתוקף.</string>
+    <string name="kiosk_cleared">תצורת הקיוסק הוסרה. המכשיר מפעיל סינון אפליקציות מנוהל בלבד.</string>
+    <string name="kiosk_error_auth">תוקף הפעלת המנהל פג. יש להזין שוב את קוד המנהל כדי לשנות את פרופיל הקיוסק.</string>
+    <string name="kiosk_error_invalid">לא ניתן להשתמש בתצורת הקיוסק: %1$s</string>
+    <string name="kiosk_error_not_configured">יש לשמור פרופיל קיוסק לפני ההפעלה.</string>
+    <string name="kiosk_error_not_active">הקיוסק אינו פעיל במכשיר הזה.</string>
+    <string name="kiosk_error_apply">פרופיל הקיוסק נרשם, אך המכשיר לא אישר את כל השלבים: %1$s</string>
+    <string name="kiosk_error_refused">בקשת הקיוסק נדחתה (%1$s).</string>
+    <string name="kiosk_problem_target_not_selected">עדיין לא נבחרה אפליקציה.</string>
+    <string name="kiosk_problem_target_invalid_name">הערך השמור אינו מזהה חבילה תקין של ⁦Android⁩.</string>
+    <string name="kiosk_problem_target_unresolved">לא ניתן לקרוא מהמכשיר את האפליקציה שנבחרה.</string>
+    <string name="kiosk_problem_target_mismatch">המכשיר השיב על חבילה אחרת מזו שנבחרה.</string>
+    <string name="kiosk_problem_target_device_guard">⁦Device Guard⁩ אינה יכולה לנעול את עצמה.</string>
+    <string name="kiosk_problem_target_protected">האפליקציה הזאת היא רכיב מערכת חיוני, ערוץ הניהול או משטח בריחה מוכר, ולכן אי אפשר לנעול עליה.</string>
+    <string name="kiosk_problem_target_not_installed">האפליקציה שנבחרה אינה מותקנת עוד.</string>
+    <string name="kiosk_problem_target_not_enabled">האפליקציה שנבחרה מושבתת במכשיר.</string>
+    <string name="kiosk_problem_target_not_launchable">לאפליקציה שנבחרה אין מסך שאדם יכול לפתוח.</string>
+    <string name="kiosk_problem_site_missing">לא הוזנה כתובת אתר.</string>
+    <string name="kiosk_problem_site_scheme">הכתובת חייבת להתחיל ב־⁦https⁩, משום שיעד קיוסק אינו יכול לעבור ללא הצפנה.</string>
+    <string name="kiosk_problem_site_credentials">הכתובת אינה יכולה לשאת שם משתמש או סיסמה.</string>
+    <string name="kiosk_problem_site_host">לא ניתן להשתמש בשם המארח. יש להזין שם ב־⁦ASCII⁩ שמכיל נקודה; דומיין בין־לאומי חייב להיות מוזן בצורת ה־⁦punycode⁩ שלו.</string>
+    <string name="kiosk_problem_site_port">מספר הפורט מחוץ לטווח המותר.</string>
+    <string name="kiosk_problem_site_malformed">לא ניתן לקרוא את הכתובת ככתובת ⁦HTTPS⁩ מוחלטת אחת.</string>
+    <string name="kiosk_problem_unknown">תצורה בלתי שמישה (%1$s).</string>
+
+    <!-- Kiosk profile: the locked surface -->
+    <string name="kiosk_host_error_title">מצב קיוסק אינו זמין</string>
+    <string name="kiosk_host_not_configured">לא שמורה במכשיר הזה תצורת קיוסק תקפה.</string>
+    <string name="kiosk_host_target_unavailable">האפליקציה שהוגדרה לקיוסק אינה זמינה. יש לפנות למנהל המכשיר.</string>
+    <string name="kiosk_host_site_unavailable">לא ניתן לטעון את האתר שהוגדר. יש לבדוק את החיבור לרשת ולנסות שוב.</string>
+    <string name="kiosk_host_tls">החיבור המאובטח לאתר נכשל, ולכן הגישה נחסמה.</string>
+    <string name="kiosk_host_blocked_navigation">נחסם: היעד נמצא מחוץ לאתר שהוגדר.</string>
+    <string name="kiosk_host_download_blocked">הורדות חסומות במצב קיוסק.</string>
+    <string name="kiosk_host_renderer_gone">תצוגת הדפדפן הפסיקה להגיב ונסגרה באופן בטוח. יש לנסות שוב.</string>
+    <string name="kiosk_host_retry">נסו שוב</string>
+
+    <!-- Management connectivity -->
+    <string name="management_dialog_title">קישוריות ניהול</string>
+    <string name="management_dialog_note">החבילות האלה ממשיכות לפעול כל עוד ההגנה פעילה. חבילה שאין לה טביעת אצבע נעוצה של אישור חתימה נסמכת על שם החבילה בלבד: כל אפליקציה שתותקן תחת אותו שם יורשת את הפטור. כדי לסגור את הפער יש לנעוץ את טביעת האצבע ⁦SHA-256⁩ של אישור החתימה.</string>
+    <string name="management_status_pinned">אישור החתימה נעוץ</string>
+    <string name="management_status_unpinned">אין אישור נעוץ — אמון לפי שם בלבד</string>
+    <string name="management_status_absent">אינה מותקנת במכשיר הזה</string>
+
     <!-- Audit log -->
     <string name="audit_dialog_title">יומן פעולות ניהול</string>
+    <string name="audit_empty">עדיין אין פעולות מתועדות.</string>
+    <string name="audit_kiosk_configured_off">תצורת קיוסק נשמרה: סינון אפליקציות מנוהל בלבד</string>
+    <string name="audit_kiosk_configured_app">תצורת קיוסק נשמרה: קיוסק אפליקציה יחידה, האפליקציה הנעולה %1$s</string>
+    <string name="audit_kiosk_configured_site">תצורת קיוסק נשמרה: קיוסק אתר יחיד, המקור המותר %1$s</string>
+    <string name="audit_kiosk_activated">הקיוסק הופעל</string>
+    <string name="audit_kiosk_activation_failed">הפעלת הקיוסק נדחתה: %1$s</string>
+    <string name="audit_kiosk_exited">בוצעה יציאה מהקיוסק והסינון המנוהל שוחזר</string>
+    <string name="audit_kiosk_cleared">תצורת הקיוסק הוסרה</string>
+    <string name="audit_kiosk_restored">הקיוסק שוחזר לאחר הפעלה מחדש</string>
+    <string name="audit_kiosk_restore_failed">לא ניתן היה לשחזר את הקיוסק: %1$s</string>
+    <string name="audit_kiosk_fault">לא ניתן לקיים את הקיוסק: %1$s</string>
+    <string name="audit_kiosk_admin_entry">התבקשה כניסת מנהל ממסך הקיוסק</string>
     <string name="audit_pin_set">קוד המנהל הוגדר</string>
     <string name="audit_pin_replaced">קוד המנהל הוחלף</string>
     <string name="audit_apply">מדיניות ההגנה הופעלה או רועננה</string>

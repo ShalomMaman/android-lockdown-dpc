@@ -6,10 +6,11 @@
 
 Device Guard is an Android device-policy controller for fully managed, Device Owner deployments. It is designed for dedicated devices where an authorized administrator chooses which apps remain available and protects the policy with a local PIN.
 
-The app interface is currently Hebrew-first. The source code, build documentation, security model, and contribution workflow are maintained in English.
+The app interface is fully bilingual: English is the default locale and Hebrew is a complete translation, selectable from the authenticated console and mirrored for right-to-left layout. The source code, build documentation, security model, and contribution workflow are maintained in English.
 
 ## Features
 
+- Three explicit operating profiles: managed app filtering, single-app kiosk, and single-site kiosk. Kiosk is opt-in — an upgrade or a reboot never turns it on. See [`docs/kiosk-mode.md`](docs/kiosk-mode.md).
 - Blocklist and strict allowlist operating modes.
 - Built-in blocking for known browsers, app stores, and social-media apps.
 - HTTP/HTTPS link interception while protection is active.
@@ -22,8 +23,9 @@ The app interface is currently Hebrew-first. The source code, build documentatio
 - Synchronous verification of restrictions, package visibility, uninstall blocking, WebView availability, and link routing; Android 14+ policy callbacks provide additional asynchronous confirmation.
 - Keeps the system WebView provider available while blocking its browser UI when Chrome supplies the WebView engine.
 - Keeps the management app and Tailscale available and protected from removal.
-- Local administrative audit log.
+- Local administrative audit log, including kiosk configure, activation, refused activation, exit and restore events. It never records PINs, recovery codes, or the path, query or fragment of a kiosk website — a single-site event records the allowed origin only.
 - Signed self-update channel with daily checks, ECDSA metadata verification, APK hash/identity/version/signer verification, and silent Device Owner installation.
+- English and Hebrew UI with enforced locale parity: every key, plural category and format placeholder is checked in CI and by a standalone script, so a half-translated release fails the build instead of showing English inside a Hebrew screen.
 
 ## Requirements
 
@@ -37,6 +39,13 @@ The app interface is currently Hebrew-first. The source code, build documentatio
 export JAVA_HOME="/path/to/jdk-17"
 export ANDROID_HOME="/path/to/android-sdk"
 ./gradlew assembleDebug lintDebug test
+```
+
+Locale parity can also be checked without an Android SDK:
+
+```bash
+python3 tools/check_locale_parity.py
+python3 -m unittest discover -s tools -p 'test_*.py'
 ```
 
 ## Development provisioning
@@ -60,6 +69,7 @@ The fail-closed package-reconciliation design is documented in [`docs/package-re
 - Commercial deployments should use QR or USB provisioning after a factory reset and a documented signed-update process.
 - Do not enable `DISALLOW_DEBUGGING_FEATURES` until an independent management path has been tested, or remote recovery may become impossible.
 - Recovery reset or firmware flashing can remove any DPC. A serious threat model must also cover boot-chain integrity and physical access.
+- **Kiosk mode is unverified on hardware.** Nothing in 0.5.0 has been tested on a Device Owner-provisioned handset or on any OEM build. Before enabling kiosk on a device you cannot easily reach, confirm the administrator PIN is known to more than one person and a current recovery code is stored off the device: without either, the only way out of kiosk is re-provisioning, which destroys local data. The unverified assumptions are enumerated in [`docs/kiosk-mode.md`](docs/kiosk-mode.md#what-is-not-proven-without-a-device).
 
 ## Contributing
 
@@ -69,4 +79,18 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Status
 
-Pilot release: `0.4.1`.
+Pilot release: `0.5.0` (`versionCode 9`).
+
+`0.5.0` keeps the pilot `applicationId` and signer, so it updates the already provisioned pilot device in place.
+
+| Area | State |
+| --- | --- |
+| Managed app filtering (0.4 behaviour) | Unchanged when kiosk is off; covered by the existing JVM tests |
+| Administrator PIN, lockout, recovery code | Unchanged; covered by JVM tests |
+| English/Hebrew UI and RTL layout | Complete; parity enforced by `LocaleParityTest` and `tools/check_locale_parity.py` |
+| Kiosk state machine, URL and origin rules, target eligibility, console refusal handling | Pure logic, covered by JVM tests |
+| Kiosk console flow (profile, app picker, site editor, confirmation) | Implemented; **not** exercised on a device or an emulator |
+| Lock task, HOME takeover, escape-surface hiding, reboot restoration | **Unverified on hardware.** No Device Owner handset and no OEM build has been tested |
+| Production identity and external signing | Documented, unused by this build; no production secrets are configured |
+
+Kiosk mode should be treated as a pilot feature pending Device Owner testing.

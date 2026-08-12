@@ -69,8 +69,9 @@ public final class LockdownPackages {
      * below are protected even then.
      *
      * <p>This set is intentionally free of every package in
-     * {@link #ALWAYS_BLOCKED}; {@code LockdownPackagesTest} pins that so a future
-     * addition here cannot silently unblock a store or a browser.
+     * {@link #ALWAYS_BLOCKED} and {@link #KIOSK_ESCAPE_SURFACES};
+     * {@code ManagementPackageTest} pins that so a future addition here cannot
+     * silently unblock a store, a browser or an escape surface.
      */
     public static final Set<String> ESSENTIAL_SYSTEM = immutableSet(
             "android",
