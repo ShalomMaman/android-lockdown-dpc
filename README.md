@@ -11,8 +11,8 @@ The app interface is fully bilingual: English is the default locale and Hebrew i
 ## Features
 
 - Three explicit operating profiles: managed app filtering, single-app kiosk, and single-site kiosk. Kiosk is opt-in — an upgrade or a reboot never turns it on. See [`docs/kiosk-mode.md`](docs/kiosk-mode.md).
-- Blocklist and strict allowlist operating modes. Each keeps its own saved app list, so switching between them is reversible and never discards a curated selection.
-- Built-in blocking for known browsers, app stores, and social-media apps.
+- Blocklist and strict allowlist operating modes for third-party applications. Each keeps its own saved app list, so switching between them is reversible and never discards a curated selection.
+- Built-in blocking for known browsers, app stores, and social-media apps. Pilot 0.5.1 does not yet expose arbitrary system applications in the administrator picker; see [`docs/production-roadmap.md`](docs/production-roadmap.md).
 - HTTP/HTTPS link interception while protection is active.
 - A 6–12 digit administrator PIN with progressive throttling and lockout.
 - A one-time recovery code stored only as a protected verifier.
@@ -69,7 +69,7 @@ Open Device Guard, set an administrator PIN, store the recovery code securely, s
 
 ## Security and deployment
 
-The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md). What an independent UI, localization and kiosk-administration review found, what changed, and what remains unproven without hardware are recorded in [`docs/ui-qa-remediation.md`](docs/ui-qa-remediation.md).
+The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md). What an independent UI, localization and kiosk-administration review found, what changed, and what remains unproven without hardware are recorded in [`docs/ui-qa-remediation.md`](docs/ui-qa-remediation.md). The exact Pilot 0.5.1 boundary and the planned system-app, system-policy and maintenance-mode work are recorded in [`docs/production-roadmap.md`](docs/production-roadmap.md).
 
 - Never commit an APK-signing key, metadata-signing key, administrator PIN, recovery code, or device credential.
 - A normal build retains the pilot identity and development signer but embeds no update channel. The explicit pilot-channel command above is required for a remotely updatable pilot artifact. The separate production identity and external-signing flow are documented in [`docs/production-release.md`](docs/production-release.md).
@@ -97,6 +97,8 @@ Pilot release candidate: `0.5.1` (`versionCode 10`).
 | English/Hebrew UI and RTL layout | Complete; parity enforced by `LocaleParityTest` and `tools/check_locale_parity.py` |
 | Kiosk state machine, URL and origin rules, target eligibility, console refusal handling | Pure logic, covered by JVM tests |
 | Kiosk console flow (profile, app picker, site editor, confirmation) | Implemented; **not** exercised on a device or an emulator |
+| Arbitrary system-application selection | Backend classification exists; **administrator UI is not implemented** |
+| Developer-options and ADB restriction | Deliberately disabled for pilot break-glass recovery; planned before production |
 | Lock task, HOME takeover, escape-surface hiding, reboot restoration | **Unverified on hardware.** No Device Owner handset and no OEM build has been tested |
 | Production identity and external signing | Documented, unused by this build; no production secrets are configured |
 
