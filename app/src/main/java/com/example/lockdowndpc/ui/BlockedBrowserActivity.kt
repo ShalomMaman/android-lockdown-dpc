@@ -2,10 +2,10 @@ package com.example.lockdowndpc.ui
 
 import android.graphics.Color
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,8 +28,13 @@ import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 
-/** Safe destination for HTTP and HTTPS intents while browser access is blocked. */
-class BlockedBrowserActivity : ComponentActivity() {
+/**
+ * Safe destination for HTTP and HTTPS intents while browser access is blocked.
+ *
+ * `AppCompatActivity` is the base class so this screen honours the persisted
+ * display language on API levels below 33, like the rest of the console.
+ */
+class BlockedBrowserActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(

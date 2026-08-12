@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.ui.theme.LockdownStatusColors
 
@@ -174,17 +175,29 @@ internal fun PolicyStatusCard(
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider(color = style.content.copy(alpha = 0.20f))
                 facts.forEach { (label, value) ->
+                    // The label takes the leftover width so it wraps instead of
+                    // colliding with the value: English labels are longer than the
+                    // Hebrew ones this card was laid out for, and both grow again
+                    // at large font scales. `TextAlign.End` is resolved against the
+                    // layout direction, so the value stays on the trailing edge in
+                    // either direction.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
                         Text(
                             text = value,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.End,
                         )
                     }
                 }
@@ -363,7 +376,10 @@ internal fun ActionRow(
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.size(16.dp))
-        Column(modifier = Modifier.fillMaxWidth()) {
+        // `weight` rather than `fillMaxWidth`: filling the row's max width pushes
+        // the text past the trailing edge instead of wrapping it, which the longer
+        // English titles and large font scales both hit.
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,

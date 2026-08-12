@@ -7,10 +7,10 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -60,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -85,8 +86,11 @@ private const val ICON_SIZE_DP = 40
  * Selection of the managed applications. The inventory rules, the default
  * selection and what gets persisted are unchanged; the list is now searchable and
  * the save action is pinned to the bottom of the screen.
+ *
+ * `AppCompatActivity` is the base class for the same localization reason as
+ * [MainActivity]: below API 33 it is what applies the persisted display language.
  */
-class AllowedAppsActivity : ComponentActivity() {
+class AllowedAppsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -317,8 +321,11 @@ private fun SaveBar(
                     .padding(horizontal = 20.dp, vertical = 14.dp),
             ) {
                 Text(
-                    text = stringResource(
-                        R.string.apps_selected_count,
+                    // Hebrew inflects the verb for one, two and many selections,
+                    // so the counter is a plural rather than one format string.
+                    text = pluralStringResource(
+                        R.plurals.apps_selected_count,
+                        selectedCount,
                         selectedCount,
                         totalCount,
                     ),
@@ -396,14 +403,18 @@ private fun AppRow(
         Spacer(Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = entry.label,
+                // A third-party label can be in any language, so it is isolated
+                // without forcing a direction and is allowed a second line at
+                // large font scales.
+                text = entry.label.bidiIsolated(),
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                // Package names are Latin identifiers inside a right-to-left
-                // paragraph, so they are isolated to keep the dots in place.
+                // Package names are Latin identifiers that may sit inside a
+                // right-to-left paragraph, so they are isolated left-to-right to
+                // keep the dot-separated segments in order.
                 text = entry.packageName.ltrIsolated(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,

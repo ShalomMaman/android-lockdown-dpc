@@ -2,6 +2,7 @@ package com.example.lockdowndpc.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -70,5 +71,85 @@ class UiLogicTest {
         assertEquals(LTR_ISOLATE, isolated.first())
         assertEquals(POP_ISOLATE, isolated.last())
         assertEquals("com.example.app", isolated.substring(1, isolated.length - 1))
+    }
+
+    @Test
+    fun ltrIsolated_leavesAnEmptyValueAlone() {
+        // An empty package name or code would otherwise become two stray marks
+        // that a screen reader still has to walk over.
+        assertEquals("", "".ltrIsolated())
+    }
+
+    @Test
+    fun bidiIsolated_wrapsInFirstStrongIsolate() {
+        val isolated = "מדיניות com.example.app".bidiIsolated()
+        assertEquals(FIRST_STRONG_ISOLATE, isolated.first())
+        assertEquals(POP_ISOLATE, isolated.last())
+        assertEquals("מדיניות com.example.app", isolated.trim(*ISOLATE_MARKS))
+    }
+
+    @Test
+    fun bidiIsolated_leavesAnEmptyValueAlone() {
+        assertEquals("", "".bidiIsolated())
+    }
+
+    @Test
+    fun bidiIsolatedLines_isolatesEachLineSeparately() {
+        val isolated = bidiIsolatedLines("12/08/26 — הופעלה\n12/08/26 — SecurityException")
+        val lines = isolated.split("\n")
+        assertEquals(2, lines.size)
+        lines.forEach { line ->
+            assertEquals(FIRST_STRONG_ISOLATE, line.first())
+            assertEquals(POP_ISOLATE, line.last())
+        }
+    }
+
+    @Test
+    fun languageChoice_defaultsToTheSystemLocale() {
+        // The shipped default follows the system, so a Hebrew device is never
+        // silently switched to English.
+        assertEquals(LanguageChoice.SYSTEM, languageChoiceOf(""))
+        assertEquals(LanguageChoice.SYSTEM, languageChoiceOf("   "))
+    }
+
+    @Test
+    fun languageChoice_readsEnglishAndHebrewTags() {
+        assertEquals(LanguageChoice.ENGLISH, languageChoiceOf("en"))
+        assertEquals(LanguageChoice.ENGLISH, languageChoiceOf("en-US"))
+        assertEquals(LanguageChoice.HEBREW, languageChoiceOf("he"))
+        assertEquals(LanguageChoice.HEBREW, languageChoiceOf("he-IL"))
+    }
+
+    @Test
+    fun languageChoice_acceptsTheLegacyHebrewCode() {
+        // java.util.Locale still reports Hebrew as "iw", which is also why the
+        // resource folder is res/values-iw.
+        assertEquals(LanguageChoice.HEBREW, languageChoiceOf("iw"))
+        assertEquals(LanguageChoice.HEBREW, languageChoiceOf("iw-IL"))
+    }
+
+    @Test
+    fun languageChoice_usesTheFirstTagOfAList() {
+        assertEquals(LanguageChoice.HEBREW, languageChoiceOf("he-IL,en-US"))
+    }
+
+    @Test
+    fun languageChoice_fallsBackToTheSystemForAnUntranslatedLanguage() {
+        assertEquals(LanguageChoice.SYSTEM, languageChoiceOf("ar"))
+        assertEquals(LanguageChoice.SYSTEM, languageChoiceOf("fr-CA"))
+    }
+
+    @Test
+    fun languageTag_roundTripsEveryChoice() {
+        LanguageChoice.entries.forEach { choice ->
+            assertEquals(choice, languageChoiceOf(languageTagOf(choice).orEmpty()))
+        }
+    }
+
+    @Test
+    fun languageTag_followsTheSystemWithoutATag() {
+        assertNull(languageTagOf(LanguageChoice.SYSTEM))
+        assertEquals("en", languageTagOf(LanguageChoice.ENGLISH))
+        assertEquals("he", languageTagOf(LanguageChoice.HEBREW))
     }
 }

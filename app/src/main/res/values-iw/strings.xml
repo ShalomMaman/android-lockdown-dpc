@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew translation.
+
+    The folder qualifier is "iw", not "he": Android matches resource folders
+    against java.util.Locale#getLanguage(), which still returns the legacy code
+    "iw" for Hebrew on every supported API level. res/xml/locales_config.xml uses
+    the modern BCP-47 tag "he" because the platform locale picker parses that file
+    with Locale#forLanguageTag; both resolve to this folder.
+
+    Latin runs inside a Hebrew sentence (brand names, technical terms) are wrapped
+    in U+2066 LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE so the
+    Unicode bidi algorithm cannot drag the surrounding punctuation to the wrong
+    side. Runtime values are isolated in code instead; see ui/UiLogic.kt.
+
+    Keys, plural categories, and format placeholders are kept in parity with
+    res/values/strings.xml by LocaleParityTest.kt and tools/check_locale_parity.py.
+-->
+<resources>
+    <string name="app_name">מגן המכשיר</string>
+    <string name="admin_label">ניהול והגנת המכשיר</string>
+    <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
+    <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
+    <plurals name="policy_applied">
+        <item quantity="one">ההגנה פעילה ומאומתת. נחסמה אפליקציה אחת.</item>
+        <item quantity="two">ההגנה פעילה ומאומתת. נחסמו שתי אפליקציות.</item>
+        <item quantity="other">ההגנה פעילה ומאומתת. נחסמו %1$d אפליקציות.</item>
+    </plurals>
+    <string name="policy_failed">ההגנה לא הופעלה במלואה ולכן אינה מסומנת כפעילה.\nפרט ראשון: %1$s</string>
+    <string name="configured">מוגדרת</string>
+    <string name="configuration_required">נדרשת הגדרה</string>
+    <string name="active">פעיל</string>
+    <string name="not_configured">לא מוגדר</string>
+
+    <!-- Shared actions -->
+    <string name="action_save">שמירה</string>
+    <string name="action_cancel">ביטול</string>
+    <string name="action_close">סגירה</string>
+    <string name="action_back">חזרה</string>
+    <string name="error_unknown">שגיאה לא ידועה</string>
+
+    <!-- Status card -->
+    <string name="status_headline_active">ההגנה פעילה ומאומתת</string>
+    <string name="status_headline_applying">ההגנה בתהליך החלה</string>
+    <string name="status_headline_failed">ההגנה נכשלה — נדרש רענון</string>
+    <string name="status_headline_inactive">ההגנה טרם הופעלה</string>
+    <string name="status_label_admin">ניהול מערכת</string>
+    <string name="status_label_apps">רשימת אפליקציות</string>
+    <string name="status_detail">פרט: %1$s</string>
+
+    <!-- Enrollment -->
+    <string name="enrollment_title">נדרשת הפעלת ניהול מלא</string>
+    <string name="enrollment_subtitle">האפליקציה הותקנה, אך עדיין אינה יכולה לאכוף חסימות. טכנאי השירות צריך להשלים הרשמה מאובטחת באמצעות QR או USB.</string>
+    <string name="enrollment_note">לאחר השלמת ההרשמה ניתן יהיה להגדיר קוד מנהל ולבחור את שיטת החסימה.</string>
+
+    <!-- PIN setup -->
+    <string name="pin_setup_title">הגדרת קוד מנהל</string>
+    <string name="pin_setup_title_replace">שינוי קוד מנהל</string>
+    <string name="pin_setup_subtitle">יש לבחור קוד בן 6 עד 12 ספרות. הקוד יידרש לשינוי הרשימה או להשהיית ההגנה.</string>
+    <string name="pin_setup_field_new">קוד מנהל חדש</string>
+    <string name="pin_setup_field_confirm">אימות הקוד</string>
+    <string name="pin_setup_save">שמירת הקוד והמשך</string>
+    <string name="pin_setup_save_replace">שמירת הקוד החדש</string>
+    <string name="pin_error_format">הקוד חייב להכיל 6 עד 12 ספרות.</string>
+    <string name="pin_error_mismatch">שני הקודים אינם זהים.</string>
+    <string name="pin_error_save">לא ניתן לשמור את הקוד במכשיר.</string>
+
+    <!-- Locked -->
+    <string name="locked_title">ניהול ההגנה</string>
+    <string name="locked_subtitle">הגדרות המכשיר נעולות. יש להזין את קוד המנהל כדי לבצע שינויים.</string>
+    <string name="locked_field_pin">קוד מנהל</string>
+    <string name="locked_unlock">כניסה לניהול</string>
+    <string name="pin_error_invalid">קוד מנהל שגוי.</string>
+    <string name="pin_error_verify">לא ניתן לאמת את הקוד. יש לפנות למנהל המכשיר.</string>
+    <plurals name="lockout_seconds">
+        <item quantity="one">יותר מדי ניסיונות. ניתן לנסות שוב בעוד שנייה אחת.</item>
+        <item quantity="two">יותר מדי ניסיונות. ניתן לנסות שוב בעוד שתי שניות.</item>
+        <item quantity="other">יותר מדי ניסיונות. ניתן לנסות שוב בעוד %1$d שניות.</item>
+    </plurals>
+    <plurals name="lockout_minutes">
+        <item quantity="one">יותר מדי ניסיונות. ניתן לנסות שוב בעוד דקה אחת.</item>
+        <item quantity="two">יותר מדי ניסיונות. ניתן לנסות שוב בעוד שתי דקות.</item>
+        <item quantity="other">יותר מדי ניסיונות. ניתן לנסות שוב בעוד %1$d דקות.</item>
+    </plurals>
+
+    <!-- Admin console -->
+    <string name="admin_subtitle_allow">רק אפליקציות שנבחרו במפורש יהיו זמינות בזמן ההגנה.</string>
+    <string name="admin_subtitle_block">האפליקציות שתסומנו ייחסמו בזמן ההגנה; שאר האפליקציות יישארו פעילות.</string>
+    <string name="admin_apply">הפעלת ההגנה</string>
+    <string name="admin_apply_refresh">שמירה ורענון ההגנה</string>
+    <string name="admin_policy_working">מאמת את מדיניות ההגנה…</string>
+    <string name="admin_section_protection">הגדרות הגנה</string>
+    <string name="admin_section_access">אבטחת גישה</string>
+    <string name="admin_section_records">תיעוד ובקרה</string>
+    <string name="admin_section_updates">עדכוני מערכת</string>
+    <string name="admin_section_display">תצוגה</string>
+    <string name="admin_mode_row">שיטת החסימה</string>
+    <string name="admin_choose_allow">בחירת אפליקציות מותרות</string>
+    <string name="admin_choose_block">בחירת אפליקציות לחסימה</string>
+    <string name="admin_choose_supporting">עריכת הרשימה השמורה במכשיר</string>
+    <string name="admin_pause">השהיית ההגנה</string>
+    <string name="admin_pause_supporting">שחרור החסימות עד להפעלה מחדש</string>
+    <string name="admin_change_pin">שינוי קוד מנהל</string>
+    <string name="admin_new_recovery">יצירת קוד שחזור חדש</string>
+    <string name="admin_new_recovery_supporting">הקוד הקודם יתבטל מיד</string>
+    <string name="admin_audit">יומן פעולות ניהול</string>
+    <string name="admin_lock">נעילת מסך הניהול</string>
+    <string name="update_check_title">בדיקת עדכון מאובטח</string>
+    <string name="update_checking_title">בודק עדכון חתום…</string>
+    <string name="update_installing_title">מתקין עדכון מאומת…</string>
+    <string name="update_failed_title">בדיקת העדכון נכשלה</string>
+    <string name="update_ready_supporting">הבדיקה מתבצעת אוטומטית פעם ביום, וניתן להפעיל אותה גם עכשיו.</string>
+    <string name="update_disabled_title">עדכונים מרחוק אינם מוגדרים</string>
+    <string name="update_disabled_supporting">יש להגדיר כתובת עדכונים ומפתח אימות בזמן בניית גרסת השירות.</string>
+    <string name="admin_help_allow">\u2066Tailscale\u2069 ורכיבי המערכת החיוניים נשמרים תמיד. אפליקציה חדשה תיחסם עד לאישור מנהל.</string>
+    <string name="admin_help_block">\u2066Tailscale\u2069 ורכיבי המערכת החיוניים נשמרים תמיד. התקנות חדשות דורשות אישור מנהל.</string>
+    <string name="admin_error_recovery">לא ניתן ליצור קוד שחזור במכשיר.</string>
+    <string name="admin_error_allowlist">לפני ההפעלה יש לבחור ולשמור את רשימת האפליקציות.</string>
+    <string name="admin_pause_failed">השהיית ההגנה לא אומתה: %1$s</string>
+    <string name="admin_pause_ok">ההגנה הושהתה ואומתה. מסך הניהול נשאר נעול בקוד.</string>
+
+    <!-- Mode picker -->
+    <string name="mode_dialog_title">בחירת שיטת חסימה</string>
+    <string name="mode_option_block">חסום רק אפליקציות שסומנו</string>
+    <string name="mode_option_allow">אפשר רק אפליקציות שסומנו</string>
+    <string name="mode_label_allow">רק אפליקציות מותרות</string>
+    <string name="mode_label_block">חסימת אפליקציות מסומנות</string>
+
+    <!-- Display language -->
+    <string name="language_row_title">שפת התצוגה</string>
+    <string name="language_dialog_title">בחירת שפת תצוגה</string>
+    <string name="language_option_system">ברירת המחדל של המערכת</string>
+    <string name="language_dialog_note">שינוי השפה טוען מחדש את מסך הניהול, ולכן יידרש להזין שוב את קוד המנהל.</string>
+
+    <!-- Recovery code -->
+    <string name="recovery_title">קוד שחזור חד־פעמי</string>
+    <string name="recovery_subtitle">יש למסור את הקוד רק למנהל האחראי ולשמור אותו במקום בטוח. יצירת קוד חדש מבטלת את הקוד הקודם.</string>
+    <string name="recovery_warning">הקוד יוצג רק במסך הזה. לאחר שימוש בו יהיה חובה להגדיר קוד מנהל חדש.</string>
+    <string name="recovery_ack">רשמתי את הקוד</string>
+    <string name="recovery_code_description">קוד שחזור: %1$s</string>
+
+    <!-- Allowed apps -->
+    <string name="apps_title_allow">בחירת אפליקציות מותרות</string>
+    <string name="apps_title_block">בחירת אפליקציות לחסימה</string>
+    <string name="apps_note_allow">אפליקציות מערכת חיוניות נשארות פעילות. אפליקציה חיצונית שלא תיבחר תוסתר.</string>
+    <string name="apps_note_block">יש לסמן את האפליקציות שרוצים לחסום. דפדפנים, חנויות ורשתות חברתיות מוכרות נחסמים תמיד.</string>
+    <string name="apps_search">חיפוש אפליקציה</string>
+    <string name="apps_search_clear">ניקוי החיפוש</string>
+    <plurals name="apps_selected_count">
+        <item quantity="one">נבחרה אפליקציה אחת מתוך %2$d</item>
+        <item quantity="two">נבחרו שתי אפליקציות מתוך %2$d</item>
+        <item quantity="other">נבחרו %1$d מתוך %2$d</item>
+    </plurals>
+    <string name="apps_save">שמירת הרשימה</string>
+    <string name="apps_loading">טוען את רשימת האפליקציות…</string>
+    <string name="apps_empty_title">אין אפליקציות לניהול</string>
+    <string name="apps_empty_body">לא נמצאו במכשיר אפליקציות חיצוניות שניתן לנהל ברשימה הזאת.</string>
+    <string name="apps_no_results_title">אין תוצאות חיפוש</string>
+    <string name="apps_no_results_body">לא נמצאה אפליקציה שמתאימה למילות החיפוש.</string>
+    <string name="apps_row_description">%1$s, מזהה חבילה %2$s</string>
+
+    <!-- Blocked web destination -->
+    <string name="browser_blocked_title">הגישה לקישורי אינטרנט חסומה</string>
+    <string name="browser_blocked_subtitle">מדיניות ההגנה של המכשיר מונעת פתיחת דפדפנים וקישורי \u2066Web\u2069.</string>
+    <string name="browser_blocked_message">כדי לשנות את ההגדרה יש לפנות למנהל המכשיר ולהזין קוד מנהל.</string>
+
+    <!-- Audit log -->
+    <string name="audit_dialog_title">יומן פעולות ניהול</string>
+    <string name="audit_pin_set">קוד המנהל הוגדר</string>
+    <string name="audit_pin_replaced">קוד המנהל הוחלף</string>
+    <string name="audit_apply">מדיניות ההגנה הופעלה או רועננה</string>
+    <string name="audit_pause">מדיניות ההגנה הושהתה</string>
+    <string name="audit_recovery">נוצר קוד שחזור חדש</string>
+    <string name="audit_mode_allow">נבחר מצב: רק אפליקציות מותרות</string>
+    <string name="audit_mode_block">נבחר מצב: חסימת אפליקציות מסומנות</string>
+    <string name="audit_apps_saved">רשימת האפליקציות נשמרה</string>
+</resources>

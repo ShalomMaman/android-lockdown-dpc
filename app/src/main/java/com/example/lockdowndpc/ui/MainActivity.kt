@@ -7,10 +7,10 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Pause
@@ -90,8 +91,12 @@ import kotlinx.coroutines.withContext
  * Administrator console. The screen sequence, the three minute admin session and
  * the FLAG_SECURE rules are the same as the programmatic View implementation this
  * replaced; only the presentation moved to Compose.
+ *
+ * The base class is `AppCompatActivity` purely for localization: below API 33 that
+ * is what applies the persisted display language to the activity resources. See
+ * [AppLocales].
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -184,13 +189,20 @@ private fun initialScreen(context: Context): ConsoleScreen {
     return ConsoleScreen.LOCKED
 }
 
+/**
+ * The retry guidance is a plural: English needs one/other and Hebrew additionally
+ * needs the dual form (`שנייה אחת` / `שתי שניות` / `%d שניות`), which a single
+ * format string cannot express. `getQuantityString` takes an `Int`, so the rounded
+ * delay is clamped rather than truncated.
+ */
 private fun lockoutText(context: Context, remainingMillis: Long): String {
     val delay = lockoutDelayOf(remainingMillis)
     val template = when (delay.unit) {
-        LockoutUnit.SECONDS -> R.string.lockout_seconds
-        LockoutUnit.MINUTES -> R.string.lockout_minutes
+        LockoutUnit.SECONDS -> R.plurals.lockout_seconds
+        LockoutUnit.MINUTES -> R.plurals.lockout_minutes
     }
-    return context.getString(template, delay.amount)
+    val amount = delay.amount.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+    return context.resources.getQuantityString(template, amount, amount)
 }
 
 @Composable
@@ -204,6 +216,7 @@ private fun AdminConsole(
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var modePickerVisible by remember { mutableStateOf(false) }
+    var languagePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
     var policyOperationInProgress by remember { mutableStateOf(false) }
     var updateOperationInProgress by remember { mutableStateOf(false) }
@@ -331,17 +344,21 @@ private fun AdminConsole(
             if (!result.deviceOwner()) {
                 message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
+                // Policy details are produced by the policy layer and mix prose
+                // with Latin class and package names, so each one is isolated
+                // before it is embedded in a localized sentence.
                 val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
                 showAdmin()
                 message = UiMessage(
-                    context.getString(R.string.policy_failed, detail),
+                    context.getString(R.string.policy_failed, detail.bidiIsolated()),
                     isError = true,
                 )
             } else {
                 AuditLog.append(context, context.getString(R.string.audit_apply))
                 showAdmin()
+                val blocked = result.blockedPackages()
                 message = UiMessage(
-                    context.getString(R.string.policy_applied, result.blockedPackages()),
+                    context.resources.getQuantityString(R.plurals.policy_applied, blocked, blocked),
                     isError = false,
                 )
             }
@@ -367,7 +384,7 @@ private fun AdminConsole(
                 val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
                 showAdmin()
                 message = UiMessage(
-                    context.getString(R.string.admin_pause_failed, detail),
+                    context.getString(R.string.admin_pause_failed, detail.bidiIsolated()),
                     isError = true,
                 )
             } else {
@@ -466,6 +483,7 @@ private fun AdminConsole(
             onNewRecoveryCode = ::rotateRecoveryCode,
             onOpenAuditLog = { if (requireSession()) auditLogVisible = true },
             onCheckUpdate = ::checkForUpdates,
+            onPickLanguage = { if (requireSession()) languagePickerVisible = true },
             onLock = { showLocked() },
         )
 
@@ -493,6 +511,21 @@ private fun AdminConsole(
                     ),
                 )
                 showAdmin()
+            },
+        )
+    }
+
+    if (languagePickerVisible) {
+        LanguagePickerDialog(
+            current = AppLocales.current(),
+            onDismiss = { languagePickerVisible = false },
+            onSave = { chosen ->
+                languagePickerVisible = false
+                // Android recreates this activity to apply the new resources, and
+                // `initialScreen` drops the admin session on every recreation. That
+                // is the shipped fail-closed behaviour, so the picker says so
+                // instead of the console quietly holding the session open.
+                AppLocales.apply(chosen)
             },
         )
     }
@@ -641,6 +674,7 @@ private fun AdminScreen(
     onNewRecoveryCode: () -> Unit,
     onOpenAuditLog: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onPickLanguage: () -> Unit,
     onLock: () -> Unit,
 ) {
     val allowSelected = status.mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
@@ -735,19 +769,38 @@ private fun AdminScreen(
                         else -> R.string.update_check_title
                     }
                 ),
-                supporting = updateSnapshot.message.ifBlank {
-                    stringResource(
+                // An update message carries version identifiers and verification
+                // failures, so it is isolated rather than left to inherit the
+                // direction of the surrounding row.
+                supporting = updateSnapshot.message.takeIf { it.isNotBlank() }?.bidiIsolated()
+                    ?: stringResource(
                         if (UpdateConfig.isConfigured) {
                             R.string.update_ready_supporting
                         } else {
                             R.string.update_disabled_supporting
                         }
-                    )
-                },
+                    ),
                 enabled = UpdateConfig.isConfigured && !updateOperationInProgress,
                 onClick = onCheckUpdate,
             )
         }
+
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.admin_section_display)) {
+            ActionRow(
+                // A globe is not a directional glyph, so it is never mirrored.
+                icon = Icons.Rounded.Language,
+                title = stringResource(R.string.language_row_title),
+                supporting = stringResource(AppLocales.labelOf(AppLocales.current())),
+                onClick = onPickLanguage,
+            )
+        }
+
+        // Kiosk integration point: the kiosk agent's controls belong in a
+        // SectionCard added here, between "Display" and "Records and monitoring",
+        // built from ActionRow entries with keys named `admin_kiosk_*` in
+        // res/values/strings.xml and res/values-iw/strings.xml. See the branch
+        // notes for the rationale.
 
         Spacer(Modifier.height(20.dp))
         SectionCard(title = stringResource(R.string.admin_section_records)) {
@@ -791,8 +844,9 @@ private fun RecoveryScreen(code: String, onAcknowledge: () -> Unit) {
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // The code is Latin digits and separators, so it is rendered in its
-            // own left-to-right context inside this right-to-left page.
+            // The code is Latin digits and separators. The direction is overridden
+            // for this card only, so the groups keep their order when the rest of
+            // the page is right-to-left; in English this is already the direction.
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 SelectionContainer {
                     Text(
@@ -884,10 +938,73 @@ private fun ModePickerDialog(
     )
 }
 
+/**
+ * Radio picker for the display language. The two language names are autonyms, so
+ * an operator can always recognise their own language even when the console is
+ * currently showing one they cannot read.
+ */
+@Composable
+private fun LanguagePickerDialog(
+    current: LanguageChoice,
+    onDismiss: () -> Unit,
+    onSave: (LanguageChoice) -> Unit,
+) {
+    var selected by remember { mutableStateOf(current) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.language_dialog_title)) },
+        text = {
+            Column {
+                LanguageChoice.entries.forEach { choice ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .selectable(
+                                selected = selected == choice,
+                                role = Role.RadioButton,
+                                onClick = { selected = choice },
+                            )
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected == choice, onClick = null)
+                        Spacer(Modifier.size(12.dp))
+                        Text(
+                            // A language name is written in its own script, so it
+                            // is isolated and lets the bidi algorithm resolve its
+                            // direction from its own first strong character.
+                            text = stringResource(AppLocales.labelOf(choice)).bidiIsolated(),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.language_dialog_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(selected) }) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
+}
+
 @Composable
 private fun AuditLogDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val entries = remember { AuditLog.formatted(context).orEmpty() }
+    // Entries were recorded in whichever language was active at the time, so each
+    // line is isolated on its own instead of inheriting the direction of the first.
+    val entries = remember { bidiIsolatedLines(AuditLog.formatted(context).orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -920,7 +1037,10 @@ private fun statusHeadline(state: AllowedAppsStore.PolicyState): Int = when (sta
 @Composable
 private fun statusDetail(status: ConsoleStatus): String? =
     if (status.policyState == AllowedAppsStore.PolicyState.FAILED && status.policyError.isNotBlank()) {
-        stringResource(R.string.status_detail, status.policyError)
+        // The stored error comes from the policy layer and can hold restriction
+        // names, package names and exception class names, so it is isolated before
+        // it is embedded in the localized sentence.
+        stringResource(R.string.status_detail, status.policyError.bidiIsolated())
     } else {
         null
     }

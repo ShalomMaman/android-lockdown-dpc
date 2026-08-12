@@ -15,6 +15,7 @@
         android:fullBackupContent="false"
         android:icon="@drawable/ic_shield"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
@@ -61,6 +62,21 @@
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter>
         </receiver>
+
+        <!--
+            Locale configuration only. On API 33+ AppCompat forwards the display
+            language to the platform LocaleManager; below that it needs this
+            marker service to persist the choice across process restarts. The
+            component is never started, which is why it stays disabled.
+        -->
+        <service
+            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
+            android:enabled="false"
+            android:exported="false">
+            <meta-data
+                android:name="autoStoreLocales"
+                android:value="true" />
+        </service>
 
         <!--
             A DeviceAdminService is the Android-supported way for a device owner

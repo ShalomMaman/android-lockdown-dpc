@@ -6,11 +6,8 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 
 /**
@@ -77,18 +74,22 @@ private val LockdownTypography = Typography().let { base ->
 }
 
 /**
- * Hebrew is the only shipped locale and the previous screens forced RTL on the
- * root layout, so the theme pins the layout direction rather than following the
- * device locale.
+ * The theme deliberately does not touch `LocalLayoutDirection`. An earlier build
+ * shipped only Hebrew and pinned the root layout to RTL; now that English is the
+ * default locale, the direction has to follow the resolved locale instead.
+ *
+ * Compose seeds `LocalLayoutDirection` from the activity configuration, and
+ * `android:supportsRtl="true"` in the manifest lets that configuration report RTL,
+ * so Hebrew mirrors the whole console and English does not. Screens that host a
+ * single left-to-right value still override the direction locally; the console
+ * never forces a direction globally.
  */
 @Composable
 fun LockdownTheme(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        MaterialTheme(
-            colorScheme = LockdownColorScheme,
-            typography = LockdownTypography,
-            shapes = LockdownShapes,
-            content = content,
-        )
-    }
+    MaterialTheme(
+        colorScheme = LockdownColorScheme,
+        typography = LockdownTypography,
+        shapes = LockdownShapes,
+        content = content,
+    )
 }
