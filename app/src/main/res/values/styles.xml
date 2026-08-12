@@ -4,10 +4,16 @@
         The manifest references @style/AppTheme, so the name is fixed. Colours and
         type now live in the Compose theme (ui/theme/LockdownTheme.kt); this theme only
         has to paint the window before the first frame and keep system bars legible.
+
+        The parent is an AppCompat theme because the activities extend
+        AppCompatActivity, which is what applies the persisted display language on
+        API levels below 33. It stays a light, action-bar-less theme, so the window
+        chrome is unchanged.
     -->
-    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="AppTheme" parent="Theme.AppCompat.Light.NoActionBar">
         <item name="android:windowBackground">@color/window_background</item>
         <item name="android:colorAccent">@color/brand_primary</item>
+        <item name="colorAccent">@color/brand_primary</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>

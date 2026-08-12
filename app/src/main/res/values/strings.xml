@@ -1,143 +1,315 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+    English is the default locale. Every key here must also exist in
+    res/values-iw/strings.xml (Android's resource qualifier for Hebrew), except
+    for the language autonyms marked translatable="false", which are shown in
+    their own language on every locale.
+
+    app/src/test/java/com/example/lockdowndpc/ui/LocaleParityTest.kt and
+    tools/check_locale_parity.py both enforce that rule, including plural
+    categories and format placeholders.
+-->
 <resources>
-    <string name="app_name">מגן המכשיר</string>
-    <string name="admin_label">ניהול והגנת המכשיר</string>
-    <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
-    <string name="app_row_format">%1$s\n%2$s</string>
-    <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
-    <string name="policy_applied">ההגנה פעילה ומאומתת. נחסמו %1$d אפליקציות.</string>
-    <string name="policy_failed">ההגנה לא הופעלה במלואה ולכן אינה מסומנת כפעילה.\nפרט ראשון: %1$s</string>
-    <string name="status_format_with_allowlist">ניהול מערכת: %1$s\nמדיניות הגנה: %2$s\nרשימת אפליקציות: %3$s</string>
-    <string name="configured">מוגדרת</string>
-    <string name="configuration_required">נדרשת הגדרה</string>
-    <string name="active">פעיל</string>
-    <string name="not_configured">לא מוגדר</string>
-    <string name="not_enabled">טרם הופעלה</string>
-    <string name="policy_state_active">פעילה ומאומתת</string>
-    <string name="policy_state_applying">בתהליך החלה</string>
-    <string name="policy_state_failed">נכשלה — נדרש רענון</string>
+    <string name="app_name">Device Guard</string>
+    <string name="admin_label">Device management and protection</string>
+    <string name="admin_description">Manage apps, block installations, and restrict internet access.</string>
+    <string name="admin_profile_name">Protected device</string>
+    <string name="not_device_owner">Cannot activate: system administration is not configured.</string>
+    <plurals name="policy_applied">
+        <item quantity="one">Protection is active and verified. %1$d app is blocked.</item>
+        <item quantity="other">Protection is active and verified. %1$d apps are blocked.</item>
+    </plurals>
+    <string name="policy_failed">Protection was not fully applied, so it is not marked as active.\nFirst detail: %1$s</string>
+    <string name="policy_reason_webview_missing">The WebView engine was not found after applying policy.</string>
+    <string name="policy_event_set">Applying</string>
+    <string name="policy_event_change">Changing</string>
+    <string name="policy_update_failure">%1$s policy %2$s failed (code %3$d).</string>
+    <string name="configured">Configured</string>
+    <string name="configuration_required">Setup required</string>
+    <string name="active">Active</string>
+    <string name="not_configured">Not configured</string>
 
     <!-- Shared actions -->
-    <string name="action_save">שמירה</string>
-    <string name="action_cancel">ביטול</string>
-    <string name="action_close">סגירה</string>
-    <string name="action_back">חזרה</string>
-    <string name="error_unknown">שגיאה לא ידועה</string>
+    <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_back">Back</string>
+    <string name="error_unknown">Unknown error</string>
 
     <!-- Status card -->
-    <string name="status_headline_active">ההגנה פעילה ומאומתת</string>
-    <string name="status_headline_applying">ההגנה בתהליך החלה</string>
-    <string name="status_headline_failed">ההגנה נכשלה — נדרש רענון</string>
-    <string name="status_headline_inactive">ההגנה טרם הופעלה</string>
-    <string name="status_label_admin">ניהול מערכת</string>
-    <string name="status_label_apps">רשימת אפליקציות</string>
-    <string name="status_detail">פרט: %1$s</string>
+    <string name="status_headline_active">Protection is active and verified</string>
+    <string name="status_headline_applying">Protection is being applied</string>
+    <string name="status_headline_failed">Protection failed — a refresh is required</string>
+    <string name="status_headline_inactive">Protection is not active yet</string>
+    <string name="status_label_admin">System administration</string>
+    <string name="status_label_apps">App list</string>
+    <string name="status_detail">Detail: %1$s</string>
 
     <!-- Enrollment -->
-    <string name="enrollment_title">נדרשת הפעלת ניהול מלא</string>
-    <string name="enrollment_subtitle">האפליקציה הותקנה, אך עדיין אינה יכולה לאכוף חסימות. טכנאי השירות צריך להשלים הרשמה מאובטחת באמצעות QR או USB.</string>
-    <string name="enrollment_note">לאחר השלמת ההרשמה ניתן יהיה להגדיר קוד מנהל ולבחור את שיטת החסימה.</string>
+    <string name="enrollment_title">Full management must be activated</string>
+    <string name="enrollment_subtitle">The app is installed but cannot enforce restrictions yet. A service technician has to complete secure enrollment over QR or USB.</string>
+    <string name="enrollment_note">Once enrollment is complete you can set an administrator PIN and choose the blocking method.</string>
 
     <!-- PIN setup -->
-    <string name="pin_setup_title">הגדרת קוד מנהל</string>
-    <string name="pin_setup_title_replace">שינוי קוד מנהל</string>
-    <string name="pin_setup_subtitle">יש לבחור קוד בן 6 עד 12 ספרות. הקוד יידרש לשינוי הרשימה או להשהיית ההגנה.</string>
-    <string name="pin_setup_field_new">קוד מנהל חדש</string>
-    <string name="pin_setup_field_confirm">אימות הקוד</string>
-    <string name="pin_setup_save">שמירת הקוד והמשך</string>
-    <string name="pin_setup_save_replace">שמירת הקוד החדש</string>
-    <string name="pin_error_format">הקוד חייב להכיל 6 עד 12 ספרות.</string>
-    <string name="pin_error_mismatch">שני הקודים אינם זהים.</string>
-    <string name="pin_error_save">לא ניתן לשמור את הקוד במכשיר.</string>
+    <string name="pin_setup_title">Set an administrator PIN</string>
+    <string name="pin_setup_title_replace">Change the administrator PIN</string>
+    <string name="pin_setup_subtitle">Choose a PIN of 6 to 12 digits. The PIN is required to change the app list or to pause protection.</string>
+    <string name="pin_setup_field_new">New administrator PIN</string>
+    <string name="pin_setup_field_confirm">Confirm the PIN</string>
+    <string name="pin_setup_save">Save the PIN and continue</string>
+    <string name="pin_setup_save_replace">Save the new PIN</string>
+    <string name="pin_error_format">The PIN must contain 6 to 12 digits.</string>
+    <string name="pin_error_mismatch">The two PINs do not match.</string>
+    <string name="pin_error_save">The PIN could not be saved on this device.</string>
 
     <!-- Locked -->
-    <string name="locked_title">ניהול ההגנה</string>
-    <string name="locked_subtitle">הגדרות המכשיר נעולות. יש להזין את קוד המנהל כדי לבצע שינויים.</string>
-    <string name="locked_field_pin">קוד מנהל</string>
-    <string name="locked_unlock">כניסה לניהול</string>
-    <string name="pin_error_invalid">קוד מנהל שגוי.</string>
-    <string name="pin_error_verify">לא ניתן לאמת את הקוד. יש לפנות למנהל המכשיר.</string>
-    <string name="lockout_seconds">יותר מדי ניסיונות. ניתן לנסות שוב בעוד %1$d שניות.</string>
-    <string name="lockout_minutes">יותר מדי ניסיונות. ניתן לנסות שוב בעוד %1$d דקות.</string>
+    <string name="locked_title">Protection management</string>
+    <string name="locked_subtitle">Device settings are locked. Enter the administrator PIN to make changes.</string>
+    <string name="locked_status">Management access locked · DG-LOCKED</string>
+    <string name="locked_field_pin">Administrator PIN</string>
+    <string name="locked_unlock">Open management</string>
+    <string name="pin_error_invalid">Incorrect administrator PIN.</string>
+    <string name="pin_error_verify">The PIN could not be verified. Contact the device administrator.</string>
+    <plurals name="lockout_seconds">
+        <item quantity="one">Too many attempts. You can try again in %1$d second.</item>
+        <item quantity="other">Too many attempts. You can try again in %1$d seconds.</item>
+    </plurals>
+    <plurals name="lockout_minutes">
+        <item quantity="one">Too many attempts. You can try again in %1$d minute.</item>
+        <item quantity="other">Too many attempts. You can try again in %1$d minutes.</item>
+    </plurals>
 
     <!-- Admin console -->
-    <string name="admin_subtitle_allow">רק אפליקציות שנבחרו במפורש יהיו זמינות בזמן ההגנה.</string>
-    <string name="admin_subtitle_block">האפליקציות שתסומנו ייחסמו בזמן ההגנה; שאר האפליקציות יישארו פעילות.</string>
-    <string name="admin_apply">הפעלת ההגנה</string>
-    <string name="admin_apply_refresh">שמירה ורענון ההגנה</string>
-    <string name="admin_policy_working">מאמת את מדיניות ההגנה…</string>
-    <string name="admin_section_protection">הגדרות הגנה</string>
-    <string name="admin_section_access">אבטחת גישה</string>
-    <string name="admin_section_records">תיעוד ובקרה</string>
-    <string name="admin_section_updates">עדכוני מערכת</string>
-    <string name="admin_mode_row">שיטת החסימה</string>
-    <string name="admin_choose_allow">בחירת אפליקציות מותרות</string>
-    <string name="admin_choose_block">בחירת אפליקציות לחסימה</string>
-    <string name="admin_choose_supporting">עריכת הרשימה השמורה במכשיר</string>
-    <string name="admin_pause">השהיית ההגנה</string>
-    <string name="admin_pause_supporting">שחרור החסימות עד להפעלה מחדש</string>
-    <string name="admin_change_pin">שינוי קוד מנהל</string>
-    <string name="admin_new_recovery">יצירת קוד שחזור חדש</string>
-    <string name="admin_new_recovery_supporting">הקוד הקודם יתבטל מיד</string>
-    <string name="admin_audit">יומן פעולות ניהול</string>
-    <string name="admin_lock">נעילת מסך הניהול</string>
-    <string name="update_check_title">בדיקת עדכון מאובטח</string>
-    <string name="update_checking_title">בודק עדכון חתום…</string>
-    <string name="update_installing_title">מתקין עדכון מאומת…</string>
-    <string name="update_failed_title">בדיקת העדכון נכשלה</string>
-    <string name="update_ready_supporting">הבדיקה מתבצעת אוטומטית פעם ביום, וניתן להפעיל אותה גם עכשיו.</string>
-    <string name="update_disabled_title">עדכונים מרחוק אינם מוגדרים</string>
-    <string name="update_disabled_supporting">יש להגדיר כתובת עדכונים ומפתח אימות בזמן בניית גרסת השירות.</string>
-    <string name="admin_help_allow">Tailscale ורכיבי המערכת החיוניים נשמרים תמיד. אפליקציה חדשה תיחסם עד לאישור מנהל.</string>
-    <string name="admin_help_block">Tailscale ורכיבי המערכת החיוניים נשמרים תמיד. התקנות חדשות דורשות אישור מנהל.</string>
-    <string name="admin_error_recovery">לא ניתן ליצור קוד שחזור במכשיר.</string>
-    <string name="admin_error_allowlist">לפני ההפעלה יש לבחור ולשמור את רשימת האפליקציות.</string>
-    <string name="admin_pause_failed">השהיית ההגנה לא אומתה: %1$s</string>
-    <string name="admin_pause_ok">ההגנה הושהתה ואומתה. מסך הניהול נשאר נעול בקוד.</string>
+    <string name="admin_subtitle_allow">Only the apps you select explicitly stay available while protection is on.</string>
+    <string name="admin_subtitle_block">The apps you select are blocked while protection is on; every other app stays available.</string>
+    <string name="admin_apply">Activate protection</string>
+    <string name="admin_apply_refresh">Save and refresh protection</string>
+    <string name="admin_policy_working">Verifying the protection policy…</string>
+    <string name="admin_section_protection">Protection settings</string>
+    <string name="admin_section_access">Access security</string>
+    <string name="admin_section_records">Records and monitoring</string>
+    <string name="admin_section_updates">System updates</string>
+    <string name="admin_section_display">Display</string>
+    <string name="admin_mode_row">Blocking method</string>
+    <string name="admin_choose_allow">Select the allowed apps</string>
+    <string name="admin_choose_block">Select the apps to block</string>
+    <string name="admin_choose_supporting">Edit the list saved on this device</string>
+    <string name="admin_pause">Pause protection</string>
+    <string name="admin_pause_supporting">Release the restrictions until protection is activated again</string>
+    <string name="admin_change_pin">Change the administrator PIN</string>
+    <string name="admin_new_recovery">Generate a new recovery code</string>
+    <string name="admin_new_recovery_supporting">The previous code is revoked immediately</string>
+    <string name="admin_audit">Administration audit log</string>
+    <string name="admin_lock">Lock the management screen</string>
+    <string name="update_check_title">Check for a secure update</string>
+    <string name="update_checking_title">Checking for a signed update…</string>
+    <string name="update_installing_title">Installing a verified update…</string>
+    <string name="update_state_checking">Checking for a signed update…</string>
+    <string name="update_state_retry">The update check stopped and will retry automatically.</string>
+    <string name="update_state_downloading">Downloading update %1$s…</string>
+    <string name="update_state_installing">Update %1$s was verified and sent for installation.</string>
+    <string name="update_state_current">Version %1$s is current.</string>
+    <string name="update_state_installed">Update %1$s was installed successfully.</string>
+    <string name="update_failed_title">The update check failed</string>
+    <string name="update_ready_supporting">The check runs automatically once a day, and you can also run it now.</string>
+    <string name="update_disabled_title">Remote updates are not configured</string>
+    <string name="update_disabled_supporting">An update URL and a verification key have to be configured when the service build is produced.</string>
+    <string name="admin_help_allow">Tailscale and the essential system components are always kept. A newly installed app is blocked until an administrator approves it.</string>
+    <string name="admin_help_block">Tailscale and the essential system components are always kept. New installations require administrator approval.</string>
+    <string name="admin_error_recovery">A recovery code could not be created on this device.</string>
+    <string name="admin_error_allowlist">Select and save the app list before activating protection.</string>
+    <string name="admin_pause_failed">Pausing protection was not verified: %1$s</string>
+    <string name="admin_pause_ok">Protection is paused and verified. The management screen stays PIN-locked.</string>
 
     <!-- Mode picker -->
-    <string name="mode_dialog_title">בחירת שיטת חסימה</string>
-    <string name="mode_option_block">חסום רק אפליקציות שסומנו</string>
-    <string name="mode_option_allow">אפשר רק אפליקציות שסומנו</string>
-    <string name="mode_label_allow">רק אפליקציות מותרות</string>
-    <string name="mode_label_block">חסימת אפליקציות מסומנות</string>
+    <string name="mode_dialog_title">Choose a blocking method</string>
+    <string name="mode_option_block">Block only the apps I select</string>
+    <string name="mode_option_allow">Allow only the apps I select</string>
+    <string name="mode_label_allow">Allowed apps only</string>
+    <string name="mode_label_block">Block the selected apps</string>
+    <string name="mode_dialog_note">Each method keeps its own app list. Switching methods does not delete the list saved for the other one.</string>
+
+    <!-- Display language -->
+    <string name="language_row_title">Display language</string>
+    <string name="language_dialog_title">Choose a display language</string>
+    <string name="language_option_system">System default</string>
+    <!--
+        Language names are always written in their own language, so they are the
+        same on every locale and are never handed to a translator.
+    -->
+    <string name="language_option_english" translatable="false">English</string>
+    <string name="language_option_hebrew" translatable="false">עברית</string>
+    <string name="language_dialog_note">Changing the language reloads the console, so the administrator PIN has to be entered again.</string>
 
     <!-- Recovery code -->
-    <string name="recovery_title">קוד שחזור חד־פעמי</string>
-    <string name="recovery_subtitle">יש למסור את הקוד רק למנהל האחראי ולשמור אותו במקום בטוח. יצירת קוד חדש מבטלת את הקוד הקודם.</string>
-    <string name="recovery_warning">הקוד יוצג רק במסך הזה. לאחר שימוש בו יהיה חובה להגדיר קוד מנהל חדש.</string>
-    <string name="recovery_ack">רשמתי את הקוד</string>
-    <string name="recovery_code_description">קוד שחזור: %1$s</string>
+    <string name="recovery_title">One-time recovery code</string>
+    <string name="recovery_subtitle">Give this code only to the responsible administrator and keep it somewhere safe. Generating a new code revokes the previous one.</string>
+    <string name="recovery_warning">The code is shown on this screen only. After it is used, a new administrator PIN has to be set.</string>
+    <string name="recovery_ack">I have written the code down</string>
+    <string name="recovery_code_description">Recovery code: %1$s</string>
+    <string name="recovery_rotate_title">Generate a new recovery code?</string>
+    <string name="recovery_rotate_body">The recovery code currently on file stops working the moment a new one is generated. Any copy kept outside this device — with the school office, in a service record — becomes useless. Only continue if you can write the new code down now.</string>
+    <string name="recovery_rotate_confirm">Generate a new code</string>
 
     <!-- Allowed apps -->
-    <string name="apps_title_allow">בחירת אפליקציות מותרות</string>
-    <string name="apps_title_block">בחירת אפליקציות לחסימה</string>
-    <string name="apps_note_allow">אפליקציות מערכת חיוניות נשארות פעילות. אפליקציה חיצונית שלא תיבחר תוסתר.</string>
-    <string name="apps_note_block">יש לסמן את האפליקציות שרוצים לחסום. דפדפנים, חנויות ורשתות חברתיות מוכרות נחסמים תמיד.</string>
-    <string name="apps_search">חיפוש אפליקציה</string>
-    <string name="apps_search_clear">ניקוי החיפוש</string>
-    <string name="apps_selected_count">נבחרו %1$d מתוך %2$d</string>
-    <string name="apps_save">שמירת הרשימה</string>
-    <string name="apps_loading">טוען את רשימת האפליקציות…</string>
-    <string name="apps_empty_title">אין אפליקציות לניהול</string>
-    <string name="apps_empty_body">לא נמצאו במכשיר אפליקציות חיצוניות שניתן לנהל ברשימה הזאת.</string>
-    <string name="apps_no_results_title">אין תוצאות חיפוש</string>
-    <string name="apps_no_results_body">לא נמצאה אפליקציה שמתאימה למילות החיפוש.</string>
-    <string name="apps_row_description">%1$s, מזהה חבילה %2$s</string>
+    <string name="apps_title_allow">Select the allowed apps</string>
+    <string name="apps_title_block">Select the apps to block</string>
+    <string name="apps_note_allow">Essential system apps stay available. A third-party app that is not selected is hidden.</string>
+    <string name="apps_note_block">Select the apps you want to block. Known browsers, app stores, and social networks are always blocked.</string>
+    <string name="apps_search">Search for an app</string>
+    <string name="apps_search_clear">Clear the search</string>
+    <plurals name="apps_selected_count">
+        <item quantity="one">%1$d app selected out of %2$d</item>
+        <item quantity="other">%1$d apps selected out of %2$d</item>
+    </plurals>
+    <string name="apps_save">Save the list</string>
+    <string name="apps_loading">Loading the app list…</string>
+    <string name="apps_empty_title">No apps to manage</string>
+    <string name="apps_empty_body">No third-party apps that can be managed in this list were found on the device.</string>
+    <string name="apps_no_results_title">No search results</string>
+    <string name="apps_no_results_body">No app matches the search terms.</string>
+    <string name="apps_row_description">%1$s, package name %2$s</string>
 
     <!-- Blocked web destination -->
-    <string name="browser_blocked_title">הגישה לקישורי אינטרנט חסומה</string>
-    <string name="browser_blocked_subtitle">מדיניות ההגנה של המכשיר מונעת פתיחת דפדפנים וקישורי Web.</string>
-    <string name="browser_blocked_message">כדי לשנות את ההגדרה יש לפנות למנהל המכשיר ולהזין קוד מנהל.</string>
+    <string name="browser_blocked_title">Web access is blocked</string>
+    <string name="browser_blocked_subtitle">The protection policy of this device prevents browsers and web links from opening.</string>
+    <string name="browser_blocked_message">To change this setting, contact the device administrator and enter an administrator PIN.</string>
+
+    <!-- Kiosk profile: console -->
+    <string name="admin_section_kiosk">Kiosk profile</string>
+    <string name="admin_kiosk_row">Operating profile</string>
+    <string name="admin_management_row">Management connectivity</string>
+    <string name="admin_management_supporting">Packages that keep working while protection is on</string>
+    <string name="kiosk_title">Operating profile</string>
+    <string name="kiosk_subtitle">Choose how this device behaves. Kiosk mode is never turned on by an update or by a reboot; it takes an explicit choice on this screen and an administrator PIN.</string>
+    <string name="kiosk_section_profile">Choose a profile</string>
+    <string name="kiosk_section_actions">Activation</string>
+    <string name="kiosk_profile_off">Managed app filtering</string>
+    <string name="kiosk_profile_off_summary">The allow and block lists only. No lock task, and the home screen is left alone.</string>
+    <string name="kiosk_profile_single_app">Single-app kiosk</string>
+    <string name="kiosk_profile_single_app_summary">The device is locked to exactly one application you choose.</string>
+    <string name="kiosk_profile_single_site">Single-site kiosk</string>
+    <string name="kiosk_profile_single_site_summary">The device is locked to a built-in browser confined to one HTTPS origin.</string>
+    <string name="kiosk_state_off">Not configured</string>
+    <string name="kiosk_state_armed">Configured, not locked yet</string>
+    <string name="kiosk_state_active">Active — the device is locked</string>
+    <string name="kiosk_state_fault">Configured but not usable</string>
+    <string name="kiosk_status_label_profile">Profile</string>
+    <string name="kiosk_status_label_state">State</string>
+    <string name="kiosk_status_label_target">Locked app</string>
+    <string name="kiosk_status_label_origin">Allowed origin</string>
+    <string name="kiosk_status_none">None</string>
+    <string name="kiosk_status_detail">Reason: %1$s</string>
+    <string name="kiosk_action_choose_app">Choose the locked app</string>
+    <string name="kiosk_action_choose_site">Set the locked website</string>
+    <string name="kiosk_action_activate">Lock this device now</string>
+    <string name="kiosk_action_exit">Exit kiosk and restore managed filtering</string>
+    <string name="kiosk_action_exit_supporting">Releases the lock and puts managed app filtering back in force</string>
+    <string name="kiosk_action_clear">Remove the kiosk configuration</string>
+    <string name="kiosk_action_working">Applying the kiosk profile…</string>
+    <string name="kiosk_profile_state_summary">%1$s · %2$s</string>
+    <string name="kiosk_back">Back to management</string>
+    <string name="kiosk_recovery_title">How an administrator gets back in</string>
+    <string name="kiosk_recovery_body">On the Device Guard kiosk screen, tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
+    <string name="kiosk_recovery_single_app">On Android 9 and later the Home button returns to that Device Guard screen, so the gesture stays reachable even when the locked app never closes. On Android 8 the screen is only reachable once the locked app closes itself.</string>
+    <string name="kiosk_recovery_single_site">In a single-site kiosk that screen is the browser view itself, so the gesture is always reachable.</string>
+
+    <!-- Kiosk profile: app picker -->
+    <string name="kiosk_app_title">Choose the locked app</string>
+    <string name="kiosk_app_subtitle">Only installed apps that a person can actually open are listed, including apps this policy currently hides.</string>
+    <string name="kiosk_app_note">Device Guard itself, essential system components, the management transport, and known escape surfaces such as file managers and document pickers are never offered, because pinning one of those would hand over the way out.</string>
+    <string name="kiosk_app_empty_title">No eligible app</string>
+    <string name="kiosk_app_empty_body">This device has no installed, launchable app that may be pinned as a kiosk target.</string>
+    <string name="kiosk_app_row_description">%1$s, package name %2$s, choose as the locked app</string>
+
+    <!-- Kiosk profile: site editor -->
+    <string name="kiosk_site_title">Set the locked website</string>
+    <string name="kiosk_site_subtitle">Enter one HTTPS address. Internationalized domains have to be entered in their punycode form, which starts with xn--.</string>
+    <string name="kiosk_site_field">Website address</string>
+    <string name="kiosk_site_opens">Opening address: %1$s</string>
+    <string name="kiosk_site_origin">Allowed origin: %1$s</string>
+    <string name="kiosk_site_boundary">A link that leaves %1$s is blocked and a short notice is shown. This is navigation containment, not a network firewall: a page on the allowed origin can still load scripts, images and data from other hosts, and anything it embeds can render remote content.</string>
+    <string name="kiosk_site_save">Save the website</string>
+
+    <!-- Kiosk profile: activation confirmation -->
+    <string name="kiosk_confirm_title">Lock this device?</string>
+    <string name="kiosk_confirm_subtitle">Activation takes effect immediately on the screen in front of whoever is holding this device.</string>
+    <string name="kiosk_confirm_app">The device will show only %1$s. Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu. Home returns to the Device Guard kiosk screen, which is where an administrator signs in; it reaches no other app.</string>
+    <string name="kiosk_confirm_site">The device will show only the website at %1$s. Home, Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu.</string>
+    <string name="kiosk_confirm_reboot">A reboot returns to this kiosk target instead of to a launcher, so restarting the device is not a way out.</string>
+    <string name="kiosk_confirm_cancel">Do not lock yet</string>
+
+    <!-- Kiosk profile: results and refusals -->
+    <string name="kiosk_saved">The kiosk profile is saved. The device is not locked until you activate it.</string>
+    <string name="kiosk_activated">Kiosk is active and the device is locked to the configured target.</string>
+    <string name="kiosk_exited">Kiosk is off. Managed app filtering is in force again.</string>
+    <string name="kiosk_cleared">The kiosk configuration was removed. This device runs managed app filtering only.</string>
+    <string name="kiosk_error_auth">The administrator session expired. Enter the PIN again to change the kiosk profile.</string>
+    <string name="kiosk_error_invalid">The kiosk configuration cannot be used: %1$s</string>
+    <string name="kiosk_error_not_configured">Save a kiosk profile before activating it.</string>
+    <string name="kiosk_error_not_active">Kiosk is not active on this device.</string>
+    <string name="kiosk_error_apply">The kiosk profile was recorded, but the device did not confirm every step: %1$s</string>
+    <string name="kiosk_error_reconcile_timeout">The kiosk change was recorded, but policy reconciliation did not finish in time. Success has not been confirmed.</string>
+    <string name="kiosk_error_reconcile_failed">The kiosk change was recorded, but policy reconciliation failed verification. Success has not been confirmed.</string>
+    <string name="kiosk_error_refused">The kiosk request was refused (%1$s).</string>
+    <string name="kiosk_problem_target_not_selected">No app has been chosen yet.</string>
+    <string name="kiosk_problem_target_invalid_name">The stored value is not a valid Android package name.</string>
+    <string name="kiosk_problem_target_unresolved">The chosen app could not be read from this device.</string>
+    <string name="kiosk_problem_target_mismatch">The device answered about a different package than the one chosen.</string>
+    <string name="kiosk_problem_target_device_guard">Device Guard cannot lock itself.</string>
+    <string name="kiosk_problem_target_protected">That app is an essential system component, the management transport, or a known escape surface, so it may not be pinned.</string>
+    <string name="kiosk_problem_target_not_installed">The chosen app is no longer installed.</string>
+    <string name="kiosk_problem_target_not_enabled">The chosen app is disabled on this device.</string>
+    <string name="kiosk_problem_target_not_launchable">The chosen app has no screen a person can open.</string>
+    <string name="kiosk_problem_site_missing">No website address has been entered.</string>
+    <string name="kiosk_problem_site_scheme">The address has to start with https, because a kiosk target may not travel unencrypted.</string>
+    <string name="kiosk_problem_site_credentials">The address must not carry a user name or a password.</string>
+    <string name="kiosk_problem_site_host">The host name cannot be used. Give an ASCII name that contains a dot; an internationalized domain has to be entered in its punycode form.</string>
+    <string name="kiosk_problem_site_port">The port number is outside the allowed range.</string>
+    <string name="kiosk_problem_site_malformed">The address could not be read as one absolute HTTPS address.</string>
+    <string name="kiosk_problem_unknown">Unusable configuration (%1$s).</string>
+
+    <!-- Kiosk profile: the locked surface -->
+    <string name="kiosk_host_error_title">Kiosk mode is unavailable</string>
+    <string name="kiosk_host_not_configured">No valid kiosk configuration is stored on this device.</string>
+    <string name="kiosk_host_target_unavailable">The app configured for kiosk mode is unavailable. Contact the device administrator.</string>
+    <string name="kiosk_host_site_unavailable">The configured website could not be loaded. Check the network connection and try again.</string>
+    <string name="kiosk_host_tls">The secure connection to the website failed, so access was blocked.</string>
+    <string name="kiosk_host_blocked_navigation">Blocked: that destination is outside the configured website.</string>
+    <string name="kiosk_host_download_blocked">Downloads are blocked in kiosk mode.</string>
+    <string name="kiosk_host_renderer_gone">The browser view stopped responding and was closed safely. Try again.</string>
+    <string name="kiosk_host_retry">Try again</string>
+    <string name="kiosk_home_title">Device Guard kiosk</string>
+    <string name="kiosk_home_body">This device is locked to %1$s.</string>
+    <string name="kiosk_home_resume">Return to the app</string>
+
+    <!-- Management connectivity -->
+    <string name="management_dialog_title">Management connectivity</string>
+    <string name="management_dialog_note">These packages keep working while protection is on. A package with no pinned signing certificate is trusted by package name alone: any app installed under that name inherits the exemption. Pin the release certificate\'s SHA-256 digest to close that gap.</string>
+    <string name="management_status_pinned">Signing certificate pinned</string>
+    <string name="management_status_unpinned">No certificate pinned — trusted by name only</string>
+    <string name="management_status_absent">Not installed on this device</string>
 
     <!-- Audit log -->
-    <string name="audit_dialog_title">יומן פעולות ניהול</string>
-    <string name="audit_pin_set">קוד המנהל הוגדר</string>
-    <string name="audit_pin_replaced">קוד המנהל הוחלף</string>
-    <string name="audit_apply">מדיניות ההגנה הופעלה או רועננה</string>
-    <string name="audit_pause">מדיניות ההגנה הושהתה</string>
-    <string name="audit_recovery">נוצר קוד שחזור חדש</string>
-    <string name="audit_mode_allow">נבחר מצב: רק אפליקציות מותרות</string>
-    <string name="audit_mode_block">נבחר מצב: חסימת אפליקציות מסומנות</string>
-    <string name="audit_apps_saved">רשימת האפליקציות נשמרה</string>
+    <string name="audit_dialog_title">Administration audit log</string>
+    <string name="audit_empty">No administrative actions have been recorded yet.</string>
+    <string name="audit_kiosk_configured_off">Kiosk profile saved: managed app filtering only</string>
+    <string name="audit_kiosk_configured_app">Kiosk profile saved: single-app kiosk, locked app %1$s</string>
+    <string name="audit_kiosk_configured_site">Kiosk profile saved: single-site kiosk, allowed origin %1$s</string>
+    <string name="audit_kiosk_activated">Kiosk was activated</string>
+    <string name="audit_kiosk_activation_failed">Kiosk activation was refused: %1$s</string>
+    <string name="audit_kiosk_exited">Kiosk was exited and managed filtering was restored</string>
+    <string name="audit_kiosk_cleared">The kiosk configuration was removed</string>
+    <string name="audit_kiosk_restored">Kiosk was restored after a restart</string>
+    <string name="audit_kiosk_restore_failed">Kiosk could not be restored: %1$s</string>
+    <string name="audit_kiosk_fault">Kiosk cannot be honoured: %1$s</string>
+    <string name="audit_kiosk_admin_entry">Administrator entry was requested from the kiosk screen</string>
+    <string name="audit_pin_set">The administrator PIN was set</string>
+    <string name="audit_pin_replaced">The administrator PIN was replaced</string>
+    <string name="audit_apply">The protection policy was applied or refreshed</string>
+    <string name="audit_pause">The protection policy was paused</string>
+    <string name="audit_recovery">A new recovery code was generated</string>
+    <string name="audit_mode_allow">Mode selected: allowed apps only</string>
+    <string name="audit_mode_block">Mode selected: block the selected apps</string>
+    <string name="audit_apps_saved">The app list was saved</string>
 </resources>

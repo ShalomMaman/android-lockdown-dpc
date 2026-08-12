@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew resolves to this folder (see values-iw/strings.xml for why the
+    qualifier is "iw"), so a console showing Hebrew strings is the one case that
+    mirrors. Every other locale falls back to values/, English, and stays
+    left to right.
+-->
+<resources>
+    <bool name="use_rtl_layout">true</bool>
+</resources>

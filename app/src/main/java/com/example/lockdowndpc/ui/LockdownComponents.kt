@@ -30,6 +30,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,15 +39,19 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.ui.theme.LockdownStatusColors
 
@@ -174,17 +179,33 @@ internal fun PolicyStatusCard(
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider(color = style.content.copy(alpha = 0.20f))
                 facts.forEach { (label, value) ->
+                    // Both texts carry a weight. An unweighted child is measured
+                    // first against the whole remaining constraint, so a long value
+                    // — "Active — the device is locked", or any of these strings at
+                    // fontScale 2.0 on a 320 dp panel — used to take the entire row
+                    // and measure its own label down to zero width, leaving the one
+                    // card that answers "is this device locked?" unlabelled.
+                    // `fill = false` lets a short value stay short. `TextAlign.End`
+                    // is resolved against the layout direction, so the value stays
+                    // on the trailing edge in either direction.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        verticalAlignment = Alignment.Top,
                     ) {
-                        Text(text = label, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.weight(1f),
+                        )
                         Text(
                             text = value,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.weight(1f, fill = false),
                         )
                     }
                 }
@@ -193,7 +214,14 @@ internal fun PolicyStatusCard(
     }
 }
 
-/** Inline success/error feedback; renders nothing when there is no message. */
+/**
+ * Inline success/error feedback; renders nothing when there is no message.
+ *
+ * This is what reports every outcome in the administrator flow — policy applied
+ * or failed, pause result, every kiosk transition and every refusal — and it
+ * appears in place, with no focus change. Without the live region a screen reader
+ * says nothing at all when a kiosk activation is refused.
+ */
 @Composable
 internal fun MessageBanner(message: UiMessage?, modifier: Modifier = Modifier) {
     if (message == null) return
@@ -210,6 +238,7 @@ internal fun MessageBanner(message: UiMessage?, modifier: Modifier = Modifier) {
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite }
             .background(container, RoundedCornerShape(14.dp))
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -229,7 +258,14 @@ internal fun MessageBanner(message: UiMessage?, modifier: Modifier = Modifier) {
     }
 }
 
-/** Numeric, masked admin PIN entry with the digit-only, max-12 filter preserved. */
+/**
+ * Numeric, masked admin PIN entry with the digit-only, max-12 filter preserved.
+ *
+ * The field itself is pinned left-to-right while the page around it keeps
+ * mirroring: the content is Latin digits, and letting an RTL paragraph lay them
+ * out moves the caret to the far side of what is being typed. Same reasoning as
+ * the recovery-code card.
+ */
 @Composable
 internal fun PinField(
     value: String,
@@ -246,6 +282,10 @@ internal fun PinField(
         singleLine = true,
         shape = MaterialTheme.shapes.small,
         visualTransformation = PasswordVisualTransformation(),
+        textStyle = LocalTextStyle.current.copy(
+            textDirection = TextDirection.Ltr,
+            textAlign = TextAlign.Left,
+        ),
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.NumberPassword,
             imeAction = imeAction,
@@ -347,27 +387,36 @@ internal fun ActionRow(
             modifier = Modifier.padding(start = 56.dp),
         )
     }
+    // Disabled state is expressed as Material 3 disabled *colours* on the icon and
+    // the title, not as a blanket alpha over the whole row. Compositing the 62 %
+    // alpha this used to carry put the supporting line at about 3.2:1 — below AA —
+    // and the supporting line is the only place a disabled row explains itself.
+    // "Remote updates are not configured" is disabled in every build that ships
+    // without an update URL, so that was the common case, not an edge one.
+    val disabledContent = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .alpha(if (enabled) 1f else 0.62f)
-            .clickable(enabled = enabled, onClick = onClick)
+            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
+            tint = if (enabled) MaterialTheme.colorScheme.primary else disabledContent,
             modifier = Modifier.size(24.dp),
         )
         Spacer(Modifier.size(16.dp))
-        Column(modifier = Modifier.fillMaxWidth()) {
+        // `weight` rather than `fillMaxWidth`: filling the row's max width pushes
+        // the text past the trailing edge instead of wrapping it, which the longer
+        // English titles and large font scales both hit.
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else disabledContent,
             )
             if (supporting != null) {
                 Text(

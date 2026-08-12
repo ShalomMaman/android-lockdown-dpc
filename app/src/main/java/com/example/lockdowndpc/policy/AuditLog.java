@@ -3,6 +3,8 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.example.lockdowndpc.R;
+
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -26,7 +28,7 @@ public final class AuditLog {
     public static synchronized String formatted(Context context) {
         List<String> entries = rawEntries(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
         if (entries.isEmpty()) {
-            return "עדיין אין פעולות מתועדות.";
+            return context.getString(R.string.audit_empty);
         }
         DateFormat formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT);
         StringBuilder result = new StringBuilder();

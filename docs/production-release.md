@@ -60,6 +60,17 @@ adb shell dpm set-device-owner \
 
 The same value is required in `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME` during QR provisioning.
 
+## Recovery caveats before a customer rollout
+
+`0.5.0` keeps the pilot `applicationId` and the debug-compatible release signing config, so an ordinary `assembleRelease` still updates the existing pilot device. Nothing in this repository configures a production secret, and none is required to build.
+
+Before enabling kiosk mode on any device that is not physically at hand:
+
+- Confirm the administrator PIN is known to more than one person and that a current recovery code is stored securely off the device. Without both, the only exit from an active kiosk is re-provisioning, which destroys local data.
+- Confirm the responsible administrator has been briefed on the kiosk entry gesture documented in [`docs/kiosk-mode.md`](kiosk-mode.md#administrator-entry-from-inside-kiosk).
+- Treat kiosk mode as unproven until it has been exercised on a Device Owner-provisioned handset of the same model and Android build. Lock task behaviour, HOME-preference persistence across reboot, and the completeness of the escape-surface catalogue are all OEM-specific and are **not** verified by the unit tests.
+- Verify that a kiosk-off device still reports a verified policy apply on the target hardware, so that the kiosk reconciliation added in 0.5 has not turned ordinary managed filtering into a reported failure.
+
 ## No in-place pilot-to-production migration
 
 The production APK is a different application and cannot update `com.example.lockdowndpc`. Device Owner ownership is also bound to the existing administrator component. Moving a pilot device to the production identity requires a planned migration, normally management removal or a factory reset followed by fresh provisioning.

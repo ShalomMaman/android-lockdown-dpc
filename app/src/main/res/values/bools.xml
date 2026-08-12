@@ -1,4 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <bool name="policy_update_receiver_enabled">false</bool>
+    <!--
+        Whether the *resolved* string resources read right to left.
+
+        Deliberately a resource rather than a Configuration read. With the display
+        language on "System default" on a device set to a third right-to-left
+        language, resource resolution falls back to this folder (English) while
+        Configuration#getLayoutDirection still reports RTL, which produced a
+        mirrored English console. Reading the answer from the same folder the
+        strings came from keeps the two in agreement, and keeps the administrator
+        corner on "the side the text starts from".
+    -->
+    <bool name="use_rtl_layout">false</bool>
 </resources>

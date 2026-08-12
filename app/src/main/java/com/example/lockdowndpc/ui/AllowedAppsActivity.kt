@@ -7,10 +7,10 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -42,6 +42,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -60,10 +61,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
@@ -73,20 +76,23 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPackages
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.security.AdminSession
+import com.example.lockdowndpc.security.AppLabelSanitizer
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
 
-private const val TAILSCALE_PACKAGE = "com.tailscale.ipn"
 private const val ICON_SIZE_DP = 40
 
 /**
  * Selection of the managed applications. The inventory rules, the default
  * selection and what gets persisted are unchanged; the list is now searchable and
  * the save action is pinned to the bottom of the screen.
+ *
+ * `AppCompatActivity` is the base class for the same localization reason as
+ * [MainActivity]: below API 33 it is what applies the persisted display language.
  */
-class AllowedAppsActivity : ComponentActivity() {
+class AllowedAppsActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -246,6 +252,11 @@ private fun AllowedAppsScreen(
                         }
                     }
                 },
+                // A query is as likely to be a package-name fragment as a Hebrew
+                // label, so the field resolves its own direction from what was
+                // typed instead of inheriting the page's — the platform
+                // equivalent of `dir="auto"` on an input.
+                textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 20.dp),
@@ -317,8 +328,11 @@ private fun SaveBar(
                     .padding(horizontal = 20.dp, vertical = 14.dp),
             ) {
                 Text(
-                    text = stringResource(
-                        R.string.apps_selected_count,
+                    // Hebrew inflects the verb for one, two and many selections,
+                    // so the counter is a plural rather than one format string.
+                    text = pluralStringResource(
+                        R.plurals.apps_selected_count,
+                        selectedCount,
                         selectedCount,
                         totalCount,
                     ),
@@ -396,14 +410,18 @@ private fun AppRow(
         Spacer(Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = entry.label,
+                // A third-party label can be in any language, so it is isolated
+                // without forcing a direction and is allowed a second line at
+                // large font scales.
+                text = entry.label.bidiIsolated(),
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                // Package names are Latin identifiers inside a right-to-left
-                // paragraph, so they are isolated to keep the dots in place.
+                // Package names are Latin identifiers that may sit inside a
+                // right-to-left paragraph, so they are isolated left-to-right to
+                // keep the dot-separated segments in order.
                 text = entry.packageName.ltrIsolated(),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -444,7 +462,12 @@ private fun AppIcon(icon: ImageBitmap?) {
 /**
  * Mirrors the inventory rules of the previous implementation: every package that
  * is installed for this user or that we have managed before, minus system
- * packages, this DPC, Tailscale and the packages that are always blocked.
+ * packages, this DPC, the management transport and the packages that are always
+ * blocked.
+ *
+ * The management transport is read from [LockdownPackages.managementPackageNames]
+ * rather than from a package-name literal, so this list, the policy engine and
+ * the kiosk target rules all exclude exactly the same set.
  */
 private fun loadManagedApps(
     context: Context,
@@ -452,6 +475,7 @@ private fun loadManagedApps(
     iconSizePx: Int,
 ): LoadedApps {
     val pm = context.packageManager
+    val managementPackages = LockdownPackages.managementPackageNames()
     val allowed = AllowedAppsStore.getAllowedPackages(context)
     val configured = AllowedAppsStore.isAllowlistConfigured(context)
     val managed = AllowedAppsStore.getManagedPackages(context)
@@ -485,7 +509,7 @@ private fun loadManagedApps(
         val info = installedByPackage[packageName] ?: loadApplicationInfo(pm, packageName)
         val system = info != null &&
             info.flags and (ApplicationInfo.FLAG_SYSTEM or ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
-        if (system || packageName == context.packageName || packageName == TAILSCALE_PACKAGE) {
+        if (system || packageName == context.packageName || packageName in managementPackages) {
             continue
         }
         if (packageName in LockdownPackages.ALWAYS_BLOCKED ||
@@ -494,7 +518,7 @@ private fun loadManagedApps(
             continue
         }
 
-        val label = info?.loadLabel(pm)?.toString()
+        val label = AppLabelSanitizer.sanitize(info?.loadLabel(pm)?.toString())
             ?: AllowedAppsStore.getRememberedLabel(context, packageName)
         AllowedAppsStore.rememberManagedPackage(context, packageName, label)
         entries.add(AppEntry(packageName, label, loadIcon(pm, packageName, iconSizePx)))

@@ -7,10 +7,10 @@ import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,6 +28,7 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
+import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Pause
@@ -70,6 +71,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.kiosk.KioskConfig
+import com.example.lockdowndpc.kiosk.KioskController
+import com.example.lockdowndpc.kiosk.KioskLabels
+import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -85,13 +90,19 @@ import com.example.lockdowndpc.updates.UpdateStateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
+import java.util.function.Consumer
 
 /**
  * Administrator console. The screen sequence, the three minute admin session and
  * the FLAG_SECURE rules are the same as the programmatic View implementation this
  * replaced; only the presentation moved to Compose.
+ *
+ * The base class is `AppCompatActivity` purely for localization: below API 33 that
+ * is what applies the persisted display language to the activity resources. See
+ * [AppLocales].
  */
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -140,13 +151,34 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class ConsoleScreen(val secure: Boolean) {
+/**
+ * @param secure          keep the screen out of screenshots and the recents thumbnail
+ * @param requiresSession the screen may only be shown while an administrator
+ *                        session is valid, and is abandoned for the PIN screen
+ *                        the moment it is not — including on resume, so a
+ *                        console left open on a kiosk configuration screen
+ *                        cannot be picked up later by whoever finds the device
+ */
+private enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
     ENROLLMENT(false),
     PIN_SETUP(true),
     LOCKED(true),
-    ADMIN(false),
-    RECOVERY(true),
+    ADMIN(false, requiresSession = true),
+    RECOVERY(true, requiresSession = true),
+    KIOSK(false, requiresSession = true),
+    KIOSK_APPS(false, requiresSession = true),
+    KIOSK_SITE(false, requiresSession = true),
+    KIOSK_CONFIRM(false, requiresSession = true),
 }
+
+/**
+ * How long the console waits for the serialized policy pass a kiosk transition
+ * queued. Leaving kiosk clears this package's persistent preferred activities,
+ * which takes the managed-filtering link handlers with it, and that pass is what
+ * puts them back — so reporting "managed filtering is in force again" before it
+ * finishes would be a claim the device has not made yet.
+ */
+private const val KIOSK_POLICY_PASS_TIMEOUT_SECONDS = 30L
 
 private data class ConsoleStatus(
     val deviceOwner: Boolean,
@@ -184,13 +216,20 @@ private fun initialScreen(context: Context): ConsoleScreen {
     return ConsoleScreen.LOCKED
 }
 
+/**
+ * The retry guidance is a plural: English needs one/other and Hebrew additionally
+ * needs a dedicated dual form in Hebrew, which a single
+ * format string cannot express. `getQuantityString` takes an `Int`, so the rounded
+ * delay is clamped rather than truncated.
+ */
 private fun lockoutText(context: Context, remainingMillis: Long): String {
     val delay = lockoutDelayOf(remainingMillis)
     val template = when (delay.unit) {
-        LockoutUnit.SECONDS -> R.string.lockout_seconds
-        LockoutUnit.MINUTES -> R.string.lockout_minutes
+        LockoutUnit.SECONDS -> R.plurals.lockout_seconds
+        LockoutUnit.MINUTES -> R.plurals.lockout_minutes
     }
-    return context.getString(template, delay.amount)
+    val amount = delay.amount.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt()
+    return context.resources.getQuantityString(template, amount, amount)
 }
 
 @Composable
@@ -204,10 +243,16 @@ private fun AdminConsole(
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var modePickerVisible by remember { mutableStateOf(false) }
+    var languagePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
+    var recoveryRotateVisible by remember { mutableStateOf(false) }
+    var managementVisible by remember { mutableStateOf(false) }
     var policyOperationInProgress by remember { mutableStateOf(false) }
     var updateOperationInProgress by remember { mutableStateOf(false) }
+    var kioskOperationInProgress by remember { mutableStateOf(false) }
     var updateSnapshot by remember { mutableStateOf(UpdateStateStore.read(context)) }
+    var kiosk by remember { mutableStateOf(KioskSnapshot.Empty) }
+    var managementEntries by remember { mutableStateOf(emptyList<ManagementEntry>()) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
     val status = remember(screen, statusRevision) { readStatus(context) }
@@ -331,17 +376,21 @@ private fun AdminConsole(
             if (!result.deviceOwner()) {
                 message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
+                // Policy details are produced by the policy layer and mix prose
+                // with Latin class and package names, so each one is isolated
+                // before it is embedded in a localized sentence.
                 val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
                 showAdmin()
                 message = UiMessage(
-                    context.getString(R.string.policy_failed, detail),
+                    context.getString(R.string.policy_failed, detail.bidiIsolated()),
                     isError = true,
                 )
             } else {
                 AuditLog.append(context, context.getString(R.string.audit_apply))
                 showAdmin()
+                val blocked = result.blockedPackages()
                 message = UiMessage(
-                    context.getString(R.string.policy_applied, result.blockedPackages()),
+                    context.resources.getQuantityString(R.plurals.policy_applied, blocked, blocked),
                     isError = false,
                 )
             }
@@ -367,7 +416,7 @@ private fun AdminConsole(
                 val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
                 showAdmin()
                 message = UiMessage(
-                    context.getString(R.string.admin_pause_failed, detail),
+                    context.getString(R.string.admin_pause_failed, detail.bidiIsolated()),
                     isError = true,
                 )
             } else {
@@ -405,16 +454,90 @@ private fun AdminConsole(
         }
     }
 
+    fun refreshKiosk() {
+        coroutineScope.launch {
+            val app = context.applicationContext
+            kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
+            managementEntries = withContext(Dispatchers.IO) { readManagementEntries(app) }
+        }
+    }
+
+    /**
+     * Runs one kiosk transition and reports what the device actually did.
+     *
+     * Authorization is not decided here. [KioskController] reads `AdminSession`
+     * itself, so this session check is a UI courtesy that avoids a pointless
+     * round trip — a stale session is still refused by the controller and lands
+     * the console back on the PIN screen.
+     */
+    fun runKioskAction(
+        successMessage: Int,
+        request: (Context, Consumer<Boolean>) -> KioskController.Result,
+    ) {
+        if (kioskOperationInProgress || !requireSession()) {
+            return
+        }
+        AdminSession.extend()
+        kioskOperationInProgress = true
+        message = null
+        coroutineScope.launch {
+            val app = context.applicationContext
+            val attempt = withContext(Dispatchers.IO) {
+                awaitKioskAction(
+                    KIOSK_POLICY_PASS_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS,
+                ) { done -> request(app, done) }
+            }
+            val result = attempt.result
+            kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
+            kioskOperationInProgress = false
+            statusRevision++
+            if (isKioskSuccessReason(result.reason())) {
+                screen = ConsoleScreen.KIOSK
+                message = if (result.allowed() && attempt.reconciliationVerified) {
+                    UiMessage(context.getString(successMessage), isError = false)
+                } else if (!attempt.reconciliationCompleted) {
+                    UiMessage(
+                        context.getString(R.string.kiosk_error_reconcile_timeout),
+                        isError = true,
+                    )
+                } else if (!attempt.reconciliationVerified) {
+                    UiMessage(
+                        context.getString(R.string.kiosk_error_reconcile_failed),
+                        isError = true,
+                    )
+                } else {
+                    // The transition was authorized and recorded, but the device
+                    // did not confirm every step. Saying so is the whole point of
+                    // the verified-policy model; a green message here would be a
+                    // claim nothing checked.
+                    UiMessage(kioskApplyErrorMessage(context, result.errors()), isError = true)
+                }
+                return@launch
+            }
+            val text = kioskFailureMessage(context, result.reason(), result.errors())
+            if (kioskFailureOf(result.reason()) == KioskFailure.AUTH_REQUIRED) {
+                showLocked()
+            } else {
+                screen = ConsoleScreen.KIOSK
+            }
+            message = UiMessage(text, isError = true)
+        }
+    }
+
     LaunchedEffect(screen) { onSecureScreen(screen.secure) }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         when {
-            screen == ConsoleScreen.ADMIN && !AdminSession.isUnlocked() -> showLocked()
+            // Every session-bound screen, including the kiosk configuration
+            // flow, drops to the PIN screen the moment the session is gone.
+            screen.requiresSession && !AdminSession.isUnlocked() -> showLocked()
             screen == ConsoleScreen.ADMIN -> {
                 statusRevision++
                 updateSnapshot = UpdateStateStore.read(context)
+                refreshKiosk()
             }
-            screen == ConsoleScreen.RECOVERY && !AdminSession.isUnlocked() -> showLocked()
+            screen == ConsoleScreen.KIOSK -> refreshKiosk()
             screen == ConsoleScreen.ENROLLMENT && isDeviceOwner(context) -> {
                 message = null
                 replacingPin = false
@@ -424,6 +547,10 @@ private fun AdminConsole(
             else -> Unit
         }
     }
+
+    // The admin console shows the current kiosk profile in its status row, so the
+    // first read has to happen without waiting for a resume event.
+    LaunchedEffect(Unit) { refreshKiosk() }
 
     when (screen) {
         ConsoleScreen.ENROLLMENT -> EnrollmentScreen()
@@ -436,19 +563,28 @@ private fun AdminConsole(
         )
 
         ConsoleScreen.LOCKED -> LockedScreen(
-            status = status,
             message = message,
             onUnlock = ::unlockWith,
         )
 
         ConsoleScreen.ADMIN -> AdminScreen(
             status = status,
+            kiosk = kiosk,
             policyOperationInProgress = policyOperationInProgress,
             updateOperationInProgress = updateOperationInProgress,
             updateSnapshot = updateSnapshot,
             message = message,
             onApply = ::applyProtection,
             onPause = ::pauseProtection,
+            onOpenKiosk = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    refreshKiosk()
+                    screen = ConsoleScreen.KIOSK
+                }
+            },
+            onOpenManagement = { if (requireSession()) managementVisible = true },
             onPickMode = { if (requireSession()) modePickerVisible = true },
             onChooseApps = {
                 if (requireSession()) {
@@ -463,15 +599,96 @@ private fun AdminConsole(
                     screen = ConsoleScreen.PIN_SETUP
                 }
             },
-            onNewRecoveryCode = ::rotateRecoveryCode,
+            onNewRecoveryCode = { if (requireSession()) recoveryRotateVisible = true },
             onOpenAuditLog = { if (requireSession()) auditLogVisible = true },
             onCheckUpdate = ::checkForUpdates,
+            onPickLanguage = { if (requireSession()) languagePickerVisible = true },
             onLock = { showLocked() },
         )
 
         ConsoleScreen.RECOVERY -> RecoveryScreen(
             code = recoveryCode,
             onAcknowledge = { if (requireSession()) showAdmin() },
+        )
+
+        ConsoleScreen.KIOSK -> KioskProfileScreen(
+            snapshot = kiosk,
+            busy = kioskOperationInProgress,
+            message = message,
+            onConfigureApp = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_APPS
+                }
+            },
+            onConfigureSite = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_SITE
+                }
+            },
+            onClear = {
+                runKioskAction(R.string.kiosk_cleared) { appContext, done ->
+                    KioskController.requestClear(appContext, done)
+                }
+            },
+            onActivate = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    message = null
+                    screen = ConsoleScreen.KIOSK_CONFIRM
+                }
+            },
+            onExit = {
+                runKioskAction(R.string.kiosk_exited) { appContext, done ->
+                    KioskController.requestExit(appContext, done)
+                }
+            },
+            onBack = { if (requireSession()) showAdmin() },
+        )
+
+        ConsoleScreen.KIOSK_APPS -> KioskAppPickerScreen(
+            busy = kioskOperationInProgress,
+            onSelect = { packageName ->
+                // Saving only arms the profile. KioskController re-resolves the
+                // package against the device and re-runs the same eligibility
+                // rule the picker filtered with, so a target that was uninstalled
+                // between listing and tapping is refused rather than stored.
+                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                    KioskController.requestConfigure(
+                        appContext, KioskConfig.singleApp(packageName), done
+                    )
+                }
+            },
+            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+        )
+
+        ConsoleScreen.KIOSK_SITE -> KioskSiteScreen(
+            initialUrl = kiosk.siteUrl,
+            busy = kioskOperationInProgress,
+            message = message,
+            onSave = { url ->
+                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                    KioskController.requestConfigure(
+                        appContext, KioskConfig.singleSite(url), done
+                    )
+                }
+            },
+            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+        )
+
+        ConsoleScreen.KIOSK_CONFIRM -> KioskConfirmScreen(
+            snapshot = kiosk,
+            busy = kioskOperationInProgress,
+            message = message,
+            onConfirm = {
+                runKioskAction(R.string.kiosk_activated) { appContext, done ->
+                    KioskController.requestEnter(appContext, done)
+                }
+            },
+            onCancel = { if (requireSession()) screen = ConsoleScreen.KIOSK },
         )
     }
 
@@ -481,24 +698,85 @@ private fun AdminConsole(
             onDismiss = { modePickerVisible = false },
             onSave = { chosen ->
                 modePickerVisible = false
-                AllowedAppsStore.setProtectionMode(context, chosen)
-                AuditLog.append(
-                    context,
-                    context.getString(
-                        if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
-                            R.string.audit_mode_allow
-                        } else {
-                            R.string.audit_mode_block
-                        }
-                    ),
-                )
-                showAdmin()
+                // The session is re-checked here, not only when the dialog was
+                // opened. `AdminSession` expires on wall time rather than on
+                // interaction, so a console left on a desk with this dialog open
+                // could otherwise be saved by whoever picked the device up three
+                // minutes later — and the write commits before `showAdmin` drops
+                // back to the PIN screen.
+                if (requireSession()) {
+                    AllowedAppsStore.setProtectionMode(context, chosen)
+                    AuditLog.append(
+                        context,
+                        context.getString(
+                            if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
+                                R.string.audit_mode_allow
+                            } else {
+                                R.string.audit_mode_block
+                            }
+                        ),
+                    )
+                    showAdmin()
+                }
+            },
+        )
+    }
+
+    if (languagePickerVisible) {
+        LanguagePickerDialog(
+            current = AppLocales.current(),
+            onDismiss = { languagePickerVisible = false },
+            onSave = { chosen ->
+                languagePickerVisible = false
+                // Same re-check as the mode picker, for the same reason.
+                if (requireSession()) {
+                    // Android recreates this activity to apply the new resources,
+                    // and `initialScreen` drops the admin session on every
+                    // recreation. That is the shipped fail-closed behaviour, so the
+                    // picker says so instead of the console quietly holding the
+                    // session open.
+                    AppLocales.apply(chosen)
+                }
+            },
+        )
+    }
+
+    if (recoveryRotateVisible) {
+        // Revoking the standing recovery credential is at least as hard to undo as
+        // activating kiosk, which gets a confirmation screen of its own — and the
+        // row directly above this one is "Change the administrator PIN", so a
+        // mistap lands here. A 64 dp subtitle is not the place to disclose it.
+        AlertDialog(
+            onDismissRequest = { recoveryRotateVisible = false },
+            title = { Text(stringResource(R.string.recovery_rotate_title)) },
+            text = { Text(stringResource(R.string.recovery_rotate_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        recoveryRotateVisible = false
+                        rotateRecoveryCode()
+                    }
+                ) {
+                    Text(stringResource(R.string.recovery_rotate_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { recoveryRotateVisible = false }) {
+                    Text(stringResource(R.string.action_cancel))
+                }
             },
         )
     }
 
     if (auditLogVisible) {
         AuditLogDialog(onDismiss = { auditLogVisible = false })
+    }
+
+    if (managementVisible) {
+        ManagementPackagesDialog(
+            entries = managementEntries,
+            onDismiss = { managementVisible = false },
+        )
     }
 }
 
@@ -583,7 +861,6 @@ private fun PinSetupScreen(
 
 @Composable
 private fun LockedScreen(
-    status: ConsoleStatus,
     message: UiMessage?,
     onUnlock: (String) -> Unit,
 ) {
@@ -599,11 +876,10 @@ private fun LockedScreen(
         title = stringResource(R.string.locked_title),
         subtitle = stringResource(R.string.locked_subtitle),
     ) {
-        PolicyStatusCard(
-            tone = statusTone(status.policyState),
-            headline = stringResource(statusHeadline(status.policyState)),
-            facts = statusFacts(status),
-            detail = statusDetail(status),
+        Text(
+            text = stringResource(R.string.locked_status),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
         PinField(
@@ -629,18 +905,22 @@ private fun LockedScreen(
 @Composable
 private fun AdminScreen(
     status: ConsoleStatus,
+    kiosk: KioskSnapshot,
     policyOperationInProgress: Boolean,
     updateOperationInProgress: Boolean,
     updateSnapshot: UpdateSnapshot,
     message: UiMessage?,
     onApply: () -> Unit,
     onPause: () -> Unit,
+    onOpenKiosk: () -> Unit,
+    onOpenManagement: () -> Unit,
     onPickMode: () -> Unit,
     onChooseApps: () -> Unit,
     onChangePin: () -> Unit,
     onNewRecoveryCode: () -> Unit,
     onOpenAuditLog: () -> Unit,
     onCheckUpdate: () -> Unit,
+    onPickLanguage: () -> Unit,
     onLock: () -> Unit,
 ) {
     val allowSelected = status.mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
@@ -735,17 +1015,60 @@ private fun AdminScreen(
                         else -> R.string.update_check_title
                     }
                 ),
-                supporting = updateSnapshot.message.ifBlank {
-                    stringResource(
+                // An update message carries version identifiers and verification
+                // failures, so it is isolated rather than left to inherit the
+                // direction of the surrounding row.
+                supporting = updateSnapshot.message.takeIf { it.isNotBlank() }?.bidiIsolated()
+                    ?: stringResource(
                         if (UpdateConfig.isConfigured) {
                             R.string.update_ready_supporting
                         } else {
                             R.string.update_disabled_supporting
                         }
-                    )
-                },
+                    ),
                 enabled = UpdateConfig.isConfigured && !updateOperationInProgress,
                 onClick = onCheckUpdate,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.admin_section_display)) {
+            ActionRow(
+                // A globe is not a directional glyph, so it is never mirrored.
+                icon = Icons.Rounded.Language,
+                title = stringResource(R.string.language_row_title),
+                supporting = stringResource(AppLocales.labelOf(AppLocales.current())),
+                onClick = onPickLanguage,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.admin_section_kiosk)) {
+            ActionRow(
+                // A padlock is not a directional glyph, so it is never mirrored.
+                icon = if (kiosk.state == KioskState.ACTIVE) {
+                    Icons.Rounded.Lock
+                } else {
+                    Icons.Rounded.LockOpen
+                },
+                title = stringResource(R.string.admin_kiosk_row),
+                // Profile first, then state: an administrator glancing at this
+                // row needs to know whether the device is locked right now. The
+                // separator lives in strings.xml rather than in this expression,
+                // so it is visible to a translator and to the parity check.
+                supporting = stringResource(
+                    R.string.kiosk_profile_state_summary,
+                    stringResource(KioskLabels.profile(kiosk.mode)),
+                    stringResource(KioskLabels.state(kiosk.state)),
+                ),
+                onClick = onOpenKiosk,
+            )
+            ActionRow(
+                icon = Icons.Rounded.VpnKey,
+                title = stringResource(R.string.admin_management_row),
+                supporting = stringResource(R.string.admin_management_supporting),
+                onClick = onOpenManagement,
+                showDivider = true,
             )
         }
 
@@ -791,8 +1114,9 @@ private fun RecoveryScreen(code: String, onAcknowledge: () -> Unit) {
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // The code is Latin digits and separators, so it is rendered in its
-            // own left-to-right context inside this right-to-left page.
+            // The code is Latin digits and separators. The direction is overridden
+            // for this card only, so the groups keep their order when the rest of
+            // the page is right-to-left; in English this is already the direction.
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 SelectionContainer {
                     Text(
@@ -871,6 +1195,77 @@ private fun ModePickerDialog(
                         )
                     }
                 }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    // Each method keeps its own saved list, so this dialog can say
+                    // plainly that switching costs nothing. Up to 0.5.0 saving a
+                    // different method deleted the curated list outright, with no
+                    // warning on this screen or anywhere else.
+                    text = stringResource(R.string.mode_dialog_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(selected) }) {
+                Text(stringResource(R.string.action_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+        },
+    )
+}
+
+/**
+ * Radio picker for the display language. The two language names are autonyms, so
+ * an operator can always recognise their own language even when the console is
+ * currently showing one they cannot read.
+ */
+@Composable
+private fun LanguagePickerDialog(
+    current: LanguageChoice,
+    onDismiss: () -> Unit,
+    onSave: (LanguageChoice) -> Unit,
+) {
+    var selected by remember { mutableStateOf(current) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.language_dialog_title)) },
+        text = {
+            Column {
+                LanguageChoice.entries.forEach { choice ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 52.dp)
+                            .selectable(
+                                selected = selected == choice,
+                                role = Role.RadioButton,
+                                onClick = { selected = choice },
+                            )
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = selected == choice, onClick = null)
+                        Spacer(Modifier.size(12.dp))
+                        Text(
+                            // A language name is written in its own script, so it
+                            // is isolated and lets the bidi algorithm resolve its
+                            // direction from its own first strong character.
+                            text = stringResource(AppLocales.labelOf(choice)).bidiIsolated(),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.language_dialog_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = {
@@ -887,7 +1282,9 @@ private fun ModePickerDialog(
 @Composable
 private fun AuditLogDialog(onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val entries = remember { AuditLog.formatted(context).orEmpty() }
+    // Entries were recorded in whichever language was active at the time, so each
+    // line is isolated on its own instead of inheriting the direction of the first.
+    val entries = remember { bidiIsolatedLines(AuditLog.formatted(context).orEmpty()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -920,7 +1317,10 @@ private fun statusHeadline(state: AllowedAppsStore.PolicyState): Int = when (sta
 @Composable
 private fun statusDetail(status: ConsoleStatus): String? =
     if (status.policyState == AllowedAppsStore.PolicyState.FAILED && status.policyError.isNotBlank()) {
-        stringResource(R.string.status_detail, status.policyError)
+        // The stored error comes from the policy layer and can hold restriction
+        // names, package names and exception class names, so it is isolated before
+        // it is embedded in the localized sentence.
+        stringResource(R.string.status_detail, status.policyError.bidiIsolated())
     } else {
         null
     }

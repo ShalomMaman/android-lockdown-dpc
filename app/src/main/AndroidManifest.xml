@@ -15,6 +15,7 @@
         android:fullBackupContent="false"
         android:icon="@drawable/ic_shield"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
@@ -31,6 +32,30 @@
         <activity
             android:name=".ui.AllowedAppsActivity"
             android:exported="false" />
+
+        <!--
+            Kiosk HOME surface. Disabled in the manifest so an upgrade never turns
+            a managed device into a kiosk; KioskController enables the component
+            and installs the HOME preference only while kiosk is active, and
+            disables it again on exit. It must be exported because the system
+            starts HOME, but it grants nothing: it renders stored kiosk state and
+            the only way out is an authenticated administrator session.
+        -->
+        <activity
+            android:name=".kiosk.KioskHostActivity"
+            android:enabled="false"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:stateNotNeeded="true"
+            android:taskAffinity=".kiosk"
+            android:theme="@style/AppTheme">
+            <intent-filter android:priority="1000">
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.HOME" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
 
         <activity
             android:name=".ui.BlockedBrowserActivity"
@@ -61,6 +86,21 @@
                 <action android:name="android.app.action.PROFILE_PROVISIONING_COMPLETE" />
             </intent-filter>
         </receiver>
+
+        <!--
+            Locale configuration only. On API 33+ AppCompat forwards the display
+            language to the platform LocaleManager; below that it needs this
+            marker service to persist the choice across process restarts. The
+            component is never started, which is why it stays disabled.
+        -->
+        <service
+            android:name="androidx.appcompat.app.AppLocalesMetadataHolderService"
+            android:enabled="false"
+            android:exported="false">
+            <meta-data
+                android:name="autoStoreLocales"
+                android:value="true" />
+        </service>
 
         <!--
             A DeviceAdminService is the Android-supported way for a device owner

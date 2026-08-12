@@ -9,9 +9,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.booleanResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import com.example.lockdowndpc.R
 
 /**
  * The console keeps the trustworthy blue-on-white language of the shipped build.
@@ -77,13 +79,28 @@ private val LockdownTypography = Typography().let { base ->
 }
 
 /**
- * Hebrew is the only shipped locale and the previous screens forced RTL on the
- * root layout, so the theme pins the layout direction rather than following the
- * device locale.
+ * The layout direction follows the *resolved strings*, not the system locale.
+ *
+ * Compose seeds `LocalLayoutDirection` from the activity configuration, which
+ * reports RTL for any right-to-left system locale. Device Guard ships two
+ * translations, so a device set to a third right-to-left language with the
+ * display language left on "System default" resolved English strings into a fully
+ * mirrored layout — including the auto-mirrored back arrow and the side the kiosk
+ * recovery note points at. `R.bool.use_rtl_layout` is answered by the same
+ * resource folder the strings came from, so text and layout can no longer
+ * disagree: Hebrew mirrors, everything else does not.
+ *
+ * Screens that host a single left-to-right value still override the direction
+ * locally; nothing below this point forces a direction globally.
  */
 @Composable
 fun LockdownTheme(content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+    val direction = if (booleanResource(R.bool.use_rtl_layout)) {
+        LayoutDirection.Rtl
+    } else {
+        LayoutDirection.Ltr
+    }
+    CompositionLocalProvider(LocalLayoutDirection provides direction) {
         MaterialTheme(
             colorScheme = LockdownColorScheme,
             typography = LockdownTypography,

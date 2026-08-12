@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Declares the languages Device Guard ships, so Android 13 (API 33) and newer
+    list the app in Settings > System > Languages > App languages. Older releases
+    ignore the attribute; AppCompat provides the same choice in-app from API 26.
+
+    The tags here are BCP-47 ("he"), while the resource folder is res/values-iw.
+    Both resolve to the same Locale, whose getLanguage() is the legacy code "iw".
+-->
+<locale-config xmlns:android="http://schemas.android.com/apk/res/android">
+    <locale android:name="en" />
+    <locale android:name="he" />
+</locale-config>
