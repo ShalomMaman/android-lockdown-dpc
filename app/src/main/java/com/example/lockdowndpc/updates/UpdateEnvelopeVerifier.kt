@@ -103,12 +103,7 @@ object UpdateEnvelopeVerifier {
 
     private fun verifySignature(payload: ByteArray, signatureBytes: ByteArray, keyBase64: String) {
         try {
-            val keyBytes = Base64.getDecoder().decode(keyBase64)
-            val publicKey = KeyFactory.getInstance("EC")
-                .generatePublic(X509EncodedKeySpec(keyBytes))
-            if (publicKey !is ECPublicKey || !isSecp256r1(publicKey.params)) {
-                throw UpdateVerificationException("manifest-key-must-be-ec-p256")
-            }
+            val publicKey = requireP256PublicKey(keyBase64)
             val verifier = Signature.getInstance("SHA256withECDSA")
             verifier.initVerify(publicKey)
             verifier.update(payload)
@@ -121,6 +116,24 @@ object UpdateEnvelopeVerifier {
             throw UpdateVerificationException("invalid-manifest-key-or-signature")
         } catch (_: java.security.GeneralSecurityException) {
             throw UpdateVerificationException("manifest-signature-verification-failed")
+        }
+    }
+
+    internal fun requireP256PublicKey(keyBase64: String): ECPublicKey {
+        try {
+            val keyBytes = Base64.getDecoder().decode(keyBase64)
+            val publicKey = KeyFactory.getInstance("EC")
+                .generatePublic(X509EncodedKeySpec(keyBytes))
+            if (publicKey !is ECPublicKey || !isSecp256r1(publicKey.params)) {
+                throw UpdateVerificationException("manifest-key-must-be-ec-p256")
+            }
+            return publicKey
+        } catch (exception: UpdateVerificationException) {
+            throw exception
+        } catch (_: RuntimeException) {
+            throw UpdateVerificationException("invalid-manifest-key")
+        } catch (_: java.security.GeneralSecurityException) {
+            throw UpdateVerificationException("invalid-manifest-key")
         }
     }
 

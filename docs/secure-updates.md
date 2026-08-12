@@ -17,7 +17,22 @@ Any failure stops installation without pausing or weakening the protection polic
 
 ## Build configuration
 
-These values are supported as Gradle properties or environment variables:
+Ordinary builds are unconditionally channel-disabled and ignore ambient update
+properties and environment variables. Build the existing public pilot channel
+with one explicit command:
+
+```bash
+./gradlew -I gradle/pilot-update.init.gradle.kts --no-daemon --max-workers=2 clean pilotChannelRelease
+```
+
+That task validates the committed HTTPS URL and P-256 public key, checks the
+approved key and APK-signer fingerprints, runs tests and lint, builds the APK,
+and structurally reads its compiled `BuildConfig` from DEX. It fails if package,
+version, signer, URL, or key drift, so it cannot silently emit a channel-disabled
+pilot APK. No private material is used.
+
+Production remains a separate explicit build. These values are supported only
+by the production init path as Gradle properties or environment variables:
 
 ```text
 deviceGuardUpdateManifestUrl / DEVICE_GUARD_UPDATE_MANIFEST_URL
@@ -58,6 +73,26 @@ Store the private key and passphrase in an organizational vault with encrypted b
 ```
 
 Upload the immutable APK first, then atomically replace the stable `latest.json` consumed by devices. The signed manifest includes issue and expiration times. Clients reject validity periods above 91 days; the publisher defaults to 30 days. Refresh `latest.json` before expiration even when no APK version changes.
+
+After uploading the immutable asset and creating the signed envelope, bind the
+exact APK to the intended channel before replacing `updates/pilot/latest.json`:
+
+```bash
+python3 tools/verify_pilot_apk.py \
+  --apk app/build/outputs/apk/release/app-release.apk \
+  --expected-package com.example.lockdowndpc \
+  --expected-version-code 10 --expected-version-name 0.5.1 \
+  --expected-signer-sha256 25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b \
+  --expected-manifest-url https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json \
+  --expected-public-key-file updates/pilot/public-key.pub \
+  --expected-public-key-sha256 c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc \
+  --manifest /secure/releases/latest.json \
+  --expected-apk-url https://github.com/ShalomMaman/android-lockdown-dpc/releases/download/pilot-v0.5.1/device-guard-pilot-v0.5.1.apk
+```
+
+This final gate verifies the manifest ECDSA signature, current validity, immutable
+HTTPS asset URL, and exact APK hash, size, identity, version, signer, and embedded
+channel. It uses only public material.
 
 The device also records the highest authorized version code it has accepted. A compromised file host therefore cannot replay an older signed manifest after the device has observed a newer one.
 

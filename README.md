@@ -41,6 +41,13 @@ export ANDROID_HOME="/path/to/android-sdk"
 ./gradlew assembleDebug lintDebug test
 ```
 
+A publishable pilot-channel APK must be built with the explicit, secret-free
+channel gate. Ordinary builds intentionally keep remote updates disabled:
+
+```bash
+./gradlew -I gradle/pilot-update.init.gradle.kts --no-daemon --max-workers=2 clean pilotChannelRelease
+```
+
 Locale parity can also be checked without an Android SDK:
 
 ```bash
@@ -65,7 +72,7 @@ Open Device Guard, set an administrator PIN, store the recovery code securely, s
 The fail-closed package-reconciliation design is documented in [`docs/package-reconciliation.md`](docs/package-reconciliation.md). The remote update architecture and release process are documented in [`docs/secure-updates.md`](docs/secure-updates.md). What an independent UI, localization and kiosk-administration review found, what changed, and what remains unproven without hardware are recorded in [`docs/ui-qa-remediation.md`](docs/ui-qa-remediation.md).
 
 - Never commit an APK-signing key, metadata-signing key, administrator PIN, recovery code, or device credential.
-- A normal build retains the pilot identity and development signer for compatibility with the existing test device. The explicit production identity and external-signing flow are documented in [`docs/production-release.md`](docs/production-release.md).
+- A normal build retains the pilot identity and development signer but embeds no update channel. The explicit pilot-channel command above is required for a remotely updatable pilot artifact. The separate production identity and external-signing flow are documented in [`docs/production-release.md`](docs/production-release.md).
 - Commercial deployments should use QR or USB provisioning after a factory reset and a documented signed-update process.
 - Do not enable `DISALLOW_DEBUGGING_FEATURES` until an independent management path has been tested, or remote recovery may become impossible.
 - Recovery reset or firmware flashing can remove any DPC. A serious threat model must also cover boot-chain integrity and physical access.
@@ -79,9 +86,9 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Status
 
-Pilot release: `0.5.0` (`versionCode 9`).
+Pilot release candidate: `0.5.1` (`versionCode 10`).
 
-`0.5.0` keeps the pilot `applicationId` and signer, so it updates the already provisioned pilot device in place.
+`0.5.1` keeps the pilot `applicationId` and signer, so it can update the already provisioned pilot device in place. It is not production-ready and remains a prerelease until hardware checks pass.
 
 | Area | State |
 | --- | --- |
