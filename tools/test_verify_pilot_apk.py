@@ -243,23 +243,28 @@ class VerifyPilotApkTest(unittest.TestCase):
             verify_pilot_apk.require_p256_public_key(Path("public.pem"), Path("openssl"))
 
     def test_ci_signer_policy_requires_exactly_one_certificate(self) -> None:
-        digest = "ab" * 32
+        certificate = b"single-signer-certificate"
+        encoded = base64.b64encode(certificate).decode("ascii")
         single = mock.Mock(
             returncode=0,
-            stdout=f"Signer #1 certificate SHA-256 digest: {digest}\n",
+            stdout=(
+                "Signer #1 certificate DN: CN=CI\n"
+                f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n"
+            ),
             stderr="",
         )
         with mock.patch.object(verify_pilot_apk.subprocess, "run", return_value=single):
             self.assertEqual(
-                digest,
+                hashlib.sha256(certificate).hexdigest(),
                 verify_pilot_apk.verify_apk_has_single_signer(Path("app.apk"), Path("apksigner")),
             )
 
+        second_certificate = base64.b64encode(b"second-signer-certificate").decode("ascii")
         multiple = mock.Mock(
             returncode=0,
             stdout=(
-                f"Signer #1 certificate SHA-256 digest: {digest}\n"
-                f"Signer #2 certificate SHA-256 digest: {'cd' * 32}\n"
+                f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n"
+                f"-----BEGIN CERTIFICATE-----\n{second_certificate}\n-----END CERTIFICATE-----\n"
             ),
             stderr="",
         )

@@ -8,7 +8,6 @@ import base64
 import hashlib
 import json
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
@@ -20,11 +19,6 @@ import publish_update
 
 
 BUILD_CONFIG_DESCRIPTOR = "Lcom/example/lockdowndpc/BuildConfig;"
-CERT_SHA256_LINE = re.compile(
-    r"^Signer #[0-9]+ certificate SHA-256 digest: (?P<digest>[0-9a-fA-F]{64})$"
-)
-
-
 class VerificationError(Exception):
     """A safe, operator-facing pilot artifact verification failure."""
 
@@ -104,7 +98,7 @@ def require_p256_public_key(path: Path, openssl: Path | None = None) -> None:
 
 def verify_apk_has_single_signer(apk: Path, apksigner: Path) -> str:
     result = subprocess.run(
-        [str(apksigner), "verify", "--print-certs", str(apk)],
+        [str(apksigner), "verify", "--print-certs-pem", str(apk)],
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -112,14 +106,24 @@ def verify_apk_has_single_signer(apk: Path, apksigner: Path) -> str:
     )
     if result.returncode != 0:
         raise VerificationError("apksigner rejected the APK")
-    signer_digests = [
-        match.group("digest").lower()
-        for line in result.stdout.splitlines()
-        if (match := CERT_SHA256_LINE.match(line.strip()))
-    ]
-    if len(signer_digests) != 1:
+    begin_marker = "-----BEGIN CERTIFICATE-----"
+    end_marker = "-----END CERTIFICATE-----"
+    certificate_der: list[bytes] = []
+    remainder = result.stdout
+    while begin_marker in remainder:
+        _, encoded_tail = remainder.split(begin_marker, 1)
+        if end_marker not in encoded_tail:
+            raise VerificationError("apksigner returned a malformed signing certificate")
+        encoded, remainder = encoded_tail.split(end_marker, 1)
+        try:
+            certificate_der.append(
+                base64.b64decode("".join(encoded.split()), validate=True)
+            )
+        except ValueError as exc:
+            raise VerificationError("apksigner returned an invalid signing certificate") from exc
+    if len(certificate_der) != 1:
         raise VerificationError("APK must have exactly one signing certificate")
-    return signer_digests[0]
+    return hashlib.sha256(certificate_der[0]).hexdigest()
 
 
 def read_compiled_build_config(apk: Path, dexdump: Path) -> dict[str, str]:
