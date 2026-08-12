@@ -8,6 +8,8 @@ import android.content.IntentFilter;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
+import android.content.pm.SigningInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
@@ -16,11 +18,18 @@ import android.util.Log;
 import android.webkit.WebView;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
+import com.example.lockdowndpc.kiosk.KioskConfigStore;
+import com.example.lockdowndpc.kiosk.KioskController;
+import com.example.lockdowndpc.kiosk.KioskMode;
+import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 public final class LockdownPolicyController {
@@ -40,10 +49,15 @@ public final class LockdownPolicyController {
 
         ArrayList<String> errors = new ArrayList<>();
         applyRestrictions(dpm, admin, errors);
+        Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
+        // Kiosk reconciles before the link handlers: turning kiosk off clears
+        // every persistent preferred activity of this package, and
+        // configureBlockedBrowser below re-registers the managed-filtering ones.
+        KioskController.reconcile(context, dpm, admin, errors);
         setBlockedBrowserComponentEnabled(context, true, errors);
         configureBlockedBrowser(context, dpm, admin, errors);
-        protectManagementApps(context, dpm, admin, errors);
-        int[] packageCounts = applyPackagePolicy(context, dpm, admin, errors);
+        protectManagementApps(context, dpm, admin, trustedManagement, errors);
+        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
@@ -87,6 +101,14 @@ public final class LockdownPolicyController {
         packagesToShow.addAll(LockdownPackages.ALWAYS_BLOCKED);
         packagesToShow.addAll(LockdownPackages.KNOWN_BROWSER_AND_SOCIAL);
         packagesToShow.addAll(AllowedAppsStore.getManagedPackages(context));
+        // A device that never enabled kiosk skips this entirely; one that did must
+        // get its escape surfaces back even though they are hidden from bulk
+        // queries. An active kiosk keeps them hidden: pausing managed filtering is
+        // not a way to widen kiosk.
+        boolean kioskActive = KioskConfigStore.isActive(context);
+        if (!kioskActive && KioskConfigStore.wasEscapeSurfaceHidingApplied(context)) {
+            packagesToShow.addAll(LockdownPackages.KIOSK_ESCAPE_SURFACES);
+        }
 
         int visibleCount = 0;
         for (String packageName : packagesToShow) {
@@ -117,7 +139,11 @@ public final class LockdownPolicyController {
             }
         }
         unsuspendBrowserProviders(dpm, admin, errors);
-        protectManagementApps(context, dpm, admin, errors);
+        protectManagementApps(context, dpm, admin, resolveTrustedManagementPackages(context, errors), errors);
+        // Pausing managed filtering is not a way out of kiosk: an active kiosk
+        // keeps its lock task allowlist and re-registers the HOME preference that
+        // clearPackagePersistentPreferredActivities() above removed.
+        KioskController.reconcile(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             AllowedAppsStore.markPauseSucceeded(context);
@@ -286,13 +312,105 @@ public final class LockdownPolicyController {
         }
     }
 
+    /**
+     * Resolves which configured management packages may actually be treated as
+     * management on this device.
+     *
+     * <p>Management identity is a configuration record ({@link
+     * LockdownPackages.ManagementPackage}), not a package-name literal. When a
+     * record carries an approved certificate digest, verification fails closed:
+     * an unmatched or unreadable signer means the package gets no management
+     * privilege and the apply is reported as unverified. When no digest is
+     * configured — the default for the Tailscale pilot record — trust rests on
+     * the package name alone, which is an explicit and documented proof gap.
+     */
+    private static Set<String> resolveTrustedManagementPackages(
+            Context context,
+            List<String> errors
+    ) {
+        LinkedHashSet<String> trusted = new LinkedHashSet<>();
+        for (LockdownPackages.ManagementPackage record : LockdownPackages.managementPackages(
+                AllowedAppsStore.getManagementCertificatePins(context))) {
+            if (!isInstalled(context.getPackageManager(), record.packageName())) {
+                continue;
+            }
+            LockdownPackages.SignerVerdict verdict = LockdownPackages.verifySigner(
+                    record,
+                    signingCertificateDigests(context, record.packageName())
+            );
+            if (LockdownPackages.grantsManagementTrust(verdict)) {
+                trusted.add(record.packageName());
+            } else {
+                errors.add("חתימת " + record.packageName() + " לא אומתה (" + verdict.name() + ")");
+                Log.e(TAG, "Management signer rejected for " + record.packageName() + ": " + verdict);
+            }
+        }
+        return trusted;
+    }
+
+    private static Set<String> signingCertificateDigests(Context context, String packageName) {
+        LinkedHashSet<String> digests = new LinkedHashSet<>();
+        PackageManager pm = context.getPackageManager();
+        try {
+            Signature[] signatures;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageInfo info = getPackageInfo(pm, packageName,
+                        PackageManager.GET_SIGNING_CERTIFICATES);
+                SigningInfo signingInfo = info.signingInfo;
+                if (signingInfo == null) {
+                    return digests;
+                }
+                signatures = signingInfo.hasMultipleSigners()
+                        ? signingInfo.getApkContentsSigners()
+                        : signingInfo.getSigningCertificateHistory();
+            } else {
+                //noinspection deprecation
+                PackageInfo info = getPackageInfo(pm, packageName, PackageManager.GET_SIGNATURES);
+                //noinspection deprecation
+                signatures = info.signatures;
+            }
+            if (signatures == null) {
+                return digests;
+            }
+            MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+            for (Signature signature : signatures) {
+                digests.add(toHex(sha256.digest(signature.toByteArray())));
+            }
+        } catch (PackageManager.NameNotFoundException | NoSuchAlgorithmException ignored) {
+            // An unreadable signer is reported as "no digest observed", which a
+            // pinned record treats as UNKNOWN_SIGNER rather than as a pass.
+        }
+        return digests;
+    }
+
+    private static PackageInfo getPackageInfo(PackageManager pm, String packageName, int flags)
+            throws PackageManager.NameNotFoundException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return pm.getPackageInfo(packageName, PackageManager.PackageInfoFlags.of(flags));
+        }
+        //noinspection deprecation
+        return pm.getPackageInfo(packageName, flags);
+    }
+
+    private static String toHex(byte[] value) {
+        StringBuilder hex = new StringBuilder(value.length * 2);
+        for (byte b : value) {
+            hex.append(String.format(Locale.ROOT, "%02x", b));
+        }
+        return hex.toString();
+    }
+
     private static void protectManagementApps(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            Set<String> trustedManagement,
             List<String> errors
     ) {
-        for (String packageName : new String[]{context.getPackageName(), "com.tailscale.ipn"}) {
+        LinkedHashSet<String> protectedPackages = new LinkedHashSet<>();
+        protectedPackages.add(context.getPackageName());
+        protectedPackages.addAll(trustedManagement);
+        for (String packageName : protectedPackages) {
             if (!isInstalled(context.getPackageManager(), packageName)) {
                 continue;
             }
@@ -311,14 +429,21 @@ public final class LockdownPolicyController {
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            Set<String> trustedManagement,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
         Set<String> allowed = AllowedAppsStore.getAllowedPackages(context);
         Set<String> managed = AllowedAppsStore.getManagedPackages(context);
+        Set<String> adminSelectedSystem = AllowedAppsStore.getAdminSelectedSystemPackages(context);
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);
+        KioskConfigStore.Settings kiosk = KioskConfigStore.read(context);
+        boolean kioskActive = kiosk.state() == KioskState.ACTIVE;
+        String kioskTarget = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
+                ? kiosk.config().targetPackage()
+                : "";
         int blockedCount = 0;
         int allowedCount = 0;
 
@@ -329,7 +454,7 @@ public final class LockdownPolicyController {
                     & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
             if (!system
                     && !info.packageName.equals(context.getPackageName())
-                    && !info.packageName.equals("com.tailscale.ipn")) {
+                    && !LockdownPackages.isManagementPackage(info.packageName)) {
                 managed.add(info.packageName);
                 AllowedAppsStore.rememberManagedPackage(
                         context,
@@ -344,7 +469,19 @@ public final class LockdownPolicyController {
         packageNames.addAll(LockdownPackages.KNOWN_BROWSER_AND_SOCIAL);
         packageNames.addAll(managed);
         packageNames.addAll(allowed);
-        packageNames.add("com.tailscale.ipn");
+        packageNames.addAll(LockdownPackages.managementPackageNames());
+        // Escape surfaces are touched only once kiosk has actually been used, so a
+        // device that never enables kiosk behaves exactly as it did in 0.4. The
+        // stored flag keeps them in the reconcile set for the one pass that has to
+        // restore them after kiosk is switched off.
+        boolean reconcileEscapeSurfaces =
+                kioskActive || KioskConfigStore.wasEscapeSurfaceHidingApplied(context);
+        if (reconcileEscapeSurfaces) {
+            packageNames.addAll(LockdownPackages.KIOSK_ESCAPE_SURFACES);
+        }
+        if (!kioskTarget.isEmpty()) {
+            packageNames.add(kioskTarget);
+        }
         if (webViewProvider != null) {
             packageNames.add(webViewProvider);
         }
@@ -354,30 +491,61 @@ public final class LockdownPolicyController {
                 continue;
             }
 
+            LockdownPackages.PackageClass packageClass =
+                    LockdownPackages.classify(packageName, adminSelectedSystem);
+
             boolean shouldBlock = LockdownPackages.ALWAYS_BLOCKED.contains(packageName)
                     || LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(packageName);
 
-            if (!shouldBlock && allowlistConfigured && managed.contains(packageName)) {
+            if (!shouldBlock && allowlistConfigured
+                    && (managed.contains(packageName)
+                        || packageClass == LockdownPackages.PackageClass.ADMIN_SELECTED_SYSTEM)) {
                 shouldBlock = mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
                         ? !allowed.contains(packageName)
                         : allowed.contains(packageName);
             }
 
+            // Kiosk hides the known escape surfaces even though Lock Task already
+            // blocks navigation to most of them; a share sheet or OEM shortcut is
+            // a real exit. Outside kiosk they are deliberately left alone.
+            if (reconcileEscapeSurfaces
+                    && packageClass == LockdownPackages.PackageClass.KIOSK_ESCAPE_SURFACE) {
+                shouldBlock = kioskActive;
+            }
+
             // Management connectivity must survive policy changes. This is also
-            // useful while an administrator is still configuring the device.
-            if (packageName.equals("com.tailscale.ipn")) {
+            // useful while an administrator is still configuring the device. A
+            // configured record whose signer did not verify is absent from
+            // trustedManagement and therefore gets no exemption here.
+            if (trustedManagement.contains(packageName)) {
                 shouldBlock = false;
+            } else if (LockdownPackages.isManagementPackage(packageName)) {
+                // A configured record whose signer did not verify is not the
+                // management application. Fail closed: hide it rather than let an
+                // impostor keep the exemption its package name would have bought.
+                shouldBlock = true;
             }
             // On some Android releases Chrome is also the system WebView engine.
             // Hiding that package breaks otherwise allowed apps that render HTML.
             if (packageName.equals(webViewProvider)) {
                 shouldBlock = false;
             }
+            // Hiding these bricks OEM devices in ways the console cannot repair.
+            if (packageClass == LockdownPackages.PackageClass.ESSENTIAL_SYSTEM_PACKAGE) {
+                shouldBlock = false;
+            }
+            // The kiosk target is the whole point of the profile.
+            if (packageName.equals(kioskTarget)) {
+                shouldBlock = false;
+            }
 
             boolean criticalPackage = shouldBlock
                     || managed.contains(packageName)
                     || allowed.contains(packageName)
-                    || packageName.equals("com.tailscale.ipn")
+                    || packageName.equals(kioskTarget)
+                    || (reconcileEscapeSurfaces
+                        && packageClass == LockdownPackages.PackageClass.KIOSK_ESCAPE_SURFACE)
+                    || LockdownPackages.isManagementPackage(packageName)
                     || packageName.equals(webViewProvider);
             if (!criticalPackage || !isInstalled(pm, packageName)) {
                 continue;
@@ -402,6 +570,10 @@ public final class LockdownPolicyController {
             } catch (RuntimeException exception) {
                 errors.add("מדיניות " + packageName + ": " + exception.getClass().getSimpleName());
             }
+        }
+        // Only drop the restore obligation after a pass that actually completed.
+        if (reconcileEscapeSurfaces && (kioskActive || errors.isEmpty())) {
+            KioskConfigStore.setEscapeSurfaceHidingApplied(context, kioskActive);
         }
         return new int[]{blockedCount, allowedCount};
     }

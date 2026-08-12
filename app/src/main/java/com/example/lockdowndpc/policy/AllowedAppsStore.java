@@ -4,7 +4,9 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public final class AllowedAppsStore {
@@ -17,6 +19,8 @@ public final class AllowedAppsStore {
     private static final String KEY_MANAGED_PACKAGES = "managed_packages";
     private static final String KEY_MODE = "protection_mode";
     private static final String KEY_LABEL_PREFIX = "app_label:";
+    private static final String KEY_ADMIN_SELECTED_SYSTEM = "admin_selected_system_packages";
+    private static final String KEY_MANAGEMENT_PIN_PREFIX = "management_cert:";
 
     private AllowedAppsStore() {}
 
@@ -24,8 +28,69 @@ public final class AllowedAppsStore {
         Set<String> stored = prefs(context).getStringSet(KEY_ALLOWED, Collections.emptySet());
         HashSet<String> result = new HashSet<>(stored);
         result.add(context.getPackageName());
-        result.add("com.tailscale.ipn");
+        result.addAll(LockdownPackages.managementPackageNames());
         return result;
+    }
+
+    /**
+     * System packages an administrator explicitly opted into managing.
+     *
+     * <p>Empty by default. Device Guard does not enumerate and hide every system
+     * package: that is unrecoverable on many OEM builds. An operator who needs a
+     * specific system app under allow/block control names it here.
+     */
+    public static Set<String> getAdminSelectedSystemPackages(Context context) {
+        return new HashSet<>(
+                prefs(context).getStringSet(KEY_ADMIN_SELECTED_SYSTEM, Collections.emptySet())
+        );
+    }
+
+    public static void setAdminSelectedSystemPackages(Context context, Set<String> packages) {
+        HashSet<String> selected = new HashSet<>(packages);
+        // An essential package can never be opted in; that guard belongs here so
+        // no caller can widen it.
+        selected.removeAll(LockdownPackages.ESSENTIAL_SYSTEM);
+        prefs(context).edit().putStringSet(KEY_ADMIN_SELECTED_SYSTEM, selected).commit();
+    }
+
+    /**
+     * Administrator-configured signing-certificate pins for management packages,
+     * keyed by package name. Absent means "not proven", which
+     * {@link LockdownPackages#verifySigner} reports as an explicit gap rather
+     * than as a pass.
+     */
+    public static Map<String, Set<String>> getManagementCertificatePins(Context context) {
+        HashMap<String, Set<String>> pins = new HashMap<>();
+        for (String packageName : LockdownPackages.managementPackageNames()) {
+            Set<String> stored = prefs(context).getStringSet(
+                    KEY_MANAGEMENT_PIN_PREFIX + packageName,
+                    Collections.emptySet()
+            );
+            if (stored != null && !stored.isEmpty()) {
+                pins.put(packageName, new HashSet<>(stored));
+            }
+        }
+        return pins;
+    }
+
+    public static void setManagementCertificatePins(
+            Context context,
+            String packageName,
+            Set<String> digests
+    ) {
+        if (!LockdownPackages.isManagementPackage(packageName)) {
+            throw new IllegalArgumentException("Not a management package: " + packageName);
+        }
+        HashSet<String> normalized = new HashSet<>();
+        for (String digest : digests) {
+            String value = LockdownPackages.normalizeDigest(digest);
+            if (!value.isEmpty()) {
+                normalized.add(value);
+            }
+        }
+        prefs(context).edit()
+                .putStringSet(KEY_MANAGEMENT_PIN_PREFIX + packageName, normalized)
+                .commit();
     }
 
     public static void setAllowedPackages(
