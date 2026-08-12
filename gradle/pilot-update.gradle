@@ -107,4 +107,23 @@ plugins.withId('com.android.application') {
         description = 'Builds, tests, lints, and verifies the explicit Pilot 0.5.1 update-channel APK.'
         dependsOn 'test', 'lintRelease', 'verifyPilotRelease'
     }
+    tasks.register('verifyPilotChannelForCi', Exec) {
+        dependsOn 'assembleRelease'
+        group = 'verification'
+        description = 'CI-only channel check with the fresh runner single-signer certificate.'
+        commandLine 'python3', rootProject.file('tools/verify_pilot_apk.py'),
+            '--apk', layout.buildDirectory.file('outputs/apk/release/app-release.apk').get().asFile,
+            '--expected-package', expectedApplicationId,
+            '--expected-version-code', expectedVersionCode.toString(),
+            '--expected-version-name', expectedVersionName,
+            '--require-single-signer',
+            '--expected-manifest-url', pilotManifestUrl,
+            '--expected-public-key-file', publicKeyFile,
+            '--expected-public-key-sha256', approvedMetadataFingerprint
+    }
+    tasks.register('ciPilotChannelRelease') {
+        group = 'verification'
+        description = 'CI-only tests/lint/build/channel check; never a publishing gate.'
+        dependsOn 'test', 'lintRelease', 'verifyPilotChannelForCi'
+    }
 }

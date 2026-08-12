@@ -58,6 +58,7 @@ class VerifyPilotApkTest(unittest.TestCase):
                     return_value=("com.example.lockdowndpc", 10, "0.5.1"),
                 ),
                 mock.patch.object(verify_pilot_apk.publish_update, "verify_apk_signer"),
+                mock.patch.object(verify_pilot_apk, "require_p256_public_key"),
                 mock.patch.object(
                     verify_pilot_apk,
                     "read_compiled_build_config",
@@ -95,6 +96,7 @@ class VerifyPilotApkTest(unittest.TestCase):
                     return_value=("com.example.lockdowndpc", 10, "0.5.1"),
                 ),
                 mock.patch.object(verify_pilot_apk.publish_update, "verify_apk_signer"),
+                mock.patch.object(verify_pilot_apk, "require_p256_public_key"),
                 mock.patch.object(verify_pilot_apk, "read_compiled_build_config", return_value={}),
                 self.assertRaises(verify_pilot_apk.VerificationError),
             ):
@@ -207,6 +209,7 @@ class VerifyPilotApkTest(unittest.TestCase):
             expected_version_code=10,
             expected_version_name="0.5.1",
             expected_signer_sha256="25" * 32,
+            require_single_signer=False,
             expected_manifest_url="https://updates.example.test/latest.json",
             expected_public_key_file=key,
             expected_public_key_sha256=fingerprint,
@@ -218,6 +221,53 @@ class VerifyPilotApkTest(unittest.TestCase):
             expected_apk_url=None,
             minimum_version_code=9,
         )
+
+    def test_metadata_key_must_be_secp256r1(self) -> None:
+        accepted = mock.Mock(
+            returncode=0,
+            stdout="ASN1 OID: prime256v1\nNIST CURVE: P-256\n",
+            stderr="",
+        )
+        with mock.patch.object(verify_pilot_apk.subprocess, "run", return_value=accepted):
+            verify_pilot_apk.require_p256_public_key(Path("public.pem"), Path("openssl"))
+
+        wrong_curve = mock.Mock(
+            returncode=0,
+            stdout="ASN1 OID: secp384r1\nNIST CURVE: P-384\n",
+            stderr="",
+        )
+        with (
+            mock.patch.object(verify_pilot_apk.subprocess, "run", return_value=wrong_curve),
+            self.assertRaises(verify_pilot_apk.VerificationError),
+        ):
+            verify_pilot_apk.require_p256_public_key(Path("public.pem"), Path("openssl"))
+
+    def test_ci_signer_policy_requires_exactly_one_certificate(self) -> None:
+        digest = "ab" * 32
+        single = mock.Mock(
+            returncode=0,
+            stdout=f"Signer #1 certificate SHA-256 digest: {digest}\n",
+            stderr="",
+        )
+        with mock.patch.object(verify_pilot_apk.subprocess, "run", return_value=single):
+            self.assertEqual(
+                digest,
+                verify_pilot_apk.verify_apk_has_single_signer(Path("app.apk"), Path("apksigner")),
+            )
+
+        multiple = mock.Mock(
+            returncode=0,
+            stdout=(
+                f"Signer #1 certificate SHA-256 digest: {digest}\n"
+                f"Signer #2 certificate SHA-256 digest: {'cd' * 32}\n"
+            ),
+            stderr="",
+        )
+        with (
+            mock.patch.object(verify_pilot_apk.subprocess, "run", return_value=multiple),
+            self.assertRaises(verify_pilot_apk.VerificationError),
+        ):
+            verify_pilot_apk.verify_apk_has_single_signer(Path("app.apk"), Path("apksigner"))
 
 
 if __name__ == "__main__":

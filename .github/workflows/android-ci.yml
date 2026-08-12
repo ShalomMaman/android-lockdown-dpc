@@ -44,7 +44,7 @@ jobs:
             --apk app/build/outputs/apk/release/app-release.apk \
             --expected-package com.example.lockdowndpc \
             --expected-version-code 10 --expected-version-name 0.5.1 \
-            --expected-signer-sha256 25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b \
+            --require-single-signer \
             --expect-channel-disabled
 
       - name: Verify explicit pilot update-channel build
@@ -53,7 +53,7 @@ jobs:
           # repository-pinned pilot channel.
           DEVICE_GUARD_UPDATE_MANIFEST_URL: http://attacker.invalid/latest.json
           DEVICE_GUARD_UPDATE_PUBLIC_KEY: attacker-controlled
-        run: ./gradlew -I gradle/pilot-update.init.gradle.kts --no-daemon --max-workers=2 clean pilotChannelRelease
+        run: ./gradlew -I gradle/pilot-update.init.gradle.kts --no-daemon --max-workers=2 clean ciPilotChannelRelease
 
       - name: Test release publisher
         run: python3 -m unittest discover -s tools -p 'test_*.py'

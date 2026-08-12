@@ -8,6 +8,8 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -18,6 +20,9 @@ import publish_update
 
 
 BUILD_CONFIG_DESCRIPTOR = "Lcom/example/lockdowndpc/BuildConfig;"
+CERT_SHA256_LINE = re.compile(
+    r"^Signer #[0-9]+ certificate SHA-256 digest: (?P<digest>[0-9a-fA-F]{64})$"
+)
 
 
 class VerificationError(Exception):
@@ -30,7 +35,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--expected-package", required=True)
     parser.add_argument("--expected-version-code", required=True, type=int)
     parser.add_argument("--expected-version-name", required=True)
-    parser.add_argument("--expected-signer-sha256", required=True)
+    parser.add_argument("--expected-signer-sha256")
+    parser.add_argument("--require-single-signer", action="store_true")
     parser.add_argument("--expected-manifest-url")
     parser.add_argument("--expected-public-key-file", type=Path)
     parser.add_argument("--expected-public-key-sha256")
@@ -77,6 +83,43 @@ def read_pem_public_key(path: Path) -> tuple[str, bytes]:
     if not der:
         raise VerificationError("pilot metadata public key is empty")
     return encoded, der
+
+
+def require_p256_public_key(path: Path, openssl: Path | None = None) -> None:
+    executable = openssl or (Path(found) if (found := shutil.which("openssl")) else None)
+    if executable is None:
+        raise VerificationError("openssl was not found; it is required to validate the metadata key")
+    result = subprocess.run(
+        [str(executable), "pkey", "-pubin", "-in", str(path), "-text", "-noout"],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise VerificationError("pilot metadata public key is not a valid EC public key")
+    if "ASN1 OID: prime256v1" not in result.stdout or "NIST CURVE: P-256" not in result.stdout:
+        raise VerificationError("pilot metadata public key must use secp256r1 (P-256)")
+
+
+def verify_apk_has_single_signer(apk: Path, apksigner: Path) -> str:
+    result = subprocess.run(
+        [str(apksigner), "verify", "--print-certs", str(apk)],
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        raise VerificationError("apksigner rejected the APK")
+    signer_digests = [
+        match.group("digest").lower()
+        for line in result.stdout.splitlines()
+        if (match := CERT_SHA256_LINE.match(line.strip()))
+    ]
+    if len(signer_digests) != 1:
+        raise VerificationError("APK must have exactly one signing certificate")
+    return signer_digests[0]
 
 
 def read_compiled_build_config(apk: Path, dexdump: Path) -> dict[str, str]:
@@ -190,13 +233,24 @@ def verify(args: argparse.Namespace) -> dict[str, str | int]:
         raise VerificationError(f"pilot APK does not exist: {apk}")
     if args.expected_version_code <= 0 or not args.expected_version_name:
         raise VerificationError("expected pilot version is invalid")
-    expected_signer = publish_update.normalize_certificate_sha256(args.expected_signer_sha256)
+    if bool(args.expected_signer_sha256) == bool(args.require_single_signer):
+        raise VerificationError(
+            "choose exactly one signer policy: --expected-signer-sha256 or --require-single-signer"
+        )
+    expected_signer = (
+        publish_update.normalize_certificate_sha256(args.expected_signer_sha256)
+        if args.expected_signer_sha256 else None
+    )
     try:
         aapt2 = publish_update.find_android_build_tool("aapt2", args.aapt2)
         apksigner = publish_update.find_android_build_tool("apksigner", args.apksigner)
         dexdump = publish_update.find_android_build_tool("dexdump", args.dexdump)
         package_name, version_code, version_name = publish_update.read_apk_identity(apk, aapt2)
-        publish_update.verify_apk_signer(apk, apksigner, expected_signer)
+        if expected_signer:
+            publish_update.verify_apk_signer(apk, apksigner, expected_signer)
+            observed_signer = expected_signer
+        else:
+            observed_signer = verify_apk_has_single_signer(apk, apksigner)
     except publish_update.PublishError as exc:
         raise VerificationError(str(exc)) from exc
     actual_identity = (package_name, version_code, version_name)
@@ -215,7 +269,7 @@ def verify(args: argparse.Namespace) -> dict[str, str | int]:
             raise VerificationError("disabled-channel verification cannot bind a release manifest")
         return {
             "apk": str(apk), "packageName": package_name, "versionCode": version_code,
-            "versionName": version_name, "signerSha256": expected_signer,
+            "versionName": version_name, "signerSha256": observed_signer,
             "channel": "disabled",
         }
     if not args.expected_manifest_url or not args.expected_public_key_file or not args.expected_public_key_sha256:
@@ -225,6 +279,7 @@ def verify(args: argparse.Namespace) -> dict[str, str | int]:
         args.expected_public_key_sha256, "--expected-public-key-sha256"
     )
     public_key_base64, public_key_der = read_pem_public_key(args.expected_public_key_file)
+    require_p256_public_key(args.expected_public_key_file)
     actual_key_fingerprint = hashlib.sha256(public_key_der).hexdigest()
     if actual_key_fingerprint != expected_key_fingerprint:
         raise VerificationError("pilot metadata public-key SHA-256 does not match")
@@ -242,7 +297,7 @@ def verify(args: argparse.Namespace) -> dict[str, str | int]:
         )
     return {
         "apk": str(apk), "packageName": package_name, "versionCode": version_code,
-        "versionName": version_name, "signerSha256": expected_signer,
+        "versionName": version_name, "signerSha256": observed_signer,
         "manifestUrl": manifest_url, "metadataKeySha256": actual_key_fingerprint,
     }
 

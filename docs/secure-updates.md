@@ -31,6 +31,13 @@ and structurally reads its compiled `BuildConfig` from DEX. It fails if package,
 version, signer, URL, or key drift, so it cannot silently emit a channel-disabled
 pilot APK. No private material is used.
 
+GitHub-hosted runners create their own ephemeral Android debug certificate, so
+CI uses the separate `ciPilotChannelRelease` task. That task requires exactly
+one valid signer and verifies the complete compiled channel, but it deliberately
+does not approve that certificate for distribution. Never publish its APK. The
+documented `pilotChannelRelease` command remains the release gate and requires
+the exact signer of the already enrolled pilot device.
+
 Production remains a separate explicit build. These values are supported only
 by the production init path as Gradle properties or environment variables:
 
