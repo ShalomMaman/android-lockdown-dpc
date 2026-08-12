@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.graphics.Bitmap;
 import android.net.http.SslError;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,6 +20,8 @@ import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.SslErrorHandler;
 import android.webkit.WebChromeClient;
+import android.webkit.WebBackForwardList;
+import android.webkit.WebHistoryItem;
 import android.webkit.WebResourceError;
 import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
@@ -36,6 +39,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.security.AppLabelSanitizer;
 
 /**
  * The controlled HOME/launcher surface, active only while kiosk is enabled.
@@ -109,7 +113,7 @@ public final class KioskHostActivity extends AppCompatActivity {
                 if (webView != null
                         && webView.getVisibility() == View.VISIBLE
                         && webView.canGoBack()) {
-                    webView.goBack();
+                    goBackWithinOrigin();
                 }
                 // Otherwise the gesture is swallowed. Back never leaves the host.
             }
@@ -342,7 +346,8 @@ public final class KioskHostActivity extends AppCompatActivity {
         try {
             PackageManager pm = getPackageManager();
             CharSequence label = pm.getApplicationLabel(pm.getApplicationInfo(packageName, 0));
-            return label == null || label.length() == 0 ? packageName : label.toString();
+            String sanitized = AppLabelSanitizer.sanitize(label == null ? null : label.toString());
+            return sanitized == null || sanitized.isBlank() ? packageName : sanitized;
         } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
             return packageName;
         }
@@ -374,9 +379,39 @@ public final class KioskHostActivity extends AppCompatActivity {
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         webView.setVisibility(View.VISIBLE);
-        if (!target.equals(siteUrl) || webView.getUrl() == null) {
+        String current = webView.getUrl();
+        if (!target.equals(siteUrl)
+                || current == null
+                || !KioskNavigationGuard.evaluate(origin, current).allowed()) {
             siteUrl = target;
-            webView.loadUrl(target);
+            resetToConfiguredSite(webView, false);
+        }
+    }
+
+    /** Back may only select the immediately preceding same-origin history item. */
+    private void goBackWithinOrigin() {
+        WebBackForwardList history = webView.copyBackForwardList();
+        int previousIndex = history == null ? -1 : history.getCurrentIndex() - 1;
+        WebHistoryItem previous = previousIndex < 0 ? null : history.getItemAtIndex(previousIndex);
+        String previousUrl = previous == null ? null : previous.getUrl();
+        if (KioskNavigationGuard.evaluate(origin, previousUrl).allowed()) {
+            webView.goBack();
+            return;
+        }
+        Log.i(TAG, "Discarded unsafe kiosk history entry");
+        resetToConfiguredSite(webView, true);
+    }
+
+    /** Stops an escaped navigation, removes its history, and reasserts the configured site. */
+    private void resetToConfiguredSite(WebView view, boolean notify) {
+        if (view == null || siteUrl.isEmpty()) {
+            return;
+        }
+        view.stopLoading();
+        view.clearHistory();
+        view.loadUrl(siteUrl);
+        if (notify) {
+            showNotice(getString(R.string.kiosk_host_blocked_navigation));
         }
     }
 
@@ -438,6 +473,28 @@ public final class KioskHostActivity extends AppCompatActivity {
         }
 
         @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            enforcePostNavigation(view, url);
+        }
+
+        @Override
+        public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+            // Covers same-document History API changes, which do not pass
+            // through shouldOverrideUrlLoading.
+            enforcePostNavigation(view, url);
+        }
+
+        @Override
+        public void onPageCommitVisible(WebView view, String url) {
+            enforcePostNavigation(view, url);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            enforcePostNavigation(view, url);
+        }
+
+        @Override
         public void onReceivedSslError(WebView view, SslErrorHandler handler, SslError error) {
             // Fail closed: never proceed through a TLS error.
             handler.cancel();
@@ -480,6 +537,20 @@ public final class KioskHostActivity extends AppCompatActivity {
             Log.i(TAG, "Blocked kiosk navigation: " + verdict.reason());
             showNotice(getString(R.string.kiosk_host_blocked_navigation));
             return true;
+        }
+
+        /**
+         * Re-checks the URL after WebView has accepted a navigation. Android does
+         * not promise shouldOverrideUrlLoading for POST requests, server
+         * redirects, script assignment, or every history mutation.
+         */
+        private void enforcePostNavigation(WebView view, String url) {
+            KioskNavigationGuard.Verdict verdict = KioskNavigationGuard.evaluate(origin, url);
+            if (verdict.allowed()) {
+                return;
+            }
+            Log.i(TAG, "Reasserting kiosk site after navigation: " + verdict.reason());
+            resetToConfiguredSite(view, true);
         }
     }
 

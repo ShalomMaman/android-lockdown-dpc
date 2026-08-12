@@ -22,6 +22,7 @@ import com.example.lockdowndpc.security.AdminSession;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Device-side owner of kiosk mode: authorization, lock task, and the controlled
@@ -73,13 +74,13 @@ public final class KioskController {
      *
      * @param onPolicyReconciled run once the serialized policy pass this request
      *                           queued has finished, or immediately when the
-     *                           request was refused before queueing one. May be
-     *                           {@code null}.
+     *                           request was refused before queueing one. Receives
+     *                           true only for a verified pass. May be {@code null}.
      */
     public static synchronized Result requestConfigure(
             Context context,
             KioskConfig config,
-            Runnable onPolicyReconciled
+            Consumer<Boolean> onPolicyReconciled
     ) {
         Context app = context.getApplicationContext();
         KioskConfigValidator.Validation validation =
@@ -108,7 +109,10 @@ public final class KioskController {
     }
 
     /** Enters lock task. Requires an unlocked admin session and a valid config. */
-    public static synchronized Result requestEnter(Context context, Runnable onPolicyReconciled) {
+    public static synchronized Result requestEnter(
+            Context context,
+            Consumer<Boolean> onPolicyReconciled
+    ) {
         return requestTransition(context, KioskAction.ENTER, onPolicyReconciled);
     }
 
@@ -117,7 +121,10 @@ public final class KioskController {
     }
 
     /** Leaves lock task. Requires an unlocked admin session. */
-    public static synchronized Result requestExit(Context context, Runnable onPolicyReconciled) {
+    public static synchronized Result requestExit(
+            Context context,
+            Consumer<Boolean> onPolicyReconciled
+    ) {
         return requestTransition(context, KioskAction.EXIT, onPolicyReconciled);
     }
 
@@ -126,7 +133,10 @@ public final class KioskController {
     }
 
     /** Drops the kiosk configuration and returns to managed filtering only. */
-    public static synchronized Result requestClear(Context context, Runnable onPolicyReconciled) {
+    public static synchronized Result requestClear(
+            Context context,
+            Consumer<Boolean> onPolicyReconciled
+    ) {
         Context app = context.getApplicationContext();
         KioskState from = KioskConfigStore.readState(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
@@ -229,7 +239,7 @@ public final class KioskController {
     private static Result requestTransition(
             Context context,
             KioskAction action,
-            Runnable onPolicyReconciled
+            Consumer<Boolean> onPolicyReconciled
     ) {
         Context app = context.getApplicationContext();
         KioskConfigValidator.Validation validation = validate(app);
@@ -251,16 +261,24 @@ public final class KioskController {
             );
         }
         KioskConfigStore.writeState(app, outcome.state(), "");
-        AuditLog.append(app, app.getString(action == KioskAction.ENTER
-                ? R.string.audit_kiosk_activated
-                : R.string.audit_kiosk_exited));
-        return applyNow(app, outcome.state(), outcome.reason(), onPolicyReconciled);
+        if (action == KioskAction.ENTER) {
+            AuditLog.append(app, app.getString(R.string.audit_kiosk_activated));
+        }
+        Consumer<Boolean> completion = verified -> {
+            if (action == KioskAction.EXIT && verified) {
+                AuditLog.append(app, app.getString(R.string.audit_kiosk_exited));
+            }
+            if (onPolicyReconciled != null) {
+                onPolicyReconciled.accept(verified);
+            }
+        };
+        return applyNow(app, outcome.state(), outcome.reason(), completion);
     }
 
     /** Returns {@code result} after releasing a caller that is waiting on a pass. */
-    private static Result settle(Result result, Runnable onPolicyReconciled) {
+    private static Result settle(Result result, Consumer<Boolean> onPolicyReconciled) {
         if (onPolicyReconciled != null) {
-            onPolicyReconciled.run();
+            onPolicyReconciled.accept(false);
         }
         return result;
     }
@@ -345,7 +363,7 @@ public final class KioskController {
             Context context,
             KioskState state,
             String reason,
-            Runnable onPolicyReconciled
+            Consumer<Boolean> onPolicyReconciled
     ) {
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -365,10 +383,17 @@ public final class KioskController {
         // activities, which takes the managed-filtering link handlers with it, so
         // the pass below is what puts them back. A console caller waits on
         // onPolicyReconciled rather than reporting success while that is still in
-        // flight. runGuarded always runs the completion, including when the pass
-        // is skipped because protection is paused.
-        PolicyReconciliationCoordinator.reconcileAsync(
-                context, "kiosk-state-change", onPolicyReconciled);
+        // flight. The result-bearing coordinator always runs the completion and
+        // reports a skipped, failed or crashed pass as unverified.
+        boolean localVerified = errors.isEmpty();
+        PolicyReconciliationCoordinator.reconcileAsyncVerified(
+                context,
+                "kiosk-state-change",
+                verified -> {
+                    if (onPolicyReconciled != null) {
+                        onPolicyReconciled.accept(localVerified && verified);
+                    }
+                });
         return new Result(errors.isEmpty(), KioskConfigStore.readState(context), reason, errors);
     }
 
@@ -391,9 +416,7 @@ public final class KioskController {
             List<String> errors
     ) {
         KioskConfigStore.Settings settings = KioskConfigStore.read(context);
-        boolean active = settings.state() == KioskState.ACTIVE
-                || settings.state() == KioskState.FAULT;
-        if (!active) {
+        if (!KioskConfigStore.isContainmentState(settings.state())) {
             return disableKiosk(context, dpm, admin, errors);
         }
         applyLockTaskPackages(context, dpm, admin, settings, errors);
@@ -407,7 +430,8 @@ public final class KioskController {
         applyLockTaskFeatures(
                 dpm,
                 admin,
-                KioskRecoveryPolicy.allowHomeKey(settings.config().mode(), homeRegistered),
+                KioskRecoveryPolicy.allowHomeKey(
+                        settings.state(), settings.config().mode(), homeRegistered),
                 errors
         );
         return false;
@@ -467,7 +491,9 @@ public final class KioskController {
         packages.add(context.getPackageName());
         if (settings.state() == KioskState.ACTIVE
                 && settings.config().mode() == KioskMode.SINGLE_APP
-                && !settings.config().targetPackage().isEmpty()) {
+                && !settings.config().targetPackage().isEmpty()
+                && !KioskAppCatalog.isProtectedFromKiosk(
+                        settings.config().targetPackage())) {
             packages.add(settings.config().targetPackage());
         }
         String[] allowlist = packages.toArray(new String[0]);

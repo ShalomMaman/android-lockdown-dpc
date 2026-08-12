@@ -53,7 +53,7 @@ object SecureUpdateManager {
             UpdateCheckResult.FAILED
         } catch (exception: Exception) {
             clearCachedUpdate(appContext)
-            val reason = "בדיקת העדכון נכשלה (${exception.javaClass.simpleName})"
+            val reason = "update-check-failed:${exception.javaClass.simpleName}"
             UpdateStateStore.recordFailure(appContext, reason)
             AuditLog.append(appContext, reason)
             UpdateCheckResult.FAILED
@@ -74,7 +74,7 @@ object SecureUpdateManager {
         }
         if (snapshot.phase == UpdatePhase.INSTALLING && isInstalledCandidate(appContext, snapshot)) {
             UpdateStateStore.recordInstalled(appContext, currentVersion)
-            AuditLog.append(appContext, "עדכון $currentVersion הותקן בהצלחה")
+            AuditLog.append(appContext, "Update $currentVersion installed successfully")
         }
         clearCachedUpdate(appContext)
     }
@@ -93,7 +93,7 @@ object SecureUpdateManager {
     private fun performCheck(context: Context, isCancelled: () -> Boolean): UpdateCheckResult {
         val dpm = context.getSystemService(DevicePolicyManager::class.java)
         if (dpm == null || !dpm.isDeviceOwnerApp(context.packageName)) {
-            UpdateStateStore.recordFailure(context, "עדכון אוטומטי דורש Device Owner")
+            UpdateStateStore.recordFailure(context, "automatic-update-requires-device-owner")
             return UpdateCheckResult.FAILED
         }
 
@@ -113,7 +113,7 @@ object SecureUpdateManager {
         val current = currentPackageInfo(context)
         val highestAuthorized = UpdateStateStore.highestAuthorizedVersion(context)
         if (authorized.versionCode < highestAuthorized) {
-            throw UpdateVerificationException("manifest ישן יותר מגרסה שכבר אומתה")
+            throw UpdateVerificationException("manifest-version-rollback")
         }
         if (authorized.versionCode <= versionCodeOf(current)) {
             // The installed APK is already platform-verified; metadata alone
@@ -138,10 +138,10 @@ object SecureUpdateManager {
         UpdateStateStore.recordAuthorizedVersion(context, authorized.versionCode)
         ensureActive(apkDeadline, isCancelled)
         if (authorized.expiresAtEpochSeconds <= System.currentTimeMillis() / 1_000L) {
-            throw UpdateVerificationException("manifest העדכון פג לפני ההתקנה")
+            throw UpdateVerificationException("update-manifest-expired-before-install")
         }
         commitSelfUpdate(context, apk, authorized)
-        AuditLog.append(context, "עדכון ${authorized.versionName} אומת ונשלח להתקנה")
+        AuditLog.append(context, "Update ${authorized.versionName} verified and sent for install")
         return UpdateCheckResult.INSTALLING
     }
 
@@ -155,7 +155,7 @@ object SecureUpdateManager {
         try {
             val length = connection.contentLengthLong
             if (length > maxBytes) {
-                throw UpdateVerificationException("manifest גדול מהמותר")
+                throw UpdateVerificationException("manifest-too-large")
             }
             connection.inputStream.use { input ->
                 val output = java.io.ByteArrayOutputStream(minOf(maxBytes, 8 * 1024))
@@ -167,7 +167,7 @@ object SecureUpdateManager {
                     if (read < 0) break
                     total += read
                     if (total > maxBytes) {
-                        throw UpdateVerificationException("manifest גדול מהמותר")
+                        throw UpdateVerificationException("manifest-too-large")
                     }
                     output.write(buffer, 0, read)
                 }
@@ -198,7 +198,7 @@ object SecureUpdateManager {
         try {
             val declaredLength = connection.contentLengthLong
             if (declaredLength >= 0L && declaredLength != update.apkSize) {
-                throw UpdateVerificationException("גודל APK אינו תואם ל-manifest")
+                throw UpdateVerificationException("apk-size-mismatch")
             }
             var total = 0L
             connection.inputStream.use { input ->
@@ -210,7 +210,7 @@ object SecureUpdateManager {
                         if (read < 0) break
                         total += read
                         if (total > update.apkSize || total > MAX_APK_BYTES) {
-                            throw UpdateVerificationException("APK גדול מהמותר")
+                            throw UpdateVerificationException("apk-too-large")
                         }
                         digest.update(buffer, 0, read)
                         output.write(buffer, 0, read)
@@ -219,11 +219,11 @@ object SecureUpdateManager {
                 }
             }
             if (total != update.apkSize) {
-                throw UpdateVerificationException("הורדת APK נקטעה")
+                throw UpdateVerificationException("apk-download-truncated")
             }
             val expectedDigest = update.apkSha256.hexToBytes()
             if (!MessageDigest.isEqual(digest.digest(), expectedDigest)) {
-                throw UpdateVerificationException("SHA-256 של APK אינו תואם")
+                throw UpdateVerificationException("apk-sha256-mismatch")
             }
             if (!partial.renameTo(target)) {
                 throw java.io.IOException("Unable to finalize update cache")
@@ -279,7 +279,7 @@ object SecureUpdateManager {
                     val resolved = try {
                         URI(currentUrl).resolve(location).toString()
                     } catch (_: IllegalArgumentException) {
-                        throw UpdateVerificationException("כתובת הפניה של העדכון אינה תקינה")
+                        throw UpdateVerificationException("invalid-update-redirect-url")
                     }
                     currentUrl = UpdateEnvelopeVerifier.requireCleanHttpsUrl(resolved)
                 }
@@ -301,19 +301,19 @@ object SecureUpdateManager {
     private fun verifyArchive(context: Context, apk: File, update: AuthorizedUpdate) {
         val packageManager = context.packageManager
         val archive = packageInfoForArchive(packageManager, apk)
-            ?: throw UpdateVerificationException("Android לא הצליח לקרוא את ה-APK")
+            ?: throw UpdateVerificationException("android-could-not-read-apk")
         if (archive.packageName != context.packageName || archive.packageName != update.packageName) {
-            throw UpdateVerificationException("שם חבילת APK אינו תואם")
+            throw UpdateVerificationException("apk-package-name-mismatch")
         }
         if (versionCodeOf(archive) != update.versionCode) {
-            throw UpdateVerificationException("גרסת APK אינה תואמת ל-manifest")
+            throw UpdateVerificationException("apk-version-code-mismatch")
         }
         if (archive.versionName.orEmpty() != update.versionName) {
-            throw UpdateVerificationException("שם גרסת APK אינו תואם ל-manifest")
+            throw UpdateVerificationException("apk-version-name-mismatch")
         }
         val installed = currentPackageInfo(context)
         if (!isSignerAuthorized(installed, archive)) {
-            throw UpdateVerificationException("חתימת APK אינה תואמת לאפליקציה המותקנת")
+            throw UpdateVerificationException("apk-signer-mismatch")
         }
     }
 
@@ -392,9 +392,9 @@ object SecureUpdateManager {
             return signatureDigests(installed.signatures) == signatureDigests(archive.signatures)
         }
         val installedSigning = installed.signingInfo
-            ?: throw UpdateVerificationException("מידע חתימת APK מותקן חסר")
+            ?: throw UpdateVerificationException("installed-apk-signing-info-missing")
         val archiveSigning = archive.signingInfo
-            ?: throw UpdateVerificationException("מידע חתימת APK חדש חסר")
+            ?: throw UpdateVerificationException("new-apk-signing-info-missing")
         if (installedSigning.hasMultipleSigners() || archiveSigning.hasMultipleSigners()) {
             return installedSigning.hasMultipleSigners() &&
                 archiveSigning.hasMultipleSigners() &&
@@ -409,7 +409,7 @@ object SecureUpdateManager {
     private fun signatureDigests(signatures: Array<out android.content.pm.Signature>?): Set<String> {
         val presentSignatures = signatures ?: emptyArray()
         if (presentSignatures.isEmpty()) {
-            throw UpdateVerificationException("מידע חתימת APK חסר")
+            throw UpdateVerificationException("apk-signing-info-missing")
         }
         return presentSignatures.mapTo(linkedSetOf()) { signature ->
             MessageDigest.getInstance("SHA-256")
@@ -423,7 +423,7 @@ object SecureUpdateManager {
         else @Suppress("DEPRECATION") info.versionCode.toLong()
 
     private fun String.hexToBytes(): ByteArray {
-        if (length % 2 != 0) throw UpdateVerificationException("SHA-256 אינו תקין")
+        if (length % 2 != 0) throw UpdateVerificationException("invalid-sha256")
         return ByteArray(length / 2) { index ->
             substring(index * 2, index * 2 + 2).toInt(16).toByte()
         }

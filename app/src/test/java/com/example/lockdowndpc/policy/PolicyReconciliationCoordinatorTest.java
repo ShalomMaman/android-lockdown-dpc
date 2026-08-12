@@ -144,4 +144,48 @@ public final class PolicyReconciliationCoordinatorTest {
 
         assertTrue(worked.get());
     }
+
+    @Test
+    public void verifiedCompletionReportsWorkFailure() {
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.runGuardedVerified(
+                () -> true,
+                () -> false,
+                exception -> { throw new AssertionError(exception); },
+                verified::set
+        );
+
+        assertFalse(verified.get());
+    }
+
+    @Test
+    public void verifiedCompletionReportsCrashAsFailure() {
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+        AtomicReference<RuntimeException> recorded = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.runGuardedVerified(
+                () -> true,
+                () -> { throw new IllegalStateException("boom"); },
+                recorded::set,
+                verified::set
+        );
+
+        assertTrue(recorded.get() instanceof IllegalStateException);
+        assertFalse(verified.get());
+    }
+
+    @Test
+    public void skippedVerifiedWorkDoesNotClaimSuccess() {
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.runGuardedVerified(
+                () -> false,
+                () -> { throw new AssertionError("must not run"); },
+                exception -> { throw new AssertionError(exception); },
+                verified::set
+        );
+
+        assertFalse(verified.get());
+    }
 }

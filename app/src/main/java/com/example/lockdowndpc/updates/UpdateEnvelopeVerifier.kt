@@ -38,12 +38,12 @@ object UpdateEnvelopeVerifier {
         nowEpochSeconds: Long,
     ): AuthorizedUpdate {
         if (envelopeBytes.isEmpty() || envelopeBytes.size > MAX_MANIFEST_BYTES) {
-            throw UpdateVerificationException("גודל manifest אינו תקין")
+            throw UpdateVerificationException("invalid-manifest-size")
         }
         val envelope = try {
             JSONObject(envelopeBytes.toString(Charsets.UTF_8))
         } catch (_: RuntimeException) {
-            throw UpdateVerificationException("מבנה manifest אינו תקין")
+            throw UpdateVerificationException("invalid-manifest-structure")
         }
         val payloadBytes = decodeUrlBase64(envelope.optString("payload"))
         val signatureBytes = decodeUrlBase64(envelope.optString("signature"))
@@ -52,42 +52,42 @@ object UpdateEnvelopeVerifier {
         val payload = try {
             JSONObject(payloadBytes.toString(Charsets.UTF_8))
         } catch (_: RuntimeException) {
-            throw UpdateVerificationException("תוכן manifest אינו תקין")
+            throw UpdateVerificationException("invalid-manifest-content")
         }
         if (payload.optInt("schemaVersion", -1) != UPDATE_SCHEMA_VERSION) {
-            throw UpdateVerificationException("גרסת manifest אינה נתמכת")
+            throw UpdateVerificationException("unsupported-manifest-version")
         }
         val packageName = payload.optString("packageName")
         if (packageName != expectedPackage) {
-            throw UpdateVerificationException("חבילת העדכון אינה תואמת")
+            throw UpdateVerificationException("update-package-mismatch")
         }
         val versionCode = payload.optLong("versionCode", -1L)
         if (versionCode <= 0L) {
-            throw UpdateVerificationException("קוד גרסה אינו תקין")
+            throw UpdateVerificationException("invalid-version-code")
         }
         val versionName = payload.optString("versionName")
         if (versionName.isBlank() || versionName.length > 64) {
-            throw UpdateVerificationException("שם גרסה אינו תקין")
+            throw UpdateVerificationException("invalid-version-name")
         }
         val apkSize = payload.optLong("apkSize", -1L)
         if (apkSize <= 0L || apkSize > MAX_APK_BYTES) {
-            throw UpdateVerificationException("גודל APK אינו מורשה")
+            throw UpdateVerificationException("invalid-apk-size")
         }
         val sha256 = payload.optString("apkSha256").lowercase()
         if (!sha256.matches(Regex("[0-9a-f]{64}"))) {
-            throw UpdateVerificationException("SHA-256 אינו תקין")
+            throw UpdateVerificationException("invalid-sha256")
         }
         val apkUrl = requireCleanHttpsUrl(payload.optString("apkUrl"))
         val issuedAt = payload.optLong("issuedAt", -1L)
         val expiresAt = payload.optLong("expiresAt", -1L)
         if (issuedAt <= 0L || issuedAt > nowEpochSeconds + MAX_CLOCK_SKEW_SECONDS) {
-            throw UpdateVerificationException("זמן הנפקת manifest אינו תקין")
+            throw UpdateVerificationException("invalid-manifest-issued-at")
         }
         if (expiresAt <= nowEpochSeconds ||
             expiresAt <= issuedAt ||
             expiresAt - issuedAt > MAX_METADATA_VALIDITY_SECONDS
         ) {
-            throw UpdateVerificationException("manifest העדכון פג תוקף")
+            throw UpdateVerificationException("expired-update-manifest")
         }
         return AuthorizedUpdate(
             packageName = packageName,
@@ -107,20 +107,20 @@ object UpdateEnvelopeVerifier {
             val publicKey = KeyFactory.getInstance("EC")
                 .generatePublic(X509EncodedKeySpec(keyBytes))
             if (publicKey !is ECPublicKey || !isSecp256r1(publicKey.params)) {
-                throw UpdateVerificationException("מפתח manifest חייב להיות EC P-256")
+                throw UpdateVerificationException("manifest-key-must-be-ec-p256")
             }
             val verifier = Signature.getInstance("SHA256withECDSA")
             verifier.initVerify(publicKey)
             verifier.update(payload)
             if (!verifier.verify(signatureBytes)) {
-                throw UpdateVerificationException("חתימת manifest אינה תקינה")
+                throw UpdateVerificationException("invalid-manifest-signature")
             }
         } catch (exception: UpdateVerificationException) {
             throw exception
         } catch (_: RuntimeException) {
-            throw UpdateVerificationException("מפתח או חתימת manifest אינם תקינים")
+            throw UpdateVerificationException("invalid-manifest-key-or-signature")
         } catch (_: java.security.GeneralSecurityException) {
-            throw UpdateVerificationException("אימות חתימת manifest נכשל")
+            throw UpdateVerificationException("manifest-signature-verification-failed")
         }
     }
 
@@ -140,14 +140,14 @@ object UpdateEnvelopeVerifier {
         }
         Base64.getUrlDecoder().decode(value)
     } catch (_: IllegalArgumentException) {
-        throw UpdateVerificationException("קידוד manifest אינו תקין")
+        throw UpdateVerificationException("invalid-manifest-encoding")
     }
 
     internal fun requireCleanHttpsUrl(value: String): String {
         val uri = try {
             URI(value)
         } catch (_: Exception) {
-            throw UpdateVerificationException("כתובת APK אינה תקינה")
+            throw UpdateVerificationException("invalid-apk-url")
         }
         if (!uri.scheme.equals("https", ignoreCase = true) ||
             uri.host.isNullOrBlank() ||
@@ -155,7 +155,7 @@ object UpdateEnvelopeVerifier {
             uri.fragment != null ||
             uri.rawQuery?.length.orZero() > 2_048
         ) {
-            throw UpdateVerificationException("כתובת APK חייבת להיות HTTPS נקייה")
+            throw UpdateVerificationException("apk-url-must-be-clean-https")
         }
         return uri.toASCIIString()
     }

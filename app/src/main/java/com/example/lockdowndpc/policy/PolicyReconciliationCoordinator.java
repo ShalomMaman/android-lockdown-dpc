@@ -12,6 +12,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /** Serializes background reconciliation requests from DPC lifecycle events. */
 public final class PolicyReconciliationCoordinator {
@@ -35,8 +36,21 @@ public final class PolicyReconciliationCoordinator {
             String reason,
             Runnable completion
     ) {
+        reconcileAsyncVerified(context, reason, verified -> {
+            if (completion != null) {
+                completion.run();
+            }
+        });
+    }
+
+    /** Reconciles and reports whether the complete policy pass was verified. */
+    public static void reconcileAsyncVerified(
+            Context context,
+            String reason,
+            Consumer<Boolean> completion
+    ) {
         Context appContext = context.getApplicationContext();
-        submit(() -> runGuarded(
+        submit(() -> runGuardedVerified(
                 () -> {
                     if (!AllowedAppsStore.isProtectionEnabled(appContext)) {
                         Log.i(TAG, "Skipping reconciliation while protection is paused: " + reason);
@@ -52,6 +66,7 @@ public final class PolicyReconciliationCoordinator {
                     } else {
                         Log.e(TAG, "Reconciliation failed: " + reason);
                     }
+                    return result.applied();
                 },
                 exception -> {
                     String message = "Reconciliation crashed (" + reason + "): "
@@ -173,6 +188,25 @@ public final class PolicyReconciliationCoordinator {
         } finally {
             if (completion != null) {
                 completion.run();
+            }
+        }
+    }
+
+    /** Result-bearing counterpart for callers that distinguish completion from success. */
+    static void runGuardedVerified(
+            BooleanSupplier shouldRun,
+            Supplier<Boolean> work,
+            Consumer<RuntimeException> crashHandler,
+            Consumer<Boolean> completion
+    ) {
+        boolean verified = false;
+        try {
+            verified = shouldRun.getAsBoolean() && Boolean.TRUE.equals(work.get());
+        } catch (RuntimeException exception) {
+            crashHandler.accept(exception);
+        } finally {
+            if (completion != null) {
+                completion.accept(verified);
             }
         }
     }

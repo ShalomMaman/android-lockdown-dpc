@@ -3,6 +3,8 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.example.lockdowndpc.security.AppLabelSanitizer;
+
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -109,9 +111,12 @@ public final class AllowedAppsStore {
 
     public static void setAdminSelectedSystemPackages(Context context, Set<String> packages) {
         HashSet<String> selected = new HashSet<>(packages);
-        // An essential package can never be opted in; that guard belongs here so
-        // no caller can widen it.
+        // Protected packages can never be opted in; this guard belongs here so
+        // no caller can turn an app store or kiosk escape surface into an
+        // ordinary administrator-selected system package.
         selected.removeAll(LockdownPackages.ESSENTIAL_SYSTEM);
+        selected.removeAll(LockdownPackages.ALWAYS_BLOCKED);
+        selected.removeAll(LockdownPackages.KIOSK_ESCAPE_SURFACES);
         prefs(context).edit().putStringSet(KEY_ADMIN_SELECTED_SYSTEM, selected).commit();
     }
 
@@ -188,14 +193,16 @@ public final class AllowedAppsStore {
         managed.add(packageName);
         SharedPreferences.Editor editor = prefs(context).edit()
                 .putStringSet(KEY_MANAGED_PACKAGES, managed);
-        if (label != null && !label.isBlank()) {
-            editor.putString(KEY_LABEL_PREFIX + packageName, label);
+        String sanitizedLabel = AppLabelSanitizer.sanitize(label);
+        if (sanitizedLabel != null && !sanitizedLabel.isBlank()) {
+            editor.putString(KEY_LABEL_PREFIX + packageName, sanitizedLabel);
         }
         editor.apply();
     }
 
     public static String getRememberedLabel(Context context, String packageName) {
-        return prefs(context).getString(KEY_LABEL_PREFIX + packageName, packageName);
+        return AppLabelSanitizer.sanitize(
+                prefs(context).getString(KEY_LABEL_PREFIX + packageName, packageName));
     }
 
     /** Whether the method currently in force has a saved selection of its own. */

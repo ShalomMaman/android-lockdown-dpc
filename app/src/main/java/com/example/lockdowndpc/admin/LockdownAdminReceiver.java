@@ -6,6 +6,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 
+import com.example.lockdowndpc.R;
+
 public final class LockdownAdminReceiver extends DeviceAdminReceiver {
     public static ComponentName componentName(Context context) {
         return new ComponentName(context, LockdownAdminReceiver.class);
@@ -21,7 +23,7 @@ public final class LockdownAdminReceiver extends DeviceAdminReceiver {
         super.onProfileProvisioningComplete(context, intent);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         if (dpm != null && dpm.isDeviceOwnerApp(context.getPackageName())) {
-            dpm.setProfileName(componentName(context), "מכשיר מוגן");
+            dpm.setProfileName(componentName(context), context.getString(R.string.admin_profile_name));
         }
     }
 }

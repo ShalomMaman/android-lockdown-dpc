@@ -16,7 +16,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
         val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
         val snapshot = UpdateStateStore.read(context)
         if (sessionId < 0 || sessionId != snapshot.candidateSessionId) {
-            AuditLog.append(context, "התעלמות מתוצאת התקנה ישנה או לא מזוהה")
+            AuditLog.append(context, "Ignored stale or unknown install result")
             return
         }
         val versionName = snapshot.candidateVersion
@@ -24,21 +24,21 @@ class UpdateInstallReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> {
                 if (SecureUpdateManager.isInstalledCandidate(context, snapshot)) {
                     UpdateStateStore.recordInstalled(context, versionName)
-                    AuditLog.append(context, "עדכון $versionName הותקן בהצלחה")
+                    AuditLog.append(context, "Update $versionName installed successfully")
                 } else {
-                    val message = "Android דיווח הצלחה אך הגרסה המותקנת לא תאמה למועמד"
+                    val message = "installed-version-did-not-match-candidate"
                     UpdateStateStore.recordFailure(context, message)
                     AuditLog.append(context, message)
                 }
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 abandonPendingSession(context, intent)
-                val message = "Android דרש אישור משתמש לעדכון; ההתקנה נעצרה"
+                val message = "update-install-requires-user-action"
                 UpdateStateStore.recordFailure(context, message)
                 AuditLog.append(context, message)
             }
             else -> {
-                val message = "התקנת העדכון נכשלה (קוד $status)"
+                val message = "update-install-failed:$status"
                 UpdateStateStore.recordFailure(context, message)
                 AuditLog.append(context, message)
             }

@@ -47,6 +47,14 @@ public final class KioskAppCatalogTest {
     }
 
     @Test
+    public void rejectsEveryAlwaysBlockedBrowserAndAppStore() {
+        for (String packageName : LockdownPackages.ALWAYS_BLOCKED) {
+            assertTrue(packageName, KioskAppCatalog.isProtectedFromKiosk(packageName));
+            assertFalse(packageName, KioskAppCatalog.isSelectable(healthy(packageName, "Store")));
+        }
+    }
+
+    @Test
     public void rejectsEssentialSystemPackagesAndTheManagementTransport() {
         for (String packageName : LockdownPackages.ESSENTIAL_SYSTEM) {
             assertTrue(packageName, KioskAppCatalog.isProtectedFromKiosk(packageName));

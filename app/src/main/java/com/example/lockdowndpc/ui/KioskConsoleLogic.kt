@@ -1,6 +1,33 @@
 package com.example.lockdowndpc.ui
 
+import com.example.lockdowndpc.kiosk.KioskController
 import com.example.lockdowndpc.kiosk.KioskUrl
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.function.Consumer
+
+/** A transition result plus its independently reported serialized policy pass. */
+internal data class KioskActionAttempt(
+    val result: KioskController.Result,
+    val reconciliationCompleted: Boolean,
+    val reconciliationVerified: Boolean,
+)
+
+/** Blocking test seam used from an IO dispatcher, never from the main thread. */
+internal fun awaitKioskAction(
+    timeout: Long,
+    unit: TimeUnit,
+    request: (Consumer<Boolean>) -> KioskController.Result,
+): KioskActionAttempt {
+    val reconciled = CountDownLatch(1)
+    var verified = false
+    val outcome = request(Consumer { passVerified ->
+        verified = passVerified
+        reconciled.countDown()
+    })
+    val completed = reconciled.await(timeout, unit)
+    return KioskActionAttempt(outcome, completed, completed && verified)
+}
 
 /**
  * Pure decisions and formatting for the kiosk administration flow.

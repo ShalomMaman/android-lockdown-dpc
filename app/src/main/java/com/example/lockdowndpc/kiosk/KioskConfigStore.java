@@ -56,6 +56,21 @@ public final class KioskConfigStore {
         return readState(context) == KioskState.ACTIVE;
     }
 
+    /**
+     * Whether kiosk containment must remain enforced.
+     *
+     * <p>A fault makes the configured target unusable; it never releases lock
+     * task, HOME ownership, or hidden escape surfaces. Keeping this predicate in
+     * one place prevents a new enforcement caller from treating FAULT as OFF.
+     */
+    public static boolean requiresContainment(Context context) {
+        return isContainmentState(readState(context));
+    }
+
+    public static boolean isContainmentState(KioskState state) {
+        return state == KioskState.ACTIVE || state == KioskState.FAULT;
+    }
+
     /** Stores a validated configuration. The caller owns authorization. */
     public static void writeConfig(Context context, KioskConfig config, String normalizedSiteUrl) {
         prefs(context).edit()

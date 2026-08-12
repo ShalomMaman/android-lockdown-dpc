@@ -20,6 +20,7 @@
     <string name="app_name">מגן המכשיר</string>
     <string name="admin_label">ניהול והגנת המכשיר</string>
     <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
+    <string name="admin_profile_name">מכשיר מוגן</string>
     <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
     <plurals name="policy_applied">
         <item quantity="one">ההגנה פעילה ומאומתת. נחסמה אפליקציה אחת.</item>
@@ -27,6 +28,10 @@
         <item quantity="other">ההגנה פעילה ומאומתת. נחסמו %1$d אפליקציות.</item>
     </plurals>
     <string name="policy_failed">ההגנה לא הופעלה במלואה ולכן אינה מסומנת כפעילה.\nפרט ראשון: %1$s</string>
+    <string name="policy_reason_webview_missing">מנוע ⁦WebView⁩ לא נמצא לאחר החלת המדיניות.</string>
+    <string name="policy_event_set">החלת</string>
+    <string name="policy_event_change">שינוי</string>
+    <string name="policy_update_failure">%1$s מדיניות %2$s נכשלה (קוד %3$d).</string>
     <!--
         The four status values below are two gendered pairs, and each pair agrees
         with a different subject. Keep them together and keep the gender:
@@ -77,6 +82,7 @@
     <!-- Locked -->
     <string name="locked_title">ניהול ההגנה</string>
     <string name="locked_subtitle">הגדרות המכשיר נעולות. יש להזין את קוד המנהל כדי לבצע שינויים.</string>
+    <string name="locked_status">הגישה לניהול נעולה · ⁦DG-LOCKED⁩</string>
     <string name="locked_field_pin">קוד מנהל</string>
     <string name="locked_unlock">כניסה לניהול</string>
     <string name="pin_error_invalid">קוד מנהל שגוי.</string>
@@ -117,6 +123,12 @@
     <string name="update_check_title">בדיקת עדכון מאובטח</string>
     <string name="update_checking_title">בודק עדכון חתום…</string>
     <string name="update_installing_title">מתקין עדכון מאומת…</string>
+    <string name="update_state_checking">בודק עדכון חתום…</string>
+    <string name="update_state_retry">בדיקת העדכון הופסקה ותנוסה שוב אוטומטית.</string>
+    <string name="update_state_downloading">מוריד עדכון %1$s…</string>
+    <string name="update_state_installing">העדכון %1$s אומת ונשלח להתקנה.</string>
+    <string name="update_state_current">הגרסה %1$s היא העדכנית ביותר.</string>
+    <string name="update_state_installed">העדכון %1$s הותקן בהצלחה.</string>
     <string name="update_failed_title">בדיקת העדכון נכשלה</string>
     <string name="update_ready_supporting">הבדיקה מתבצעת אוטומטית פעם ביום, וניתן להפעיל אותה גם עכשיו.</string>
     <string name="update_disabled_title">עדכונים מרחוק אינם מוגדרים</string>
@@ -262,6 +274,8 @@
     <string name="kiosk_error_not_configured">יש לשמור פרופיל קיוסק לפני ההפעלה.</string>
     <string name="kiosk_error_not_active">הקיוסק אינו פעיל במכשיר הזה.</string>
     <string name="kiosk_error_apply">פרופיל הקיוסק נרשם, אך המכשיר לא אישר את כל השלבים: %1$s</string>
+    <string name="kiosk_error_reconcile_timeout">השינוי בקיוסק נרשם, אך התאמת המדיניות לא הסתיימה בזמן. ההצלחה לא אושרה.</string>
+    <string name="kiosk_error_reconcile_failed">השינוי בקיוסק נרשם, אך אימות התאמת המדיניות נכשל. ההצלחה לא אושרה.</string>
     <string name="kiosk_error_refused">בקשת הקיוסק נדחתה (%1$s).</string>
     <string name="kiosk_problem_target_not_selected">עדיין לא נבחרה אפליקציה.</string>
     <string name="kiosk_problem_target_invalid_name">הערך השמור אינו מזהה חבילה תקין של ⁦Android⁩.</string>

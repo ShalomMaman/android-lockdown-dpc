@@ -13,12 +13,17 @@
     <string name="app_name">Device Guard</string>
     <string name="admin_label">Device management and protection</string>
     <string name="admin_description">Manage apps, block installations, and restrict internet access.</string>
+    <string name="admin_profile_name">Protected device</string>
     <string name="not_device_owner">Cannot activate: system administration is not configured.</string>
     <plurals name="policy_applied">
         <item quantity="one">Protection is active and verified. %1$d app is blocked.</item>
         <item quantity="other">Protection is active and verified. %1$d apps are blocked.</item>
     </plurals>
     <string name="policy_failed">Protection was not fully applied, so it is not marked as active.\nFirst detail: %1$s</string>
+    <string name="policy_reason_webview_missing">The WebView engine was not found after applying policy.</string>
+    <string name="policy_event_set">Applying</string>
+    <string name="policy_event_change">Changing</string>
+    <string name="policy_update_failure">%1$s policy %2$s failed (code %3$d).</string>
     <string name="configured">Configured</string>
     <string name="configuration_required">Setup required</string>
     <string name="active">Active</string>
@@ -60,6 +65,7 @@
     <!-- Locked -->
     <string name="locked_title">Protection management</string>
     <string name="locked_subtitle">Device settings are locked. Enter the administrator PIN to make changes.</string>
+    <string name="locked_status">Management access locked · DG-LOCKED</string>
     <string name="locked_field_pin">Administrator PIN</string>
     <string name="locked_unlock">Open management</string>
     <string name="pin_error_invalid">Incorrect administrator PIN.</string>
@@ -98,6 +104,12 @@
     <string name="update_check_title">Check for a secure update</string>
     <string name="update_checking_title">Checking for a signed update…</string>
     <string name="update_installing_title">Installing a verified update…</string>
+    <string name="update_state_checking">Checking for a signed update…</string>
+    <string name="update_state_retry">The update check stopped and will retry automatically.</string>
+    <string name="update_state_downloading">Downloading update %1$s…</string>
+    <string name="update_state_installing">Update %1$s was verified and sent for installation.</string>
+    <string name="update_state_current">Version %1$s is current.</string>
+    <string name="update_state_installed">Update %1$s was installed successfully.</string>
     <string name="update_failed_title">The update check failed</string>
     <string name="update_ready_supporting">The check runs automatically once a day, and you can also run it now.</string>
     <string name="update_disabled_title">Remote updates are not configured</string>
@@ -237,6 +249,8 @@
     <string name="kiosk_error_not_configured">Save a kiosk profile before activating it.</string>
     <string name="kiosk_error_not_active">Kiosk is not active on this device.</string>
     <string name="kiosk_error_apply">The kiosk profile was recorded, but the device did not confirm every step: %1$s</string>
+    <string name="kiosk_error_reconcile_timeout">The kiosk change was recorded, but policy reconciliation did not finish in time. Success has not been confirmed.</string>
+    <string name="kiosk_error_reconcile_failed">The kiosk change was recorded, but policy reconciliation failed verification. Success has not been confirmed.</string>
     <string name="kiosk_error_refused">The kiosk request was refused (%1$s).</string>
     <string name="kiosk_problem_target_not_selected">No app has been chosen yet.</string>
     <string name="kiosk_problem_target_invalid_name">The stored value is not a valid Android package name.</string>

@@ -156,11 +156,11 @@ public final class LockdownPackages {
         if (isManagementPackage(packageName)) {
             return PackageClass.MANAGEMENT;
         }
-        if (adminSelectedSystemPackages != null && adminSelectedSystemPackages.contains(packageName)) {
-            return PackageClass.ADMIN_SELECTED_SYSTEM;
-        }
         if (KIOSK_ESCAPE_SURFACES.contains(packageName)) {
             return PackageClass.KIOSK_ESCAPE_SURFACE;
+        }
+        if (adminSelectedSystemPackages != null && adminSelectedSystemPackages.contains(packageName)) {
+            return PackageClass.ADMIN_SELECTED_SYSTEM;
         }
         return PackageClass.ORDINARY;
     }

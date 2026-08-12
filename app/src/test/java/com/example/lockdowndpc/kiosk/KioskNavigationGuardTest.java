@@ -38,6 +38,23 @@ public final class KioskNavigationGuardTest {
     }
 
     @Test
+    public void postServerScriptAndHistoryDestinationsUseTheSameOriginDecision() {
+        // WebView does not consistently call shouldOverrideUrlLoading for these
+        // navigation sources. The host's post-navigation callbacks feed their
+        // committed URL through this same decision point.
+        for (String escaped : new String[]{
+                "https://evil.test/post-result",
+                "https://evil.test/server-redirect",
+                "https://evil.test/script-location",
+                "https://evil.test/history-entry"
+        }) {
+            blocks(escaped, "external-origin");
+        }
+        allows("https://portal.school.example/post-result");
+        allows("https://portal.school.example/history-entry");
+    }
+
+    @Test
     public void blocksPortChangesOnTheSameHost() {
         blocks("https://portal.school.example:8443/", "external-origin");
     }

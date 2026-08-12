@@ -1,6 +1,7 @@
 package com.example.lockdowndpc.updates
 
 import android.content.Context
+import com.example.lockdowndpc.R
 
 enum class UpdatePhase {
     DISABLED,
@@ -51,18 +52,22 @@ object UpdateStateStore {
         )
     }
 
-    fun recordChecking(context: Context) = write(context, UpdatePhase.CHECKING, "בודק עדכון חתום…")
+    fun recordChecking(context: Context) = write(
+        context,
+        UpdatePhase.CHECKING,
+        context.getString(R.string.update_state_checking),
+    )
 
     fun recordRetryPending(context: Context) = write(
         context,
         UpdatePhase.IDLE,
-        "בדיקת העדכון הופסקה ותנוסה שוב אוטומטית",
+        context.getString(R.string.update_state_retry),
     )
 
     fun recordDownloading(context: Context, versionName: String) = write(
         context,
         UpdatePhase.DOWNLOADING,
-        "מוריד עדכון $versionName…",
+        context.getString(R.string.update_state_downloading, versionName),
         versionName,
     )
 
@@ -74,7 +79,7 @@ object UpdateStateStore {
     ) = write(
         context,
         UpdatePhase.INSTALLING,
-        "העדכון $versionName אומת ונשלח להתקנה",
+        context.getString(R.string.update_state_installing, versionName),
         versionName,
         versionCode,
         sessionId,
@@ -84,14 +89,14 @@ object UpdateStateStore {
     fun recordUpToDate(context: Context, currentVersion: String) = write(
         context,
         UpdatePhase.UP_TO_DATE,
-        "הגרסה $currentVersion היא העדכנית ביותר",
+        context.getString(R.string.update_state_current, currentVersion),
         checked = true,
     )
 
     fun recordInstalled(context: Context, versionName: String) = write(
         context,
         UpdatePhase.INSTALLED,
-        "העדכון $versionName הותקן בהצלחה",
+        context.getString(R.string.update_state_installed, versionName),
         checked = true,
     )
 

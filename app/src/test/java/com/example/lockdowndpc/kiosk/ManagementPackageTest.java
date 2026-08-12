@@ -128,4 +128,15 @@ public final class ManagementPackageTest {
         assertEquals(PackageClass.ESSENTIAL_SYSTEM_PACKAGE,
                 LockdownPackages.classify("com.android.systemui", Set.of("com.android.systemui")));
     }
+
+    @Test
+    public void administratorSelectionCannotOverrideEscapeSurfaceClassification() {
+        for (String packageName : LockdownPackages.KIOSK_ESCAPE_SURFACES) {
+            assertEquals(
+                    packageName,
+                    PackageClass.KIOSK_ESCAPE_SURFACE,
+                    LockdownPackages.classify(packageName, Set.of(packageName))
+            );
+        }
+    }
 }

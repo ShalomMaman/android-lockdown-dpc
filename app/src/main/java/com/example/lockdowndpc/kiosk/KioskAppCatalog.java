@@ -1,6 +1,7 @@
 package com.example.lockdowndpc.kiosk;
 
 import com.example.lockdowndpc.policy.LockdownPackages;
+import com.example.lockdowndpc.security.AppLabelSanitizer;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -50,6 +51,7 @@ public final class KioskAppCatalog {
     ) {
         public Candidate {
             packageName = packageName == null ? "" : packageName.trim();
+            label = AppLabelSanitizer.sanitize(label);
             label = label == null || label.isBlank() ? packageName : label;
         }
     }
@@ -64,6 +66,9 @@ public final class KioskAppCatalog {
      */
     public static boolean isProtectedFromKiosk(String packageName) {
         if (packageName == null || packageName.isEmpty()) {
+            return true;
+        }
+        if (LockdownPackages.ALWAYS_BLOCKED.contains(packageName)) {
             return true;
         }
         LockdownPackages.PackageClass packageClass =

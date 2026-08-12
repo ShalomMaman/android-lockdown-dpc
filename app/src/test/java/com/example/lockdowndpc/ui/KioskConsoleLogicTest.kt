@@ -1,10 +1,13 @@
 package com.example.lockdowndpc.ui
 
+import com.example.lockdowndpc.kiosk.KioskController
+import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.TimeUnit
 
 /**
  * The console's own decisions: which refusal an operator is looking at, which
@@ -15,6 +18,45 @@ import org.junit.Test
  * Owner-provisioned handset is proven here instead.
  */
 class KioskConsoleLogicTest {
+
+    private fun transitionResult() = KioskController.Result(
+        true,
+        KioskState.OFF,
+        "exited",
+        emptyList(),
+    )
+
+    @Test
+    fun kioskActionWaiterDistinguishesVerifiedFailureFromCompletion() {
+        val attempt = awaitKioskAction(1, TimeUnit.SECONDS) { done ->
+            done.accept(false)
+            transitionResult()
+        }
+
+        assertTrue(attempt.reconciliationCompleted)
+        assertFalse(attempt.reconciliationVerified)
+    }
+
+    @Test
+    fun kioskActionWaiterDoesNotTreatTimeoutAsSuccess() {
+        val attempt = awaitKioskAction(0, TimeUnit.MILLISECONDS) {
+            transitionResult()
+        }
+
+        assertFalse(attempt.reconciliationCompleted)
+        assertFalse(attempt.reconciliationVerified)
+    }
+
+    @Test
+    fun kioskActionWaiterAcceptsOnlyAnExplicitVerifiedCompletion() {
+        val attempt = awaitKioskAction(1, TimeUnit.SECONDS) { done ->
+            done.accept(true)
+            transitionResult()
+        }
+
+        assertTrue(attempt.reconciliationCompleted)
+        assertTrue(attempt.reconciliationVerified)
+    }
 
     @Test
     fun everyStateMachineRefusalIsClassified() {

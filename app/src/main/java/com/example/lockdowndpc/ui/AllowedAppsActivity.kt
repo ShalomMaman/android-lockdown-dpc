@@ -76,6 +76,7 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPackages
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.security.AdminSession
+import com.example.lockdowndpc.security.AppLabelSanitizer
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -517,7 +518,7 @@ private fun loadManagedApps(
             continue
         }
 
-        val label = info?.loadLabel(pm)?.toString()
+        val label = AppLabelSanitizer.sanitize(info?.loadLabel(pm)?.toString())
             ?: AllowedAppsStore.getRememberedLabel(context, packageName)
         AllowedAppsStore.rememberManagedPackage(context, packageName, label)
         entries.add(AppEntry(packageName, label, loadIcon(pm, packageName, iconSizePx)))

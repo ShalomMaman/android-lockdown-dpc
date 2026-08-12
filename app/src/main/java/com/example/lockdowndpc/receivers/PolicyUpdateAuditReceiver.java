@@ -7,6 +7,7 @@ import android.app.admin.TargetUser;
 import android.content.Context;
 import android.os.Bundle;
 
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.AuditLog;
 
@@ -21,7 +22,7 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
             TargetUser targetUser,
             PolicyUpdateResult policyUpdateResult
     ) {
-        recordFailureIfNeeded(context, "החלת", policyIdentifier, additionalPolicyParams,
+        recordFailureIfNeeded(context, R.string.policy_event_set, policyIdentifier, additionalPolicyParams,
                 policyUpdateResult);
     }
 
@@ -33,13 +34,13 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
             TargetUser targetUser,
             PolicyUpdateResult policyUpdateResult
     ) {
-        recordFailureIfNeeded(context, "שינוי", policyIdentifier, additionalPolicyParams,
+        recordFailureIfNeeded(context, R.string.policy_event_change, policyIdentifier, additionalPolicyParams,
                 policyUpdateResult);
     }
 
     private static void recordFailureIfNeeded(
             Context context,
-            String event,
+            int eventResource,
             String policyIdentifier,
             Bundle additionalPolicyParams,
             PolicyUpdateResult result
@@ -52,8 +53,11 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
         String target = packageName.isEmpty()
                 ? policyIdentifier
                 : policyIdentifier + " / " + packageName;
-        String error = event + " מדיניות " + target
-                + " נכשלה (קוד " + result.getResultCode() + ")";
+        String error = context.getString(
+                R.string.policy_update_failure,
+                context.getString(eventResource),
+                target,
+                result.getResultCode());
         AllowedAppsStore.markApplyFailed(context, error);
         AuditLog.append(context, error);
     }

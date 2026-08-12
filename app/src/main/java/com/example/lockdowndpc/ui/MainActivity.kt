@@ -90,8 +90,8 @@ import com.example.lockdowndpc.updates.UpdateStateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.function.Consumer
 
 /**
  * Administrator console. The screen sequence, the three minute admin session and
@@ -218,7 +218,7 @@ private fun initialScreen(context: Context): ConsoleScreen {
 
 /**
  * The retry guidance is a plural: English needs one/other and Hebrew additionally
- * needs the dual form (`שנייה אחת` / `שתי שניות` / `%d שניות`), which a single
+ * needs a dedicated dual form in Hebrew, which a single
  * format string cannot express. `getQuantityString` takes an `Int`, so the rounded
  * delay is clamped rather than truncated.
  */
@@ -472,7 +472,7 @@ private fun AdminConsole(
      */
     fun runKioskAction(
         successMessage: Int,
-        request: (Context, Runnable) -> KioskController.Result,
+        request: (Context, Consumer<Boolean>) -> KioskController.Result,
     ) {
         if (kioskOperationInProgress || !requireSession()) {
             return
@@ -482,19 +482,30 @@ private fun AdminConsole(
         message = null
         coroutineScope.launch {
             val app = context.applicationContext
-            val result = withContext(Dispatchers.IO) {
-                val reconciled = CountDownLatch(1)
-                val outcome = request(app, Runnable { reconciled.countDown() })
-                reconciled.await(KIOSK_POLICY_PASS_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                outcome
+            val attempt = withContext(Dispatchers.IO) {
+                awaitKioskAction(
+                    KIOSK_POLICY_PASS_TIMEOUT_SECONDS,
+                    TimeUnit.SECONDS,
+                ) { done -> request(app, done) }
             }
+            val result = attempt.result
             kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
             kioskOperationInProgress = false
             statusRevision++
             if (isKioskSuccessReason(result.reason())) {
                 screen = ConsoleScreen.KIOSK
-                message = if (result.allowed()) {
+                message = if (result.allowed() && attempt.reconciliationVerified) {
                     UiMessage(context.getString(successMessage), isError = false)
+                } else if (!attempt.reconciliationCompleted) {
+                    UiMessage(
+                        context.getString(R.string.kiosk_error_reconcile_timeout),
+                        isError = true,
+                    )
+                } else if (!attempt.reconciliationVerified) {
+                    UiMessage(
+                        context.getString(R.string.kiosk_error_reconcile_failed),
+                        isError = true,
+                    )
                 } else {
                     // The transition was authorized and recorded, but the device
                     // did not confirm every step. Saying so is the whole point of
@@ -552,7 +563,6 @@ private fun AdminConsole(
         )
 
         ConsoleScreen.LOCKED -> LockedScreen(
-            status = status,
             message = message,
             onUnlock = ::unlockWith,
         )
@@ -851,7 +861,6 @@ private fun PinSetupScreen(
 
 @Composable
 private fun LockedScreen(
-    status: ConsoleStatus,
     message: UiMessage?,
     onUnlock: (String) -> Unit,
 ) {
@@ -867,11 +876,10 @@ private fun LockedScreen(
         title = stringResource(R.string.locked_title),
         subtitle = stringResource(R.string.locked_subtitle),
     ) {
-        PolicyStatusCard(
-            tone = statusTone(status.policyState),
-            headline = stringResource(statusHeadline(status.policyState)),
-            facts = statusFacts(status),
-            detail = statusDetail(status),
+        Text(
+            text = stringResource(R.string.locked_status),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.height(24.dp))
         PinField(

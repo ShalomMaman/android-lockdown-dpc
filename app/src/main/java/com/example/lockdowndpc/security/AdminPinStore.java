@@ -56,7 +56,7 @@ public final class AdminPinStore {
 
     public static void setNewPin(Context context, String pin) throws SecurityException {
         if (!isValidPin(pin)) {
-            throw new IllegalArgumentException("הקוד חייב להכיל 6 עד 12 ספרות");
+            throw new IllegalArgumentException("pin-must-contain-6-to-12-digits");
         }
         try {
             byte[] salt = new byte[16];
@@ -69,7 +69,7 @@ public final class AdminPinStore {
                     PinLockoutPolicy.LockoutState.CLEARED
             ).commit();
         } catch (Exception exception) {
-            throw new SecurityException("לא ניתן לשמור את קוד המנהל", exception);
+            throw new SecurityException("admin-pin-save-failed", exception);
         }
     }
 
@@ -89,7 +89,7 @@ public final class AdminPinStore {
                     .commit();
             return code.substring(0, 4) + "-" + code.substring(4, 8) + "-" + code.substring(8);
         } catch (Exception exception) {
-            throw new SecurityException("לא ניתן ליצור קוד שחזור", exception);
+            throw new SecurityException("recovery-code-create-failed", exception);
         }
     }
 

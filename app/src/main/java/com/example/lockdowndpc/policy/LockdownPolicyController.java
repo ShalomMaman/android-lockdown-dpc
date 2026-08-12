@@ -17,11 +17,12 @@ import android.os.UserManager;
 import android.util.Log;
 import android.webkit.WebView;
 
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.kiosk.KioskConfigStore;
+import com.example.lockdowndpc.kiosk.KioskAppCatalog;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
-import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
 
 import java.security.MessageDigest;
@@ -42,7 +43,7 @@ public final class LockdownPolicyController {
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
-            String error = "האפליקציה אינה Device Owner";
+            String error = "device-owner-required";
             AllowedAppsStore.markApplyFailed(context, error);
             return new PolicyResult(false, false, 0, 0, List.of(error));
         }
@@ -67,7 +68,7 @@ public final class LockdownPolicyController {
         } else {
             String summary = summarizeErrors(errors);
             AllowedAppsStore.markApplyFailed(context, summary);
-            AuditLog.append(context, "החלת המדיניות נכשלה: " + summary);
+            AuditLog.append(context, "Policy apply failed: " + summary);
             Log.e(TAG, "Policy apply failed verification: " + summary);
         }
         return new PolicyResult(true, verified, packageCounts[0], packageCounts[1], errors);
@@ -78,7 +79,7 @@ public final class LockdownPolicyController {
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
-            String error = "האפליקציה אינה Device Owner";
+            String error = "device-owner-required";
             AllowedAppsStore.markPauseFailed(context, error);
             return new PolicyResult(false, false, 0, 0, List.of(error));
         }
@@ -88,7 +89,7 @@ public final class LockdownPolicyController {
         try {
             dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
         } catch (RuntimeException exception) {
-            errors.add("ניקוי חסימת קישורים: " + exception.getClass().getSimpleName());
+            errors.add("link-block-clear:" + exception.getClass().getSimpleName());
         }
         setBlockedBrowserComponentEnabled(context, false, errors);
 
@@ -105,7 +106,7 @@ public final class LockdownPolicyController {
         // get its escape surfaces back even though they are hidden from bulk
         // queries. An active kiosk keeps them hidden: pausing managed filtering is
         // not a way to widen kiosk.
-        boolean kioskActive = KioskConfigStore.isActive(context);
+        boolean kioskActive = KioskConfigStore.requiresContainment(context);
         if (!kioskActive && KioskConfigStore.wasEscapeSurfaceHidingApplied(context)) {
             packagesToShow.addAll(LockdownPackages.KIOSK_ESCAPE_SURFACES);
         }
@@ -128,14 +129,14 @@ public final class LockdownPolicyController {
                 boolean updated = dpm.setApplicationHidden(admin, packageName, false);
                 boolean hidden = dpm.isApplicationHidden(admin, packageName);
                 if (hidden || (!updated && wasHidden)) {
-                    errors.add("שחרור " + packageName + " לא אומת");
+                    errors.add("package-release-unverified:" + packageName);
                 } else {
                     visibleCount++;
                 }
             } catch (IllegalArgumentException ignored) {
                 // Known package is not installed on this device.
             } catch (RuntimeException exception) {
-                errors.add("שחרור " + packageName + ": " + exception.getClass().getSimpleName());
+                errors.add("package-release:" + packageName + ":" + exception.getClass().getSimpleName());
             }
         }
         unsuspendBrowserProviders(dpm, admin, errors);
@@ -151,7 +152,7 @@ public final class LockdownPolicyController {
         } else {
             String summary = summarizeErrors(errors);
             AllowedAppsStore.markPauseFailed(context, summary);
-            AuditLog.append(context, "השהיית המדיניות נכשלה: " + summary);
+            AuditLog.append(context, "Policy pause failed: " + summary);
             Log.e(TAG, "Policy pause failed verification: " + summary);
         }
         return new PolicyResult(true, verified, 0, visibleCount, errors);
@@ -213,10 +214,10 @@ public final class LockdownPolicyController {
             try {
                 dpm.clearUserRestriction(admin, restriction);
                 if (dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                    errors.add("שחרור " + restriction + " לא אומת");
+                    errors.add("restriction-release-unverified:" + restriction);
                 }
             } catch (RuntimeException exception) {
-                errors.add("שחרור " + restriction + ": " + exception.getClass().getSimpleName());
+                errors.add("restriction-release:" + restriction + ":" + exception.getClass().getSimpleName());
             }
         }
     }
@@ -230,7 +231,7 @@ public final class LockdownPolicyController {
         try {
             dpm.addUserRestriction(admin, restriction);
             if (!dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                errors.add(restriction + ": ההגבלה לא הוחלה");
+                errors.add("restriction-not-applied:" + restriction);
             }
         } catch (RuntimeException exception) {
             errors.add(restriction + ": " + exception.getClass().getSimpleName());
@@ -256,7 +257,7 @@ public final class LockdownPolicyController {
                 filter.addDataScheme(scheme);
                 dpm.addPersistentPreferredActivity(admin, filter, blockedActivity);
             } catch (RuntimeException exception) {
-                errors.add("קישורי " + scheme + ": " + exception.getClass().getSimpleName());
+                errors.add("link-filter:" + scheme + ":" + exception.getClass().getSimpleName());
             }
         }
         for (String scheme : new String[]{"http", "https"}) {
@@ -264,10 +265,10 @@ public final class LockdownPolicyController {
                 Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(scheme + "://policy-check.invalid"));
                 probe.addCategory(Intent.CATEGORY_BROWSABLE);
                 if (!eventuallyResolvesTo(context.getPackageManager(), probe, blockedActivity)) {
-                    errors.add("קישורי " + scheme + ": יעד החסימה לא אומת");
+                    errors.add("link-filter-target-unverified:" + scheme);
                 }
             } catch (RuntimeException exception) {
-                errors.add("קישורי " + scheme + ": " + exception.getClass().getSimpleName());
+                errors.add("link-filter:" + scheme + ":" + exception.getClass().getSimpleName());
             }
         }
     }
@@ -305,10 +306,10 @@ public final class LockdownPolicyController {
                     PackageManager.DONT_KILL_APP
             );
             if (context.getPackageManager().getComponentEnabledSetting(component) != state) {
-                errors.add("עדכון חסימת קישורים לא אומת");
+                errors.add("link-filter-update-unverified");
             }
         } catch (RuntimeException exception) {
-            errors.add("עדכון חסימת קישורים: " + exception.getClass().getSimpleName());
+            errors.add("link-filter-update:" + exception.getClass().getSimpleName());
         }
     }
 
@@ -341,7 +342,8 @@ public final class LockdownPolicyController {
             if (LockdownPackages.grantsManagementTrust(verdict)) {
                 trusted.add(record.packageName());
             } else {
-                errors.add("חתימת " + record.packageName() + " לא אומתה (" + verdict.name() + ")");
+                errors.add("management-signer-unverified:" + record.packageName()
+                        + ":" + verdict.name());
                 Log.e(TAG, "Management signer rejected for " + record.packageName() + ": " + verdict);
             }
         }
@@ -417,10 +419,11 @@ public final class LockdownPolicyController {
             try {
                 dpm.setUninstallBlocked(admin, packageName, true);
                 if (!dpm.isUninstallBlocked(admin, packageName)) {
-                    errors.add("הגנת הסרה " + packageName + " לא אומתה");
+                    errors.add("uninstall-protection-unverified:" + packageName);
                 }
             } catch (RuntimeException exception) {
-                errors.add("הגנת הסרה " + packageName + ": " + exception.getClass().getSimpleName());
+                errors.add("uninstall-protection:" + packageName + ":"
+                        + exception.getClass().getSimpleName());
             }
         }
     }
@@ -440,10 +443,13 @@ public final class LockdownPolicyController {
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);
         KioskConfigStore.Settings kiosk = KioskConfigStore.read(context);
-        boolean kioskActive = kiosk.state() == KioskState.ACTIVE;
-        String kioskTarget = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
+        boolean kioskActive = KioskConfigStore.isContainmentState(kiosk.state());
+        String requestedKioskTarget = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
                 ? kiosk.config().targetPackage()
                 : "";
+        String kioskTarget = KioskAppCatalog.isProtectedFromKiosk(requestedKioskTarget)
+                ? ""
+                : requestedKioskTarget;
         int blockedCount = 0;
         int allowedCount = 0;
 
@@ -556,9 +562,9 @@ public final class LockdownPolicyController {
                 boolean updated = dpm.setApplicationHidden(admin, packageName, shouldBlock);
                 boolean hidden = dpm.isApplicationHidden(admin, packageName);
                 if (!updated && wasHidden != shouldBlock) {
-                    errors.add("מדיניות " + packageName + ": Android דחה את העדכון");
+                    errors.add("package-policy-update-rejected:" + packageName);
                 } else if (hidden != shouldBlock) {
-                    errors.add("מדיניות " + packageName + ": המצב בפועל אינו תואם");
+                    errors.add("package-policy-state-mismatch:" + packageName);
                 }
                 if (hidden) {
                     blockedCount++;
@@ -568,7 +574,8 @@ public final class LockdownPolicyController {
             } catch (IllegalArgumentException ignored) {
                 // A known package is not installed on this device.
             } catch (RuntimeException exception) {
-                errors.add("מדיניות " + packageName + ": " + exception.getClass().getSimpleName());
+                errors.add("package-policy:" + packageName + ":"
+                        + exception.getClass().getSimpleName());
             }
         }
         // Only drop the restore obligation after a pass that actually completed.
@@ -639,14 +646,14 @@ public final class LockdownPolicyController {
         try {
             String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, true);
             if (failed.length > 0) {
-                errors.add("חסימת הפעלת הדפדפן נכשלה");
+                errors.add("browser-suspension-failed");
             } else if (!dpm.isPackageSuspended(admin, provider)) {
-                errors.add("חסימת הפעלת הדפדפן לא אומתה");
+                errors.add("browser-suspension-unverified");
             }
         } catch (PackageManager.NameNotFoundException exception) {
-            errors.add("מנוע WebView לא נמצא לאחר החלת המדיניות");
+            errors.add(context.getString(R.string.policy_reason_webview_missing));
         } catch (RuntimeException exception) {
-            errors.add("חסימת הפעלת הדפדפן: " + exception.getClass().getSimpleName());
+            errors.add("browser-suspension:" + exception.getClass().getSimpleName());
         }
     }
 
@@ -667,14 +674,14 @@ public final class LockdownPolicyController {
                     continue;
                 }
                 if (dpm.isPackageSuspended(admin, packageName)) {
-                    errors.add("שחרור מנוע WebView " + packageName + " לא אומת");
+                    errors.add("webview-release-unverified:" + packageName);
                 }
             } catch (PackageManager.NameNotFoundException ignored) {
                 // Provider is not installed.
             } catch (IllegalArgumentException ignored) {
                 // Provider is not installed.
             } catch (RuntimeException exception) {
-                errors.add("שחרור מנוע WebView: " + exception.getClass().getSimpleName());
+                errors.add("webview-release:" + exception.getClass().getSimpleName());
             }
         }
     }
@@ -740,7 +747,7 @@ public final class LockdownPolicyController {
             return "";
         }
         String first = errors.get(0);
-        return errors.size() == 1 ? first : first + " (ועוד " + (errors.size() - 1) + ")";
+        return errors.size() == 1 ? first : first + " (and " + (errors.size() - 1) + " more)";
     }
 
     public record PolicyResult(

@@ -50,8 +50,14 @@ public final class KioskRecoveryPolicy {
      * launcher of ours is registered is exactly the configuration the platform
      * rejects, and the one where HOME could land somewhere we did not choose.
      */
-    public static boolean allowHomeKey(KioskMode mode, boolean homeRegistered) {
-        return mode == KioskMode.SINGLE_APP && homeRegistered;
+    public static boolean allowHomeKey(
+            KioskStateMachine.KioskState state,
+            KioskMode mode,
+            boolean homeRegistered
+    ) {
+        return state == KioskStateMachine.KioskState.ACTIVE
+                && mode == KioskMode.SINGLE_APP
+                && homeRegistered;
     }
 
     /**

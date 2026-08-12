@@ -179,6 +179,37 @@ class LocaleParityTest {
         assertEquals(setOf("en", "he"), declared)
     }
 
+    @Test
+    fun lockedScreenDoesNotRenderPolicyOrPackageDetailsBeforeAuthentication() {
+        val source = File(moduleDir(), "src/main/java/com/example/lockdowndpc/ui/MainActivity.kt")
+            .readText()
+        val body = source.substringAfter("private fun LockedScreen(")
+            .substringBefore("\n@Composable\nprivate fun AdminScreen(")
+
+        assertTrue("locked screen must use only its generic status resource",
+            "R.string.locked_status" in body)
+        listOf("PolicyStatusCard", "statusFacts", "statusDetail", "policyError", "packageName")
+            .forEach { forbidden ->
+                assertTrue("locked screen discloses $forbidden", forbidden !in body)
+            }
+    }
+
+    @Test
+    fun sourceTreeHasNoHardcodedHebrewLiterals() {
+        val sourceRoot = File(moduleDir(), "src/main/java")
+        val violations = sourceRoot.walkTopDown()
+            .filter { it.isFile && it.extension in setOf("java", "kt") }
+            .filter { file -> file.readText().any { it in HEBREW_BLOCK } }
+            .map { it.relativeTo(moduleDir()).path }
+            .toList()
+
+        assertEquals(
+            "Hebrew user-facing text belongs in values-iw/strings.xml",
+            emptyList<String>(),
+            violations,
+        )
+    }
+
     private fun forEachLocale(action: (String, LocaleResources) -> Unit) {
         action("values", default)
         action("values-iw", hebrew)

@@ -64,6 +64,7 @@ import com.example.lockdowndpc.kiosk.KioskMode
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.LockdownPackages
+import com.example.lockdowndpc.security.AppLabelSanitizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -96,7 +97,7 @@ internal data class KioskSnapshot(
      *
      * A single-app target is a third-party label whose language is unknown at
      * build time, so it takes first-strong isolation: forcing it left-to-right
-     * made a Hebrew label such as `סרטונים (בטא)` resolve its parentheses against
+     * made a right-to-left third-party label resolve its parentheses against
      * an L base and render visibly scrambled. An origin is a Latin identifier and
      * genuinely is left-to-right.
      */
@@ -937,7 +938,7 @@ private fun loadKioskAppRows(context: Context): List<KioskAppRow> {
         val info = infoByPackage[packageName]
         KioskAppCatalog.Candidate(
             packageName,
-            info?.loadLabel(pm)?.toString()
+            AppLabelSanitizer.sanitize(info?.loadLabel(pm)?.toString())
                 ?: AllowedAppsStore.getRememberedLabel(context, packageName),
             info != null,
             info?.enabled ?: false,
@@ -961,7 +962,7 @@ private fun applicationLabel(context: Context, packageName: String): String {
             @Suppress("DEPRECATION")
             pm.getApplicationInfo(packageName, flags.toInt())
         }
-        info.loadLabel(pm).toString()
+        AppLabelSanitizer.sanitize(info.loadLabel(pm).toString())
     } catch (ignored: PackageManager.NameNotFoundException) {
         AllowedAppsStore.getRememberedLabel(context, packageName)
     }
