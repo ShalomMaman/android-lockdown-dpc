@@ -7,13 +7,6 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-val updateManifestUrl = providers.gradleProperty("deviceGuardUpdateManifestUrl")
-    .orElse(providers.environmentVariable("DEVICE_GUARD_UPDATE_MANIFEST_URL"))
-    .orElse("")
-val updatePublicKey = providers.gradleProperty("deviceGuardUpdatePublicKey")
-    .orElse(providers.environmentVariable("DEVICE_GUARD_UPDATE_PUBLIC_KEY"))
-    .orElse("")
-
 android {
     namespace = "com.example.lockdowndpc"
     compileSdk = 36
@@ -25,10 +18,12 @@ android {
         // Pilot compatibility: the applicationId and the release signing config
         // below are deliberately unchanged, so this build updates the already
         // provisioned pilot device in place. Only the version identity moves.
-        versionCode = 9
-        versionName = "0.5.0"
-        buildConfigField("String", "UPDATE_MANIFEST_URL", updateManifestUrl.get().asBuildConfigString())
-        buildConfigField("String", "UPDATE_PUBLIC_KEY", updatePublicKey.get().asBuildConfigString())
+        versionCode = 10
+        versionName = "0.5.1"
+        // Update channels are an explicit build choice. Ordinary builds never
+        // consume ambient properties or environment variables.
+        buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())
+        buildConfigField("String", "UPDATE_PUBLIC_KEY", "".asBuildConfigString())
     }
 
     buildTypes {

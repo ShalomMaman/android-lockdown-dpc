@@ -1,0 +1,129 @@
+/*
+ * Applied only by pilot-update.init.gradle.kts. This is deliberately separate
+ * from both ordinary channel-disabled builds and externally signed production.
+ */
+
+import java.security.AlgorithmParameters
+import java.security.KeyFactory
+import java.security.MessageDigest
+import java.security.interfaces.ECPublicKey
+import java.security.spec.ECGenParameterSpec
+import java.security.spec.ECParameterSpec
+import java.security.spec.X509EncodedKeySpec
+
+def pilotManifestUrl = 'https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json'
+def approvedMetadataFingerprint = 'c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc'
+def approvedPilotSigner = '25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b'
+def expectedApplicationId = 'com.example.lockdowndpc'
+def expectedVersionCode = 10
+def expectedVersionName = '0.5.1'
+
+def asBuildConfigString = { String value ->
+    '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+}
+
+def validateCleanHttps = { String value ->
+    try {
+        def uri = new URI(value)
+        if (!'https'.equalsIgnoreCase(uri.scheme) || !uri.host || uri.userInfo || uri.fragment) {
+            throw new IllegalArgumentException('unclean HTTPS URL')
+        }
+    } catch (Exception ignored) {
+        throw new GradleException('Pilot update manifest URL must be a clean HTTPS URL')
+    }
+}
+
+def publicKeyFile = rootProject.file('updates/pilot/public-key.pub')
+if (!publicKeyFile.isFile()) {
+    throw new GradleException('Missing committed pilot metadata public key')
+}
+def publicKeyBase64 = publicKeyFile.text
+    .replace('-----BEGIN PUBLIC KEY-----', '')
+    .replace('-----END PUBLIC KEY-----', '')
+    .replaceAll('\\s', '')
+def publicKeyBytes
+try {
+    publicKeyBytes = Base64.decoder.decode(publicKeyBase64)
+    def parsedPublicKey = KeyFactory.getInstance('EC').generatePublic(
+        new X509EncodedKeySpec(publicKeyBytes)
+    )
+    def expectedParameters = AlgorithmParameters.getInstance('EC')
+    expectedParameters.init(new ECGenParameterSpec('secp256r1'))
+    def expectedP256 = expectedParameters.getParameterSpec(ECParameterSpec)
+    if (!(parsedPublicKey instanceof ECPublicKey)
+            || parsedPublicKey.params.curve != expectedP256.curve
+            || parsedPublicKey.params.generator != expectedP256.generator
+            || parsedPublicKey.params.order != expectedP256.order
+            || parsedPublicKey.params.cofactor != expectedP256.cofactor) {
+        throw new IllegalArgumentException('metadata key must use P-256')
+    }
+} catch (Exception ignored) {
+    throw new GradleException('Pilot metadata public key must be P-256 EC/X.509 PEM')
+}
+def actualMetadataFingerprint = MessageDigest.getInstance('SHA-256')
+    .digest(publicKeyBytes)
+    .collect { String.format('%02x', it & 0xff) }
+    .join('')
+if (actualMetadataFingerprint != approvedMetadataFingerprint) {
+    throw new GradleException('Pilot metadata public-key SHA-256 does not match the approved fingerprint')
+}
+validateCleanHttps(pilotManifestUrl)
+
+plugins.withId('com.android.application') {
+    def configuredApplicationId = android.defaultConfig.applicationId
+    def configuredVersionCode = android.defaultConfig.versionCode
+    def configuredVersionName = android.defaultConfig.versionName
+    def releaseSigningName = android.buildTypes.release.signingConfig?.name
+    if (configuredApplicationId != expectedApplicationId
+            || configuredVersionCode != expectedVersionCode
+            || configuredVersionName != expectedVersionName) {
+        throw new GradleException('Pilot identity/version drifted from the approved 0.5.1 release')
+    }
+    if (releaseSigningName != 'debug') {
+        throw new GradleException('Pilot release no longer uses the pilot-compatible signing configuration')
+    }
+
+    android.defaultConfig {
+        buildConfigField 'String', 'UPDATE_MANIFEST_URL', asBuildConfigString(pilotManifestUrl)
+        buildConfigField 'String', 'UPDATE_PUBLIC_KEY', asBuildConfigString(publicKeyBase64)
+    }
+
+    tasks.register('verifyPilotRelease', Exec) {
+        dependsOn 'assembleRelease'
+        group = 'verification'
+        description = 'Verifies pilot APK identity, signer, version, and embedded update channel.'
+        commandLine 'python3', rootProject.file('tools/verify_pilot_apk.py'),
+            '--apk', layout.buildDirectory.file('outputs/apk/release/app-release.apk').get().asFile,
+            '--expected-package', expectedApplicationId,
+            '--expected-version-code', expectedVersionCode.toString(),
+            '--expected-version-name', expectedVersionName,
+            '--expected-signer-sha256', approvedPilotSigner,
+            '--expected-manifest-url', pilotManifestUrl,
+            '--expected-public-key-file', publicKeyFile,
+            '--expected-public-key-sha256', approvedMetadataFingerprint
+    }
+    tasks.register('pilotChannelRelease') {
+        group = 'build'
+        description = 'Builds, tests, lints, and verifies the explicit Pilot 0.5.1 update-channel APK.'
+        dependsOn 'test', 'lintRelease', 'verifyPilotRelease'
+    }
+    tasks.register('verifyPilotChannelForCi', Exec) {
+        dependsOn 'assembleRelease'
+        group = 'verification'
+        description = 'CI-only channel check with the fresh runner single-signer certificate.'
+        commandLine 'python3', rootProject.file('tools/verify_pilot_apk.py'),
+            '--apk', layout.buildDirectory.file('outputs/apk/release/app-release.apk').get().asFile,
+            '--expected-package', expectedApplicationId,
+            '--expected-version-code', expectedVersionCode.toString(),
+            '--expected-version-name', expectedVersionName,
+            '--require-single-signer',
+            '--expected-manifest-url', pilotManifestUrl,
+            '--expected-public-key-file', publicKeyFile,
+            '--expected-public-key-sha256', approvedMetadataFingerprint
+    }
+    tasks.register('ciPilotChannelRelease') {
+        group = 'verification'
+        description = 'CI-only tests/lint/build/channel check; never a publishing gate.'
+        dependsOn 'test', 'lintRelease', 'verifyPilotChannelForCi'
+    }
+}

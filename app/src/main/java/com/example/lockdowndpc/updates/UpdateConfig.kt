@@ -11,8 +11,12 @@ object UpdateConfig {
         get() = BuildConfig.UPDATE_PUBLIC_KEY.trim()
 
     val isConfigured: Boolean
-        get() = metadataPublicKey.isNotEmpty() && try {
+        get() = isConfigurationValid(manifestUrl, metadataPublicKey)
+
+    internal fun isConfigurationValid(manifestUrl: String, metadataPublicKey: String): Boolean =
+        manifestUrl.isNotBlank() && metadataPublicKey.isNotBlank() && try {
             UpdateEnvelopeVerifier.requireCleanHttpsUrl(manifestUrl)
+            UpdateEnvelopeVerifier.requireP256PublicKey(metadataPublicKey)
             true
         } catch (_: UpdateVerificationException) {
             false

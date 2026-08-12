@@ -2,7 +2,8 @@
 
 The production path is intentionally separate from the existing pilot:
 
-- A normal build keeps the `com.example.lockdowndpc` identity and pilot signer, so it can update the already provisioned Device Owner test device.
+- A normal build keeps the `com.example.lockdowndpc` identity and pilot signer but deliberately embeds no update channel.
+- The explicit pilot init path embeds only the committed public pilot URL/key and can update the existing Device Owner test device.
 - A production build uses the temporary `il.co.shalommaman.deviceguard` identity and requires an external signing key. Keys and secrets never live in this repository.
 
 > Finalize the organization name and application ID before provisioning the first customer device. Changing either after release is a migration, not a normal update.
@@ -34,7 +35,7 @@ The final three values enable the signed update channel. The manifest URL must u
 
 ## Build
 
-The init script is an explicit switch: without `-I`, Gradle produces a pilot APK; with it, Gradle produces a production APK.
+The production init script is an explicit switch. Without an init script Gradle produces a channel-disabled development/pilot-compatible APK; `pilot-update.init.gradle.kts` is the separate public pilot channel; `production.init.gradle.kts` is production.
 
 ```bash
 ./gradlew -I gradle/production.init.gradle.kts clean assembleRelease lintRelease test
@@ -62,7 +63,7 @@ The same value is required in `android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPO
 
 ## Recovery caveats before a customer rollout
 
-`0.5.0` keeps the pilot `applicationId` and the debug-compatible release signing config, so an ordinary `assembleRelease` still updates the existing pilot device. Nothing in this repository configures a production secret, and none is required to build.
+`0.5.1` keeps the pilot `applicationId` and debug-compatible signing config. Only the explicit pilot-channel build embeds its update endpoint and public verification key. Nothing in this repository configures a production secret, and none is required for the pilot build.
 
 Before enabling kiosk mode on any device that is not physically at hand:
 

@@ -89,9 +89,15 @@ plugins.withId('com.android.application') {
         throw new GradleException('Production update public-key SHA-256 does not match')
     }
 
+    def asBuildConfigString = { String value ->
+        '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    }
+
     android {
         defaultConfig {
             applicationId 'il.co.shalommaman.deviceguard'
+            buildConfigField 'String', 'UPDATE_MANIFEST_URL', asBuildConfigString(updateManifestUrlValue)
+            buildConfigField 'String', 'UPDATE_PUBLIC_KEY', asBuildConfigString(updatePublicKeyValue)
         }
         signingConfigs {
             production {

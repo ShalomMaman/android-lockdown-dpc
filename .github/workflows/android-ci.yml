@@ -35,7 +35,25 @@ jobs:
         uses: gradle/actions/wrapper-validation@v6
 
       - name: Run Android checks
-        run: ./gradlew --no-daemon --max-workers=2 test lintRelease assembleRelease
+        env:
+          DEVICE_GUARD_UPDATE_MANIFEST_URL: https://attacker.invalid/latest.json
+          DEVICE_GUARD_UPDATE_PUBLIC_KEY: attacker-controlled
+        run: |
+          ./gradlew --no-daemon --max-workers=2 test lintRelease assembleRelease
+          python3 tools/verify_pilot_apk.py \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            --expected-package com.example.lockdowndpc \
+            --expected-version-code 10 --expected-version-name 0.5.1 \
+            --require-single-signer \
+            --expect-channel-disabled
+
+      - name: Verify explicit pilot update-channel build
+        env:
+          # Hostile ambient values must not affect ordinary builds or the
+          # repository-pinned pilot channel.
+          DEVICE_GUARD_UPDATE_MANIFEST_URL: http://attacker.invalid/latest.json
+          DEVICE_GUARD_UPDATE_PUBLIC_KEY: attacker-controlled
+        run: ./gradlew -I gradle/pilot-update.init.gradle.kts --no-daemon --max-workers=2 clean ciPilotChannelRelease
 
       - name: Test release publisher
         run: python3 -m unittest discover -s tools -p 'test_*.py'
