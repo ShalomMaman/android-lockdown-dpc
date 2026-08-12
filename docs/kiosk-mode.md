@@ -446,6 +446,11 @@ cleared after a pass that completed without errors.
 
 ### Deferred: an administrator UI for `ADMIN_SELECTED_SYSTEM`
 
+The planned product behavior and production acceptance criteria are now tracked
+in [`production-roadmap.md`](production-roadmap.md). The important current-state
+summary is unchanged: Pilot 0.5.1 does not display arbitrary system packages in
+the administrator application picker.
+
 `AllowedAppsStore.setAdminSelectedSystemPackages` exists, filters
 `ESSENTIAL_SYSTEM` on write, and is exercised by the policy engine. A console
 screen that writes it is nonetheless **deferred to a later release**, and 0.5
