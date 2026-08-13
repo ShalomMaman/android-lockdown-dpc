@@ -23,6 +23,11 @@ public final class AllowedAppsStore {
     private static final String KEY_LABEL_PREFIX = "app_label:";
     private static final String KEY_ADMIN_SELECTED_SYSTEM = "admin_selected_system_packages";
     private static final String KEY_MANAGEMENT_PIN_PREFIX = "management_cert:";
+    private static final String KEY_SYSTEM_RISK_SIGNER_PREFIX = "system_risk_signer:";
+    private static final String KEY_SYSTEM_RISK_VERSION_PREFIX = "system_risk_version:";
+    private static final String KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX = "system_risk_prior_state:";
+    private static final String KEY_SYSTEM_RISK_FIRMWARE_PREFIX = "system_risk_firmware:";
+    private static final String KEY_SYSTEM_RISK_AT_PREFIX = "system_risk_at:";
 
     private AllowedAppsStore() {}
 
@@ -121,6 +126,48 @@ public final class AllowedAppsStore {
     }
 
     /**
+     * The administrator's on-file acceptance of the identity risk of one
+     * unclassified OEM system package, or {@code null} when none was ever
+     * recorded. The caller re-checks {@link SystemAppRiskAcceptance#matches}
+     * against the currently observed signer and version before treating the
+     * package as manageable; this store only persists what was accepted, it does
+     * not judge whether it is still valid.
+     */
+    public static SystemAppRiskAcceptance getSystemRiskAcceptance(Context context, String packageName) {
+        SharedPreferences preferences = prefs(context);
+        String signerKey = KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName;
+        if (!preferences.contains(signerKey)) {
+            return null;
+        }
+        return new SystemAppRiskAcceptance(
+                packageName,
+                preferences.getString(signerKey, ""),
+                preferences.getString(KEY_SYSTEM_RISK_VERSION_PREFIX + packageName, ""),
+                preferences.getString(KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX + packageName, ""),
+                preferences.getString(KEY_SYSTEM_RISK_FIRMWARE_PREFIX + packageName, ""),
+                preferences.getLong(KEY_SYSTEM_RISK_AT_PREFIX + packageName, 0L)
+        );
+    }
+
+    /**
+     * Records an administrator's explicit acceptance of one unclassified OEM
+     * package's identity risk. Recording an acceptance never adds the package to
+     * {@link #setAdminSelectedSystemPackages}; the caller still has to opt the
+     * package in separately, which keeps this a pure audit record rather than a
+     * privilege grant on its own.
+     */
+    public static void recordSystemRiskAcceptance(Context context, SystemAppRiskAcceptance acceptance) {
+        String packageName = acceptance.packageName();
+        prefs(context).edit()
+                .putString(KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName, acceptance.signerDigest())
+                .putString(KEY_SYSTEM_RISK_VERSION_PREFIX + packageName, acceptance.version())
+                .putString(KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX + packageName, acceptance.priorState())
+                .putString(KEY_SYSTEM_RISK_FIRMWARE_PREFIX + packageName, acceptance.firmwareBuild())
+                .putLong(KEY_SYSTEM_RISK_AT_PREFIX + packageName, acceptance.acceptedAtMillis())
+                .commit();
+    }
+
+    /**
      * Administrator-configured signing-certificate pins for management packages,
      * keyed by package name. Absent means "not proven", which
      * {@link LockdownPackages#verifySigner} reports as an explicit gap rather
@@ -198,6 +245,26 @@ public final class AllowedAppsStore {
             editor.putString(KEY_LABEL_PREFIX + packageName, sanitizedLabel);
         }
         editor.apply();
+    }
+
+    /**
+     * Remembers a display label <em>without</em> joining the managed-package set.
+     *
+     * <p>The inventory screen lists system packages too, and a system package that
+     * Device Guard has hidden disappears from bulk {@code PackageManager} queries,
+     * so its label has to survive somewhere for the row to stay readable. It must
+     * not become a {@link #getManagedPackages} member to get that: the policy
+     * engine puts every managed package under the allow/block rules, which in
+     * "allow only what I select" mode would hide every system package an operator
+     * had merely scrolled past. Membership stays the deliberate, separately
+     * guarded {@link #setAdminSelectedSystemPackages} decision.
+     */
+    public static void rememberPackageLabel(Context context, String packageName, String label) {
+        String sanitizedLabel = AppLabelSanitizer.sanitize(label);
+        if (sanitizedLabel == null || sanitizedLabel.isBlank()) {
+            return;
+        }
+        prefs(context).edit().putString(KEY_LABEL_PREFIX + packageName, sanitizedLabel).apply();
     }
 
     public static String getRememberedLabel(Context context, String packageName) {

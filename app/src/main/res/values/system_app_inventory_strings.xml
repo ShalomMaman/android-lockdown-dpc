@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    System-application inventory (Issue #18).
+
+    Kept in its own file rather than appended to strings.xml so the inventory
+    screen owns its vocabulary and so a change here cannot collide with the
+    shared console strings. Android merges every values/*.xml into one resource
+    table, so keys must still be globally unique; they all carry the
+    `sysinv_` prefix for that reason.
+
+    Every key here must also exist in res/values-iw/system_app_inventory_strings.xml.
+    SystemAppInventoryStringsParityTest.kt enforces that, including format
+    placeholders and plural categories.
+-->
+<resources>
+
+    <!-- Screen frame -->
+    <string name="sysinv_title">Application inventory</string>
+    <string name="sysinv_subtitle">Every application on this device, including Android system components. What can be blocked depends on the safety tier of each row.</string>
+    <string name="sysinv_search">Search by name or package</string>
+    <string name="sysinv_search_clear">Clear the search</string>
+    <string name="sysinv_loading">Reading the application inventory…</string>
+    <string name="sysinv_no_results_title">No matching applications</string>
+    <string name="sysinv_no_results_body">No application matches this search and filter.</string>
+
+    <!-- Filters -->
+    <string name="sysinv_filter_label">Filter</string>
+    <string name="sysinv_filter_all">All</string>
+    <string name="sysinv_filter_user">User-installed</string>
+    <string name="sysinv_filter_system">System</string>
+    <string name="sysinv_filter_store">Stores and installers</string>
+    <string name="sysinv_filter_browser">Browsers</string>
+    <string name="sysinv_filter_social">Social</string>
+    <string name="sysinv_filter_management">Management</string>
+    <string name="sysinv_filter_protected">Protected</string>
+
+    <!-- Row state -->
+    <string name="sysinv_state_allowed">Allowed</string>
+    <string name="sysinv_state_blocked">Blocked</string>
+    <string name="sysinv_state_protected">Protected</string>
+
+    <!-- Origin -->
+    <string name="sysinv_origin_user">User-installed</string>
+    <string name="sysinv_origin_system">System</string>
+    <string name="sysinv_origin_updated_system">Updated system</string>
+
+    <!-- Installation and visibility state -->
+    <string name="sysinv_installed">Installed</string>
+    <string name="sysinv_not_installed">Not installed</string>
+    <string name="sysinv_hidden_by_policy">Hidden by Device Guard</string>
+
+    <!-- Reasons -->
+    <string name="sysinv_reason_device_guard">Device Guard itself; it can never be blocked.</string>
+    <string name="sysinv_reason_essential_system">Essential Android component. Blocking it can leave the device unrepairable from this console.</string>
+    <string name="sysinv_reason_management">Verified management transport. Blocking it would remove remote access to this device.</string>
+    <string name="sysinv_reason_active_input_method">Active keyboard. Blocking it would leave the device with no way to type.</string>
+    <string name="sysinv_reason_active_webview">Active WebView provider. Blocking it breaks every application that renders web content.</string>
+    <string name="sysinv_reason_always_blocked">Blocked by the built-in store and browser catalogue.</string>
+    <string name="sysinv_reason_kiosk_escape">Kiosk escape surface. Managed by the kiosk profile rather than by hand.</string>
+    <string name="sysinv_reason_known_catalog">Classified by the built-in browser and social catalogue.</string>
+    <string name="sysinv_reason_known_manageable">Reviewed system application. It carries no Android responsibility this console cannot restore.</string>
+    <string name="sysinv_reason_unclassified_oem">Unclassified OEM component. It must be reviewed before it can be blocked.</string>
+    <string name="sysinv_reason_unclassified_oem_drift">The signer or version changed since the risk was accepted. The acceptance no longer applies.</string>
+    <string name="sysinv_reason_unclassified_oem_accepted">Risk accepted by an administrator on this device.</string>
+    <string name="sysinv_reason_ordinary">Ordinary application under the selected policy.</string>
+
+    <!-- Advanced risk acceptance -->
+    <string name="sysinv_risk_action">Review this component…</string>
+    <string name="sysinv_risk_title">Accept the risk of managing this component?</string>
+    <string name="sysinv_risk_body">An OEM component can be required by this firmware even when its name looks harmless. Blocking the wrong one can break the keyboard, the launcher, telephony or updates, and this console may not be able to repair it.</string>
+    <string name="sysinv_risk_record_intro">This acceptance is recorded with:</string>
+    <string name="sysinv_risk_field_package">Package: %1$s</string>
+    <string name="sysinv_risk_field_signer">Signer digest: %1$s</string>
+    <string name="sysinv_risk_field_version">Version: %1$s</string>
+    <string name="sysinv_risk_field_prior_state">State before this change: %1$s</string>
+    <string name="sysinv_risk_field_firmware">Firmware build: %1$s</string>
+    <string name="sysinv_risk_unknown_value">not readable</string>
+    <string name="sysinv_risk_confirm">Accept the risk</string>
+    <string name="sysinv_risk_cancel">Cancel</string>
+    <string name="sysinv_risk_drift_warning">This component was accepted before, but its signer or version has changed since. Accepting again records the new identity.</string>
+
+    <!-- Save confirmation -->
+    <string name="sysinv_save">Save the selection</string>
+    <string name="sysinv_save_confirm_title">Apply this system selection?</string>
+    <string name="sysinv_save_confirm_body">Device Guard will request this policy and then verify it. Protection is only reported as active once every change has been confirmed by Android.</string>
+    <string name="sysinv_save_confirm_action">Save and apply</string>
+    <string name="sysinv_save_confirm_cancel">Go back</string>
+    <string name="sysinv_row_description">%1$s, package %2$s, %3$s, %4$s</string>
+    <string name="sysinv_audit_system_saved">The system application selection was saved</string>
+
+    <plurals name="sysinv_system_selected_count">
+        <item quantity="one">%1$d system component selected</item>
+        <item quantity="other">%1$d system components selected</item>
+    </plurals>
+
+</resources>

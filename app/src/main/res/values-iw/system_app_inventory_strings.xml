@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew translation of the system-application inventory (Issue #18).
+
+    The folder qualifier is "iw" for the same reason as strings.xml: Android
+    resolves resource folders against java.util.Locale#getLanguage(), which
+    still reports the legacy Hebrew code.
+
+    Latin runs inside a Hebrew sentence (Android, WebView, OEM, Device Guard's
+    English-sourced technical terms) are wrapped in U+2066 LEFT-TO-RIGHT
+    ISOLATE / U+2069 POP DIRECTIONAL ISOLATE so the bidi algorithm cannot drag
+    the surrounding punctuation to the wrong side. Runtime values — package
+    names, digests, versions — are isolated in code instead; see ui/UiLogic.kt.
+
+    Keys, plural categories and format placeholders are kept in parity with
+    res/values/system_app_inventory_strings.xml by
+    SystemAppInventoryStringsParityTest.kt.
+-->
+<resources>
+
+    <!-- Screen frame -->
+    <string name="sysinv_title">מלאי האפליקציות</string>
+    <string name="sysinv_subtitle">כל האפליקציות שמותקנות במכשיר, כולל רכיבי מערכת של ⁦Android⁩. מה שאפשר לחסום נקבע לפי רמת הבטיחות של כל שורה.</string>
+    <string name="sysinv_search">חיפוש לפי שם או מזהה חבילה</string>
+    <string name="sysinv_search_clear">ניקוי החיפוש</string>
+    <string name="sysinv_loading">קוראים את מלאי האפליקציות…</string>
+    <string name="sysinv_no_results_title">אין אפליקציות תואמות</string>
+    <string name="sysinv_no_results_body">אף אפליקציה לא מתאימה לחיפוש ולסינון האלה.</string>
+
+    <!-- Filters -->
+    <string name="sysinv_filter_label">סינון</string>
+    <string name="sysinv_filter_all">הכול</string>
+    <string name="sysinv_filter_user">הותקנו על ידי משתמש</string>
+    <string name="sysinv_filter_system">מערכת</string>
+    <string name="sysinv_filter_store">חנויות והתקנות</string>
+    <string name="sysinv_filter_browser">דפדפנים</string>
+    <string name="sysinv_filter_social">רשתות חברתיות</string>
+    <string name="sysinv_filter_management">ניהול</string>
+    <string name="sysinv_filter_protected">מוגנות</string>
+
+    <!-- Row state -->
+    <string name="sysinv_state_allowed">מותרת</string>
+    <string name="sysinv_state_blocked">חסומה</string>
+    <string name="sysinv_state_protected">מוגנת</string>
+
+    <!-- Origin -->
+    <string name="sysinv_origin_user">הותקנה על ידי משתמש</string>
+    <string name="sysinv_origin_system">מערכת</string>
+    <string name="sysinv_origin_updated_system">מערכת מעודכנת</string>
+
+    <!-- Installation and visibility state -->
+    <string name="sysinv_installed">מותקנת</string>
+    <string name="sysinv_not_installed">לא מותקנת</string>
+    <string name="sysinv_hidden_by_policy">מוסתרת על ידי מגן המכשיר</string>
+
+    <!-- Reasons -->
+    <string name="sysinv_reason_device_guard">מגן המכשיר עצמו; לעולם אי אפשר לחסום אותו.</string>
+    <string name="sysinv_reason_essential_system">רכיב חיוני של ⁦Android⁩. חסימה שלו עלולה להשאיר את המכשיר במצב שאי אפשר לתקן מהמסך הזה.</string>
+    <string name="sysinv_reason_management">אמצעי ניהול מאומת. חסימה שלו תבטל את הגישה מרחוק למכשיר.</string>
+    <string name="sysinv_reason_active_input_method">המקלדת הפעילה. חסימה שלה תשאיר את המכשיר בלי אפשרות להקליד.</string>
+    <string name="sysinv_reason_active_webview">ספק ⁦WebView⁩ הפעיל. חסימה שלו תשבור כל אפליקציה שמציגה תוכן אינטרנט.</string>
+    <string name="sysinv_reason_always_blocked">חסומה על ידי קטלוג החנויות והדפדפנים המובנה.</string>
+    <string name="sysinv_reason_kiosk_escape">נתיב יציאה ממצב קיוסק. מנוהל על ידי פרופיל הקיוסק ולא ידנית.</string>
+    <string name="sysinv_reason_known_catalog">מסווגת על ידי קטלוג הדפדפנים והרשתות החברתיות המובנה.</string>
+    <string name="sysinv_reason_known_manageable">אפליקציית מערכת שנבדקה. אין לה תפקיד ב⁦Android⁩ שאי אפשר לשחזר מהמסך הזה.</string>
+    <string name="sysinv_reason_unclassified_oem">רכיב ⁦OEM⁩ לא מסווג. צריך לבדוק אותו לפני שאפשר לחסום.</string>
+    <string name="sysinv_reason_unclassified_oem_drift">החתימה או הגרסה השתנו מאז אישור הסיכון. האישור כבר לא תקף.</string>
+    <string name="sysinv_reason_unclassified_oem_accepted">הסיכון אושר על ידי מנהל במכשיר הזה.</string>
+    <string name="sysinv_reason_ordinary">אפליקציה רגילה תחת המדיניות שנבחרה.</string>
+
+    <!-- Advanced risk acceptance -->
+    <string name="sysinv_risk_action">בדיקת הרכיב הזה…</string>
+    <string name="sysinv_risk_title">לאשר את הסיכון בניהול הרכיב הזה?</string>
+    <string name="sysinv_risk_body">רכיב ⁦OEM⁩ יכול להיות הכרחי לגרסת הקושחה הזאת גם כששמו נראה תמים. חסימה של הרכיב הלא נכון עלולה לשבור את המקלדת, את מסך הבית, את הטלפוניה או את העדכונים, ויכול להיות שאי אפשר יהיה לתקן זאת מהמסך הזה.</string>
+    <string name="sysinv_risk_record_intro">האישור הזה נרשם יחד עם:</string>
+    <string name="sysinv_risk_field_package">מזהה חבילה: %1$s</string>
+    <string name="sysinv_risk_field_signer">טביעת אצבע של החתימה: %1$s</string>
+    <string name="sysinv_risk_field_version">גרסה: %1$s</string>
+    <string name="sysinv_risk_field_prior_state">המצב לפני השינוי: %1$s</string>
+    <string name="sysinv_risk_field_firmware">גרסת הקושחה: %1$s</string>
+    <string name="sysinv_risk_unknown_value">לא ניתן לקריאה</string>
+    <string name="sysinv_risk_confirm">אישור הסיכון</string>
+    <string name="sysinv_risk_cancel">ביטול</string>
+    <string name="sysinv_risk_drift_warning">הרכיב הזה אושר בעבר, אבל החתימה או הגרסה שלו השתנו מאז. אישור מחדש ירשום את הזהות החדשה.</string>
+
+    <!-- Save confirmation -->
+    <string name="sysinv_save">שמירת הבחירה</string>
+    <string name="sysinv_save_confirm_title">להחיל את בחירת אפליקציות המערכת?</string>
+    <string name="sysinv_save_confirm_body">מגן המכשיר יבקש להחיל את המדיניות ואז יאמת אותה. ההגנה תדווח כפעילה רק אחרי ש⁦Android⁩ יאשר כל שינוי.</string>
+    <string name="sysinv_save_confirm_action">שמירה והחלה</string>
+    <string name="sysinv_save_confirm_cancel">חזרה</string>
+    <string name="sysinv_row_description">%1$s, מזהה חבילה %2$s, %3$s, %4$s</string>
+    <string name="sysinv_audit_system_saved">בחירת אפליקציות המערכת נשמרה</string>
+
+    <plurals name="sysinv_system_selected_count">
+        <item quantity="one">נבחר רכיב מערכת אחד</item>
+        <item quantity="two">נבחרו שני רכיבי מערכת</item>
+        <!--
+            The `other` branch is the one every count from 0 and from 3 upward
+            selects, so it is the branch that has to be able to show the count
+            argument itself; the `one` and `two` branches name it in words.
+        -->
+        <item quantity="other">נבחרו %1$d רכיבי מערכת</item>
+    </plurals>
+
+</resources>

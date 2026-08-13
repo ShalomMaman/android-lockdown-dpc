@@ -111,6 +111,51 @@ has a harmless-looking label. Applying the selection must use the existing
 requested → applied/failed verification model and must never show protection as
 active after a partial result.
 
+### Implemented: shown is wider than selectable
+
+The inventory screen implements this model in `policy/SystemAppClassifier`, a
+pure classifier the console consults before it draws a row. The decision worth
+recording is that **what an administrator can see and what they can change are
+deliberately different sets**, resolved in a fixed order:
+
+1. **Protected core** — Device Guard, `ESSENTIAL_SYSTEM`, verified management
+   transports, and two *runtime* facts: the active input method and the active
+   WebView provider, read from the device rather than from a catalogue. An OEM
+   keyboard absent from every catalogue is still unblockable, because the
+   failure it prevents — a device with no way to type and no way to repair it —
+   does not depend on our catalogue being complete.
+2. **Policy-ruled** — packages `ALWAYS_BLOCKED`, `KNOWN_BROWSER_AND_SOCIAL` or
+   `KIOSK_ESCAPE_SURFACES` already decide. These are shown with their reason and
+   **no checkbox**: `LockdownPolicyController` blocks them unconditionally, so a
+   checkbox would display a state the next reconciliation pass overrules.
+3. **Known manageable system app** — a narrow reviewed catalogue
+   (`SystemAppClassifier.KNOWN_MANAGEABLE_SYSTEM`) of media, gallery, games and
+   assistant components, selectable without a per-device risk acceptance.
+4. **Unclassified OEM component** — visible for diagnosis, failing closed until
+   an administrator accepts the risk. The acceptance records package name,
+   signer digest, version, prior state and firmware build, and is re-checked on
+   every load: a changed signer or version reports `DRIFTED` and the component
+   fails closed again.
+
+Two consequences are load-bearing rather than incidental. A system package
+reaches the allow/block rules **only** through the guarded
+`AllowedAppsStore.setAdminSelectedSystemPackages` store, which strips the
+protected catalogues again on write; the third-party "managed packages" set
+stays free of system packages, because that set has no second gate and would
+otherwise hide every system package an operator merely scrolled past under
+"allow only what I select". And the screen never marks policy state itself:
+saving hands off to `LockdownPolicyController`, which owns the requested →
+applied/failed contract.
+
+Packages Device Guard has hidden are omitted from bulk `PackageManager` queries,
+so the inventory is the union of what the platform reports and every package we
+have persisted a reason to remember — otherwise a blocked application would
+vanish from the screen that blocked it.
+
+Group controls such as "block all application stores" are **not** implemented;
+the filters make the affected packages inspectable, which is the prerequisite
+for them.
+
 ## System policy controls
 
 The authenticated administrator console should expose separate controls for:
