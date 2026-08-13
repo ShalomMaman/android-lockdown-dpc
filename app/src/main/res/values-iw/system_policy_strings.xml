@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    תרגום עברי של בקרות מדיניות המערכת (Issue #20).
+    כל מפתח כאן חייב להתקיים גם ב-res/values/system_policy_strings.xml.
+    השמירה על ההתאמה נבדקת ב-SystemPolicyLocaleParityTest.
+-->
+<resources>
+
+    <!-- מסך -->
+    <string name="system_policy_title">בקרות מדיניות מערכת</string>
+    <string name="system_policy_subtitle">כל בקרה נשלחת אל Android ואז נקראת בחזרה. המתג מתעד את מה שביקשתם; השורה שמתחתיו היא מה שהמכשיר אישר בפועל.</string>
+    <string name="admin_system_policy_row">בקרות מדיניות מערכת</string>
+    <string name="admin_system_policy_supporting">הגבלות ניפוי שגיאות, התקנה, רשת ומכשיר</string>
+
+    <!-- פרופיל פריסה -->
+    <string name="system_policy_profile_row">פרופיל פריסה</string>
+    <string name="system_policy_profile_pilot">פיילוט — ניפוי שגיאות נשאר זמין אלא אם תכבו אותו</string>
+    <string name="system_policy_profile_production">ייצור — ניפוי שגיאות כבוי אלא אם תפעילו אותו</string>
+
+    <!-- קטגוריות -->
+    <string name="system_policy_section_access">ניפוי שגיאות וגישה למכשיר</string>
+    <string name="system_policy_section_installs">התקנה ויישומים</string>
+    <string name="system_policy_section_network">רשת וקישוריות</string>
+    <string name="system_policy_section_device">מכשיר ומשתמשים</string>
+
+    <!-- מצב מאומת של בקרה -->
+    <string name="system_policy_status_applied">אומת ונאכף</string>
+    <string name="system_policy_status_failed">התבקש, אך המכשיר לא אישר זאת</string>
+    <string name="system_policy_status_unsupported">לא זמין בגרסת Android הזו</string>
+    <string name="system_policy_status_requested">נשמר — טרם אומת</string>
+    <string name="system_policy_status_not_requested">כבוי</string>
+    <string name="system_policy_status_line">מצב: %1$s</string>
+    <string name="system_policy_detail">תגובת המכשיר: %1$s</string>
+    <string name="system_policy_never_verified">עדיין לא בוצע אימות במכשיר הזה.</string>
+
+    <!-- החלה -->
+    <string name="system_policy_apply">החל ואמת עכשיו</string>
+    <string name="system_policy_applying">מחיל ומאמת…</string>
+    <string name="system_policy_pending_note">נשמר. דבר אינו משתנה במכשיר עד שתחילו ותאמתו.</string>
+    <string name="system_policy_paused_note">ההגנה מושהית, ולכן הבחירות נשמרות אך אינן נאכפות. הן יוחלו כשההגנה תופעל מחדש.</string>
+    <string name="system_policy_applied_ok">מדיניות המערכת הוחלה ואומתה במכשיר הזה.</string>
+    <string name="system_policy_applied_failed">המכשיר לא אישר את כל הבקרות שהתבקשו: %1$s</string>
+    <string name="system_policy_error_auth">פג תוקף הפעלת מנהל המערכת. הזינו שוב את קוד ה-PIN כדי לשנות את מדיניות המערכת.</string>
+
+    <!-- אישור -->
+    <string name="system_policy_confirm_enable_title">להפעיל את הבקרה הזו?</string>
+    <string name="system_policy_confirm_disable_title">לכבות את הבקרה הזו?</string>
+    <string name="system_policy_confirm_disable_body">ההגבלה תוסר בפעם הבאה שהמדיניות תוחל, והיכולת תהפוך לזמינה לכל מי שמחזיק במכשיר.</string>
+    <string name="system_policy_confirm_apply">אישור</string>
+
+    <!-- בקרה: אפשרויות מפתח ו-ADB -->
+    <string name="system_policy_control_developer_options_and_adb_title">אפשרויות מפתח וניפוי שגיאות ב-USB</string>
+    <string name="system_policy_control_developer_options_and_adb_consequence">מכבה את אפשרויות המפתח ואת ADB. ניפוי שגיאות ב-USB הוא הדרך המתועדת לשחזר מכשיר שלא ניתן להגיע אליו דרך יישום הניהול, ולכן הפעלת הבקרה מסירה את נתיב השחזור הקיים. אין להפעיל אותה לפני שעדכון חתום הותקן בהצלחה בחומרה הזו.</string>
+
+    <!-- בקרה: העברת קבצים ב-USB -->
+    <string name="system_policy_control_usb_file_transfer_title">העברת קבצים ב-USB</string>
+    <string name="system_policy_control_usb_file_transfer_consequence">המכשיר עדיין נטען דרך USB, אך לא ניתן לחבר אותו כאחסון, ולכן אי אפשר להעתיק אליו קבצים או ממנו בכבל.</string>
+
+    <!-- בקרה: מקורות לא ידועים -->
+    <string name="system_policy_control_unknown_source_installs_title">התקנה ממקורות לא ידועים</string>
+    <string name="system_policy_control_unknown_source_installs_consequence">לא ניתן עוד להתקין יישומים מקובץ או מכל מקור שאינו מתקין מאושר. ב-Android 10 ואילך החסימה חלה גם על פרופילים אחרים במכשיר.</string>
+
+    <!-- בקרה: חנויות ומתקינים -->
+    <string name="system_policy_control_app_stores_and_installers_title">כל התקנת חבילה, כולל חנויות</string>
+    <string name="system_policy_control_app_stores_and_installers_consequence">חוסם כל מתקין במכשיר. Android מחיל זאת גם על יישום הניהול, ולכן Device Guard לא יוכל להתקין עדכונים חתומים משלו כל עוד הבקרה פעילה. השאירו אותה כבויה עד שהעדכונים יסופקו בדרך אחרת.</string>
+
+    <!-- בקרה: חשבונות -->
+    <string name="system_policy_control_account_modification_title">הוספה ושינוי של חשבונות</string>
+    <string name="system_policy_control_account_modification_consequence">לא ניתן להוסיף, להסיר או להגדיר מחדש חשבון בהגדרות, כולל חשבון שיישום מותקן זקוק לו כדי להתחבר.</string>
+
+    <!-- בקרה: VPN -->
+    <string name="system_policy_control_vpn_configuration_title">הגדרת VPN</string>
+    <string name="system_policy_control_vpn_configuration_consequence">מי שמשתמש במכשיר אינו יכול ליצור או לערוך VPN. חיבור VPN שהוגדר על ידי הניהול ממשיך לפעול.</string>
+
+    <!-- בקרה: איפוס רשת -->
+    <string name="system_policy_control_network_reset_title">איפוס הגדרות רשת</string>
+    <string name="system_policy_control_network_reset_consequence">פעולת ההגדרות שמנקה בבת אחת את הגדרות ה-Wi-Fi, הנתונים הסלולריים ו-Bluetooth הופכת ללא זמינה, כך שלא ניתן לנתק בטעות את קישוריות הניהול.</string>
+
+    <!-- בקרה: שיתוף אינטרנט -->
+    <string name="system_policy_control_tethering_title">שיתוף אינטרנט ונקודה חמה</string>
+    <string name="system_policy_control_tethering_consequence">המכשיר אינו יכול לשתף את החיבור שלו עם מכשירים אחרים דרך Wi-Fi, USB או Bluetooth.</string>
+
+    <!-- בקרה: Wi-Fi -->
+    <string name="system_policy_control_wifi_configuration_title">הגדרת רשתות Wi-Fi</string>
+    <string name="system_policy_control_wifi_configuration_consequence">מי שמשתמש במכשיר אינו יכול להוסיף או לשנות רשתות Wi-Fi. מה שיצרן מסוים אכן חוסם משתנה בין דגמים, ולכן הבקרה הזו מדווחת בנפרד ולעולם אינה מסמנת את ההגנה כתקולה בעצמה. אם המכשיר גם מאבד את הרשת שדרכה הוא מנוהל, רק גישה פיזית תוכל לשחזר אותו.</string>
+
+    <!-- בקרה: DNS פרטי -->
+    <string name="system_policy_control_private_dns_title">DNS פרטי</string>
+    <string name="system_policy_control_private_dns_consequence">לא ניתן לשנות את מצב ה-DNS הפרטי, ולכן אי אפשר להפנות את תרגום השמות אל שרת שאינו מסונן. דורש Android 10 ואילך.</string>
+
+    <!-- בקרה: תאריך ושעה -->
+    <string name="system_policy_control_date_and_time_title">תאריך, שעה ואזור זמן</string>
+    <string name="system_policy_control_date_and_time_consequence">לא ניתן לכוון את השעון ידנית. בדיקות אישורים ומשימות מתוזמנות תלויות בו. דורש Android 9 ואילך.</string>
+
+    <!-- בקרה: מצב בטוח -->
+    <string name="system_policy_control_safe_boot_title">אתחול במצב בטוח</string>
+    <string name="system_policy_control_safe_boot_consequence">לא ניתן להפעיל מחדש את המכשיר במצב בטוח, מצב שהיה מפעיל אותו ללא מדיניות הניהול.</string>
+
+    <!-- בקרה: איפוס לנתוני יצרן -->
+    <string name="system_policy_control_factory_reset_title">איפוס לנתוני יצרן מההגדרות</string>
+    <string name="system_policy_control_factory_reset_consequence">פעולת האיפוס בהגדרות הופכת ללא זמינה. איפוס שמופעל מתפריט השחזור של החומרה נמצא מחוץ למה שיישום ניהול כלשהו יכול לחסום.</string>
+
+    <!-- בקרה: משתמשים ופרופילים -->
+    <string name="system_policy_control_user_and_profile_creation_title">משתמשים ופרופילים נוספים</string>
+    <string name="system_policy_control_user_and_profile_creation_consequence">לא ניתן ליצור משתמש או פרופיל עבודה חדש, וב-Android 9 ואילך גם מעבר בין משתמשים חסום. כך נמנעת הפעלה שנייה ולא מנוהלת באותו מכשיר.</string>
+
+    <!-- בקרה: הסרת יישומים -->
+    <string name="system_policy_control_app_uninstall_title">הסרת יישומים</string>
+    <string name="system_policy_control_app_uninstall_consequence">לא ניתן להסיר יישומים מהמכשיר על ידי מי שמשתמש בו.</string>
+
+    <!-- בקרה: בקרות יישומים -->
+    <string name="system_policy_control_app_control_settings_title">בקרות יישומים בהגדרות</string>
+    <string name="system_policy_control_app_control_settings_consequence">עצירה כפויה, ניקוי נתונים וניקוי מטמון הופכים ללא זמינים בהגדרות, כך שלא ניתן לנטרל יישום מנוהל באמצעות ניקוי המצב שלו.</string>
+
+    <!-- יומן ביקורת -->
+    <string name="audit_system_policy_unverified">מדיניות מערכת לא אומתה: %1$s</string>
+    <string name="audit_system_policy_changed">בקרת מדיניות מערכת שונתה: %1$s</string>
+    <string name="audit_system_policy_applied">בקרות מדיניות המערכת הוחלו ואומתו</string>
+</resources>

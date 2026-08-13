@@ -13,7 +13,6 @@ import android.content.pm.SigningInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
-import android.os.UserManager;
 import android.util.Log;
 import android.webkit.WebView;
 
@@ -49,7 +48,7 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
-        applyRestrictions(dpm, admin, errors);
+        applySystemPolicy(context, dpm, admin, errors);
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
@@ -85,7 +84,7 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
-        clearRestrictions(dpm, admin, errors);
+        releaseSystemPolicy(context, dpm, admin, errors);
         try {
             dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
         } catch (RuntimeException exception) {
@@ -158,84 +157,87 @@ public final class LockdownPolicyController {
         return new PolicyResult(true, verified, 0, visibleCount, errors);
     }
 
-    private static void applyRestrictions(
+    /**
+     * Applies the administrator's system policy controls and verifies each one.
+     *
+     * <p>This replaces the fixed restriction list 0.5.1 sent unconditionally.
+     * The set is not narrower: {@link SystemPolicyControl} defaults reproduce that
+     * list exactly for a device with no stored choices, so an upgraded pilot
+     * enforces what it enforced before — including keeping developer options and
+     * ADB available, which the pilot still uses as its recovery path.
+     *
+     * <p>Only a <em>critical</em> control the administrator actually asked for can
+     * add an error here, and an error is what makes {@code apply} report the
+     * policy as unverified and drives the console's fault state. An advisory
+     * refusal and a restriction this Android release does not implement are
+     * recorded and shown, but neither is allowed to brick a working device.
+     */
+    private static void applySystemPolicy(
+            Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
             List<String> errors
     ) {
-        safeRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, errors);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            safeRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY, errors);
-            safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_PRIVATE_DNS, errors);
-        }
-        safeRestriction(dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_APPS_CONTROL, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_MODIFY_ACCOUNTS, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_ADD_USER, errors);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            safeRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, errors);
-            safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_DATE_TIME, errors);
-        }
-        safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_VPN, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_TETHERING, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_NETWORK_RESET, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_USB_FILE_TRANSFER, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_FACTORY_RESET, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_SAFE_BOOT, errors);
-    }
-
-    private static void clearRestrictions(
-            DevicePolicyManager dpm,
-            ComponentName admin,
-            List<String> errors
-    ) {
-        ArrayList<String> restrictions = new ArrayList<>(List.of(
-                UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
-                UserManager.DISALLOW_UNINSTALL_APPS,
-                UserManager.DISALLOW_APPS_CONTROL,
-                UserManager.DISALLOW_MODIFY_ACCOUNTS,
-                UserManager.DISALLOW_ADD_USER,
-                UserManager.DISALLOW_CONFIG_VPN,
-                UserManager.DISALLOW_CONFIG_TETHERING,
-                UserManager.DISALLOW_NETWORK_RESET,
-                UserManager.DISALLOW_USB_FILE_TRANSFER,
-                UserManager.DISALLOW_FACTORY_RESET,
-                UserManager.DISALLOW_SAFE_BOOT
-        ));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            restrictions.add(UserManager.DISALLOW_USER_SWITCH);
-            restrictions.add(UserManager.DISALLOW_CONFIG_DATE_TIME);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            restrictions.add(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
-            restrictions.add(UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
-        }
-        for (String restriction : restrictions) {
-            try {
-                dpm.clearUserRestriction(admin, restriction);
-                if (dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                    errors.add("restriction-release-unverified:" + restriction);
-                }
-            } catch (RuntimeException exception) {
-                errors.add("restriction-release:" + restriction + ":" + exception.getClass().getSimpleName());
-            }
+        SystemPolicyReport report = SystemPolicyEnforcer.enforce(
+                Build.VERSION.SDK_INT,
+                SystemPolicyStore.effectiveProfile(context),
+                SystemPolicyStore.explicitChoices(context),
+                new SystemPolicyDeviceGateway(dpm, admin)
+        );
+        recordSystemPolicy(context, report);
+        for (SystemPolicyControlStatus fault : report.faults()) {
+            errors.add("system-policy:" + fault.summary());
         }
     }
 
-    private static void safeRestriction(
+    /**
+     * Withdraws every system policy control for {@code pause}.
+     *
+     * <p>Pause keeps the stricter rule 0.5.1 used: any restriction that will not
+     * come off is a pause failure, advisory or not. A paused device that is still
+     * enforcing something is exactly the state an administrator is trying to
+     * leave, so it may not be reported as a clean pause.
+     */
+    private static void releaseSystemPolicy(
+            Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
-            String restriction,
             List<String> errors
     ) {
-        try {
-            dpm.addUserRestriction(admin, restriction);
-            if (!dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                errors.add("restriction-not-applied:" + restriction);
-            }
-        } catch (RuntimeException exception) {
-            errors.add(restriction + ": " + exception.getClass().getSimpleName());
+        SystemPolicyReport report = SystemPolicyEnforcer.release(
+                Build.VERSION.SDK_INT,
+                new SystemPolicyDeviceGateway(dpm, admin)
+        );
+        recordSystemPolicy(context, report);
+        for (SystemPolicyControlStatus failure : report.failures()) {
+            errors.add("system-policy-release:" + failure.summary());
         }
+    }
+
+    /**
+     * Audits what changed, then stores the pass as the console's evidence.
+     *
+     * <p>Only problems are audited, and only when the outcome differs from the
+     * one already on file. Reconciliation runs on every boot and every package
+     * change; appending a line per control per pass would evict the
+     * administrator actions the 50-entry log exists to keep.
+     */
+    private static void recordSystemPolicy(Context context, SystemPolicyReport report) {
+        for (SystemPolicyControlStatus status : report.statuses()) {
+            boolean problem = status.failed()
+                    || (status.requested()
+                        && status.outcome() == SystemPolicyOutcome.UNSUPPORTED);
+            if (!problem
+                    || SystemPolicyStore.lastOutcome(context, status.control())
+                        == status.outcome()) {
+                continue;
+            }
+            AuditLog.append(
+                    context,
+                    context.getString(R.string.audit_system_policy_unverified, status.summary())
+            );
+        }
+        SystemPolicyStore.saveReport(context, report);
     }
 
     private static void configureBlockedBrowser(
