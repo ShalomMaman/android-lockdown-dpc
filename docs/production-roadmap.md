@@ -113,22 +113,72 @@ active after a partial result.
 
 ## System policy controls
 
-The authenticated administrator console should expose separate controls for:
+The authenticated administrator console exposes sixteen separate controls,
+each bound to the official Android Enterprise `UserManager` restrictions it is
+made of and applied through `DevicePolicyManager#addUserRestriction`:
 
 - developer options and Android debugging (`DISALLOW_DEBUGGING_FEATURES`);
 - USB file transfer;
-- installation from unknown sources;
-- application stores and package installers;
+- installation from unknown sources (per-user, plus the Android 10 global key);
+- all package installation, including stores and installers;
 - adding or changing accounts;
 - VPN configuration;
 - network reset, tethering and Wi-Fi configuration where supported;
+- private DNS;
 - date and time changes;
 - Safe Boot, factory reset and user/profile creation;
 - application uninstall and application-control settings.
 
-These controls must report whether the current Android release supports them and
-whether Android verified the requested state. A switch is not proof that the
-policy was applied.
+Every control is written and then read back from
+`DevicePolicyManager#getUserRestrictions`, and reports one of **unsupported**,
+**not requested**, **requested**, **applied** or **failed** for the running SDK.
+A saved switch is never rendered as enforcement: changing one clears the stored
+verification, so the row reads "saved — not verified yet" until an apply pass
+confirms it against the platform.
+
+A failed *critical* control that the administrator requested adds an error to the
+reconciliation result, which is what makes protection report as faulted. Two
+cases deliberately do not fault: a restriction the running Android release does
+not implement, because an older device is not a broken device; and a failure to
+*withdraw* a control, because the device is then stricter than asked rather than
+weaker, and faulting there would strand an administrator reopening a capability.
+Wi-Fi configuration is the single advisory control — Android defines the
+restriction but OEM behaviour varies, so a refusal is recorded and shown without
+faulting protection.
+
+### Pilot migration safety
+
+Defaults are keyed to a deployment profile derived from the running application
+ID. `gradle/production-identity.gradle` already assigns a distinct production
+identity, and Android refuses to change an application ID on an in-place update,
+so a provisioned pilot cannot become a production install. Anything
+unrecognised — a fork, a rename, an unreadable record — resolves to the pilot
+profile, and a profile once recorded as pilot is never promoted.
+
+The pilot defaults reproduce the Pilot 0.5.1 restriction set exactly, so an
+upgraded pilot enforces what it enforced before and **keeps developer options and
+ADB available**. `SystemPolicyMigrationTest` pins that set literally. Developer
+options and ADB default to on only for the production profile. Blocking all
+package installation is never a default on either profile: Android applies
+`DISALLOW_INSTALL_APPS` to the device owner as well, which would disable the
+signed self-update that gate 3 below requires before ADB can be withdrawn.
+
+### Open integration requirements
+
+Two items are deliberately outside this change and are required before the
+production profile is complete:
+
+1. **Console entry point.** `SystemPolicyActivity` is implemented, declared and
+   unexported, and the strings `admin_system_policy_row` and
+   `admin_system_policy_supporting` exist for it, but no row in `MainActivity`
+   opens it yet. It needs an `ActionRow` in the protection section that starts
+   the activity behind `requireSession()`, exactly as the app-list row does.
+2. **Production identity constant.** `SystemPolicyProfile.PRODUCTION_APPLICATION_ID`
+   duplicates the application ID literal in `gradle/production-identity.gradle`.
+   If issue #25 changes that ID, the constant must move with it. The safe failure
+   mode if it is forgotten is that a production device is treated as a pilot.
+   Publishing the flag as a `BuildConfig` field from the Gradle files would
+   remove the duplication.
 
 ## Maintenance mode
 
