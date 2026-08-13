@@ -15,8 +15,8 @@ def pilotManifestUrl = 'https://raw.githubusercontent.com/ShalomMaman/android-lo
 def approvedMetadataFingerprint = 'c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc'
 def approvedPilotSigner = '25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b'
 def expectedApplicationId = 'com.example.lockdowndpc'
-def expectedVersionCode = 10
-def expectedVersionName = '0.5.1'
+def expectedVersionCode = 11
+def expectedVersionName = '0.5.2'
 
 def asBuildConfigString = { String value ->
     '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
@@ -77,7 +77,7 @@ plugins.withId('com.android.application') {
     if (configuredApplicationId != expectedApplicationId
             || configuredVersionCode != expectedVersionCode
             || configuredVersionName != expectedVersionName) {
-        throw new GradleException('Pilot identity/version drifted from the approved 0.5.1 release')
+        throw new GradleException('Pilot identity/version drifted from the approved 0.5.2 release')
     }
     if (releaseSigningName != 'debug') {
         throw new GradleException('Pilot release no longer uses the pilot-compatible signing configuration')
@@ -104,7 +104,7 @@ plugins.withId('com.android.application') {
     }
     tasks.register('pilotChannelRelease') {
         group = 'build'
-        description = 'Builds, tests, lints, and verifies the explicit Pilot 0.5.1 update-channel APK.'
+        description = 'Builds, tests, lints, and verifies the explicit Pilot 0.5.2 update-channel APK.'
         dependsOn 'test', 'lintRelease', 'verifyPilotRelease'
     }
     tasks.register('verifyPilotChannelForCi', Exec) {

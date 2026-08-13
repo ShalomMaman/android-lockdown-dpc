@@ -44,6 +44,36 @@
             android:exported="false" />
 
         <!--
+            Management identity console. Not exported for the same reason: it
+            writes the signing-certificate pins that decide which package is
+            allowed to keep management privilege, and a pin written by anything
+            other than an authenticated administrator would be a privilege grant.
+        -->
+        <activity
+            android:name=".ui.ManagementIdentityActivity"
+            android:exported="false" />
+
+        <!--
+            Timed maintenance mode. Not exported: this screen deliberately makes a
+            managed device weaker for a bounded period, including the break-glass
+            debugging option, so it is reachable only from an authenticated
+            administrator session inside this package.
+        -->
+        <activity
+            android:name=".ui.MaintenanceActivity"
+            android:exported="false" />
+
+        <!--
+            Local device health report. Not exported: the report names policy
+            state, kiosk state and management identity, and the export is an
+            explicit administrator action rather than something another
+            application may ask for.
+        -->
+        <activity
+            android:name=".ui.DeviceHealthActivity"
+            android:exported="false" />
+
+        <!--
             Kiosk HOME surface. Disabled in the manifest so an upgrade never turns
             a managed device into a kiosk; KioskController enables the component
             and installs the HOME preference only while kiosk is active, and

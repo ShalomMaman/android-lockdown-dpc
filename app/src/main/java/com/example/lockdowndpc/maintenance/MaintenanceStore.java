@@ -1,0 +1,169 @@
+package com.example.lockdowndpc.maintenance;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.os.SystemClock;
+
+import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOutcome;
+
+import java.util.LinkedHashSet;
+import java.util.Set;
+
+/**
+ * The one Android-aware class in this package: it persists the open window and
+ * reads the device clocks. Nothing decides anything here.
+ *
+ * <p>The split is the same one {@code SystemPolicyStore} makes. Every rule about
+ * expiry, reboot, authorisation and restore lives in
+ * {@link MaintenanceStateMachine}, {@link MaintenancePlan} and
+ * {@link MaintenanceCoordinator}, which hold no Android type and are proved on
+ * the JVM. What is left here is reading and writing a preference file, which is
+ * exactly the part a unit test could only pretend to exercise.
+ *
+ * <h2>Failing closed on a record it cannot trust</h2>
+ *
+ * <p>A stored window is a claim that this device may currently have restrictions
+ * relaxed. If any part of that claim is unreadable — a missing field, a
+ * capability key this build does not know, a value that will not parse — the
+ * store does not guess. It drops the record and leaves
+ * {@link #restorePending(Context)} set, so the next pass restores and verifies
+ * the base policy instead of assuming a device that was never opened.
+ *
+ * <p>{@link #restorePending(Context)} is set the moment a window is written and
+ * cleared only when a restore has been read back. A process killed mid-window,
+ * a crash, or a preference file that survives an unexpected upgrade therefore
+ * all end with the base policy re-asserted rather than with a device quietly
+ * left open.
+ */
+public final class MaintenanceStore {
+
+    private static final String PREFS = "maintenance";
+    private static final String KEY_SCHEMA_VERSION = "schema_version";
+    private static final String KEY_CAPABILITIES = "capabilities";
+    private static final String KEY_DURATION = "duration_millis";
+    private static final String KEY_OPENED_WALL = "opened_wall_clock";
+    private static final String KEY_OPENED_ELAPSED = "opened_elapsed";
+    private static final String KEY_LAST_WALL = "last_seen_wall_clock";
+    private static final String KEY_LAST_ELAPSED = "last_seen_elapsed";
+    private static final String KEY_RESTORE_PENDING = "restore_pending";
+
+    /** Bumped only for a change that needs migration code, so 1 means "as designed". */
+    private static final int SCHEMA_VERSION = 1;
+
+    private MaintenanceStore() {}
+
+    /**
+     * The device clocks.
+     *
+     * <p>{@code SystemClock.elapsedRealtime()} is the monotonic reading:
+     * milliseconds since boot including deep sleep, reset by a restart and not
+     * settable by anyone. {@code System.currentTimeMillis()} is the calendar
+     * clock an OEM time sync or a user can move.
+     */
+    public static MaintenanceClock deviceClock() {
+        return new MaintenanceClock() {
+            @Override
+            public long wallClockMillis() {
+                return System.currentTimeMillis();
+            }
+
+            @Override
+            public long elapsedSinceBootMillis() {
+                return SystemClock.elapsedRealtime();
+            }
+        };
+    }
+
+    /**
+     * The stored window, or {@code null} when there is none — including when the
+     * record exists but cannot be trusted.
+     */
+    public static synchronized MaintenanceWindow readWindow(Context context) {
+        SharedPreferences preferences = prefs(context);
+        String capabilityKeys = preferences.getString(KEY_CAPABILITIES, null);
+        if (capabilityKeys == null || capabilityKeys.isEmpty()) {
+            return null;
+        }
+        try {
+            Set<MaintenanceCapability> capabilities = new LinkedHashSet<>();
+            for (String key : capabilityKeys.split(",")) {
+                MaintenanceCapability capability = MaintenanceCapability.fromStorageKey(key.trim());
+                if (capability == null) {
+                    return discard(context);
+                }
+                capabilities.add(capability);
+            }
+            return new MaintenanceWindow(
+                    capabilities,
+                    preferences.getLong(KEY_DURATION, 0L),
+                    preferences.getLong(KEY_OPENED_WALL, 0L),
+                    preferences.getLong(KEY_OPENED_ELAPSED, -1L),
+                    preferences.getLong(KEY_LAST_WALL, 0L),
+                    preferences.getLong(KEY_LAST_ELAPSED, -1L));
+        } catch (RuntimeException ignored) {
+            // A rejected duration, a value stored under the wrong type, an empty
+            // capability list: none of them is evidence of a legitimate window.
+            return discard(context);
+        }
+    }
+
+    /** Whether a restore still has to be verified before this device is trusted again. */
+    public static boolean restorePending(Context context) {
+        return prefs(context).getBoolean(KEY_RESTORE_PENDING, false);
+    }
+
+    /**
+     * Persists exactly what an outcome hands back.
+     *
+     * <p>The storage rule in one place so no caller can get it wrong: a window is
+     * stored whenever the outcome carries one — an open window, or a window whose
+     * restore could not be verified — and the pending flag survives until a
+     * restore has actually been read back.
+     */
+    public static synchronized void apply(Context context, MaintenanceOutcome outcome) {
+        if (outcome.windowMustBeStored()) {
+            saveWindow(context, outcome.window());
+        } else {
+            clearWindow(context);
+        }
+        if (outcome.restoreVerified()) {
+            prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
+        }
+    }
+
+    /** Writes the window and marks a restore as owed. */
+    public static synchronized void saveWindow(Context context, MaintenanceWindow window) {
+        prefs(context).edit()
+                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
+                .putString(KEY_CAPABILITIES, window.capabilitySummary())
+                .putLong(KEY_DURATION, window.durationMillis())
+                .putLong(KEY_OPENED_WALL, window.openedAtWallClock())
+                .putLong(KEY_OPENED_ELAPSED, window.openedAtElapsed())
+                .putLong(KEY_LAST_WALL, window.lastSeenWallClock())
+                .putLong(KEY_LAST_ELAPSED, window.lastSeenElapsed())
+                .putBoolean(KEY_RESTORE_PENDING, true)
+                .commit();
+    }
+
+    /** Removes the window. The pending flag is deliberately untouched. */
+    public static synchronized void clearWindow(Context context) {
+        prefs(context).edit()
+                .remove(KEY_CAPABILITIES)
+                .remove(KEY_DURATION)
+                .remove(KEY_OPENED_WALL)
+                .remove(KEY_OPENED_ELAPSED)
+                .remove(KEY_LAST_WALL)
+                .remove(KEY_LAST_ELAPSED)
+                .commit();
+    }
+
+    private static MaintenanceWindow discard(Context context) {
+        prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, true).commit();
+        clearWindow(context);
+        return null;
+    }
+
+    private static SharedPreferences prefs(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+}

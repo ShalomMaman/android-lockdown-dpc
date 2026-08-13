@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew translation of the timed maintenance console.
+
+    The folder qualifier is "iw" for the same reason as strings.xml: Android
+    resolves resource folders against java.util.Locale#getLanguage(), which still
+    reports the legacy Hebrew code.
+
+    Latin runs inside a Hebrew sentence (USB, ADB, PIN, Safe Boot, Device Guard)
+    are wrapped in U+2066 LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE
+    so the bidi algorithm cannot drag the surrounding punctuation to the wrong
+    side. Runtime values — control keys, failure summaries, clock times — are
+    isolated in code instead; see ui/UiLogic.kt.
+
+    Keys and format placeholders are kept in parity with
+    res/values/maintenance_strings.xml.
+-->
+<resources>
+
+    <!-- מסך -->
+    <string name="maint_title">תחזוקה מתוזמנת</string>
+    <string name="maint_subtitle">תחזוקה פותחת יכולות שאתם מציינים בשמן, לזמן תחום, ואז מחזירה את המדיניות הקודמת. דבר אינו נפתח כברירת מחדל, ודבר אינו מדווח כפתוח עד שהמכשיר הזה אישר זאת.</string>
+    <string name="maint_admin_row">תחזוקה מתוזמנת</string>
+    <string name="maint_admin_supporting">פתיחת יכולות נבחרות לביקור שירות תחום בזמן</string>
+    <string name="maint_loading">בודקים אם יש חלון תחזוקה פתוח…</string>
+
+    <!-- מצב החלון -->
+    <string name="maint_status_open">פתוח</string>
+    <string name="maint_status_closed">סגור</string>
+    <string name="maint_card_open_headline">חלון תחזוקה פתוח</string>
+    <string name="maint_card_closed_headline">אין חלון תחזוקה פתוח</string>
+    <string name="maint_card_closed_detail">בקרות מדיניות המערכת שהוגדרו במכשיר הזה הן כל המדיניות כרגע.</string>
+
+    <!-- בחירת יכולות -->
+    <string name="maint_section_capabilities">יכולות לפתיחה</string>
+    <string name="maint_capabilities_note">בחרו רק את מה שהמשימה מחייבת. כל יכולת מרפה את הבקרות המפורטות תחתיה ותו לא, ויכולת שהמדיניות הבסיסית לא אכפה אינה משנה דבר.</string>
+    <string name="maint_section_break_glass">שבירת זכוכית</string>
+    <string name="maint_break_glass_badge">שבירת זכוכית</string>
+    <string name="maint_break_glass_note">פותחת ערוץ מורשה ולא יכולת למשתמש. היא לעולם אינה נבחרת עבורכם, לעולם אינה משתמעת מיכולת אחרת, והיא מחייבת אישור נפרד משלה.</string>
+
+    <!-- בחירת משך -->
+    <string name="maint_section_duration">משך הזמן</string>
+    <string name="maint_expected_close">צפוי להיסגר בסביבות %1$s</string>
+    <string name="maint_expiry_estimate_note">שעת הסגירה היא הערכה הנקראת משעון המכשיר הזה. החלון עצמו נמדד לפי שעון ההפעלה, ולכן הזזת התאריך או השעה אינה יכולה להאריך אותו, והפעלה מחדש סוגרת אותו.</string>
+
+    <!-- משכי זמן -->
+    <string name="maint_duration_15_minutes">15 דקות</string>
+    <string name="maint_duration_30_minutes">30 דקות</string>
+    <string name="maint_duration_1_hour">שעה אחת</string>
+    <string name="maint_duration_2_hours">שעתיים</string>
+    <string name="maint_duration_4_hours">4 שעות</string>
+    <string name="maint_duration_custom_minutes">%1$d דקות</string>
+
+    <!-- פעולות -->
+    <string name="maint_action_review">בדיקת החלון הזה</string>
+    <string name="maint_action_open">פתיחת חלון התחזוקה</string>
+    <string name="maint_action_working">מבצעים…</string>
+    <string name="maint_action_continue">המשך</string>
+    <string name="maint_action_close_now">סגירה עכשיו ושחזור המדיניות</string>
+    <string name="maint_action_closing">סוגרים ומאמתים…</string>
+
+    <!-- אישור -->
+    <string name="maint_confirm_title">אישור חלון התחזוקה</string>
+    <string name="maint_confirm_subtitle">זה מה שיוצא מההגנה, ולכמה זמן.</string>
+    <string name="maint_confirm_capabilities">נפתח: %1$s</string>
+    <string name="maint_confirm_duration">משך: %1$s</string>
+    <string name="maint_confirm_note">החלון נסגר בתום הזמן, בהפעלה מחדש של המכשיר, וכשאתם סוגרים אותו ידנית. בכל אחד מהמקרים האלה המדיניות הקודמת מוחלת מחדש ונקראת בחזרה לפני שהחלון מדווח כסגור.</string>
+
+    <!-- אישור שבירת הזכוכית הנפרד -->
+    <string name="maint_break_glass_title">לפתוח ערוץ ניפוי שגיאות מורשה?</string>
+    <string name="maint_break_glass_subtitle">האישור הזה נפרד מפני שההחלטה הזו נפרדת.</string>
+    <string name="maint_break_glass_warning">כשאפשרויות המפתח וניפוי השגיאות ב-⁦USB⁩ פתוחים, כבל ומארח מורשה יכולים להפעיל את המכשיר הזה מחוץ לכל מה שהמסוף הזה אוכף, כולל רשימת היישומים המותרים ומצב הקיוסק.</string>
+    <string name="maint_break_glass_not_left_open">אין להשאיר אותו פתוח. סגרו את החלון מיד עם סיום המשימה במקום להמתין לפקיעתו, ובדקו אחר כך שכרטיס המצב מציג סגור.</string>
+    <string name="maint_break_glass_confirm">פתיחת ערוץ ניפוי השגיאות</string>
+
+    <!-- החלון הפתוח -->
+    <string name="maint_open_remaining_hours">נותרו %1$d שעות ו-%2$d דקות</string>
+    <string name="maint_open_remaining_minutes">נותרו %1$d דקות</string>
+    <string name="maint_open_remaining_under_minute">נותרה פחות מדקה</string>
+    <string name="maint_open_remaining_expired">החלון הסתיים. הוא נסגר והמדיניות הקודמת משוחזרת.</string>
+    <string name="maint_open_length_hours">אורך החלון: %1$d שעות ו-%2$d דקות</string>
+    <string name="maint_open_length_minutes">אורך החלון: %1$d דקות</string>
+    <string name="maint_open_capabilities_label">פתוח כרגע</string>
+    <string name="maint_open_remaining_label">הזמן שנותר</string>
+    <string name="maint_open_relaxed">בקרות שכובו: %1$s</string>
+    <string name="maint_open_relaxed_none">לא היה צורך לכבות אף בקרה, מפני שהמדיניות הבסיסית לא אכפה אף אחת מהן.</string>
+    <string name="maint_open_residual">עדיין חסום על ידי: %1$s</string>
+
+    <!-- תוצאות -->
+    <string name="maint_result_opened">חלון התחזוקה הוחל ונקרא בחזרה במכשיר הזה.</string>
+    <string name="maint_result_open_refused">החלון לא נפתח: %1$s</string>
+    <string name="maint_result_open_failed_restored">המכשיר הזה לא אישר את החלון, ולכן הוא בוטל. המדיניות הקודמת הוחלה מחדש ונקראה בחזרה. תגובת המכשיר: %1$s</string>
+    <string name="maint_result_open_failed_restore_failed">המכשיר הזה לא אישר לא את החלון ולא את השחזור שבא אחריו, ולכן ייתכן שחלק מההגבלות עדיין רפויות. תגובת המכשיר: %1$s</string>
+    <string name="maint_result_closed_verified">החלון סגור והמדיניות הקודמת נקראה בחזרה כשהיא נאכפת במכשיר הזה.</string>
+    <string name="maint_result_close_failed">החלון הסתיים, אך המכשיר הזה לא אישר את המדיניות הקודמת. תגובת המכשיר: %1$s</string>
+    <string name="maint_result_still_open">החלון עדיין פתוח.</string>
+    <string name="maint_result_not_open">לא היה חלון תחזוקה פתוח.</string>
+
+    <!-- שחזור שלא ניתן היה להוכיח -->
+    <string name="maint_restore_failed_headline">המדיניות הקודמת לא אושרה</string>
+    <string name="maint_restore_failed_recovery">התייחסו למכשיר הזה כרפוי עד שידווח אחרת. סגרו את החלון שוב מכאן; אם הכשל חוזר, החילו ואמתו את בקרות מדיניות המערכת ממסוף המדיניות, ואז הפעילו את המכשיר מחדש לפני שהוא חוזר לשירות.</string>
+
+    <!-- מדוע הפעולה אינה זמינה -->
+    <string name="maint_blocked_session">פג תוקף הפעלת מנהל המערכת, ולכן לא ניתן לבקש חלון תחזוקה.</string>
+    <string name="maint_blocked_not_device_owner">הרשאת ניהול המערכת אינה מוגדרת במכשיר הזה, ולכן לא ניתן להרפות אף הגבלה.</string>
+    <string name="maint_blocked_already_open">כבר יש חלון פתוח. סגרו אותו תחילה: הרחבת חלון פירושה סגירת החלון הנוכחי, אימות השחזור, ופתיחת חלון חדש שנרשם בפני עצמו.</string>
+    <string name="maint_blocked_no_capability">בחרו לפחות יכולת אחת. תחזוקה אינה פותחת דבר כברירת מחדל.</string>
+    <string name="maint_blocked_invalid_duration">בחרו אחד ממשכי הזמן המוצעים.</string>
+    <string name="maint_failure_line">תגובת המכשיר: %1$s</string>
+
+    <!-- דחיות שמדווחות ממכונת המצבים -->
+    <string name="maint_refused_generic">הבקשה נדחתה.</string>
+    <string name="maint_refused_admin_authentication_required">נדרשת הפעלת מנהל מערכת.</string>
+    <string name="maint_refused_already_open">כבר יש חלון תחזוקה פתוח.</string>
+    <string name="maint_refused_no_capability_selected">לא נבחרה אף יכולת.</string>
+    <string name="maint_refused_unknown_capability">הבקשה ציינה יכולת שהגרסה הזו אינה מכירה.</string>
+    <string name="maint_refused_non_positive_duration">המשך המבוקש אינו משך חיובי.</string>
+    <string name="maint_refused_duration_above_maximum">המשך המבוקש ארוך ממה שהגרסה הזו מעניקה.</string>
+
+    <!-- יכולת: חנויות יישומים ומתקינים -->
+    <string name="maint_capability_app_store_access_title">חנויות יישומים ומתקינים</string>
+    <string name="maint_capability_app_store_access_consequence">כל מתקין במכשיר יכול לפעול שוב למשך החלון, כולל חנות יישומים. ⁦Device Guard⁩ גם יכול להתקין את העדכונים החתומים שלו בזמן שזה פתוח.</string>
+
+    <!-- יכולת: התקנת קובץ חבילה מקומי -->
+    <string name="maint_capability_local_apk_install_title">התקנת קובץ חבילה מקומי</string>
+    <string name="maint_capability_local_apk_install_consequence">ניתן להתקין קובץ חבילה שכבר נמצא במכשיר. אם המדיניות הבסיסית חוסמת גם את כל ההתקנות, הבקרה הזו תמשיך לחסום את הפעולה עד שתפתחו גם את יכולת החנויות והמתקינים; החלון אומר זאת במקום לפתוח אותה עבורכם.</string>
+
+    <!-- יכולת: בקרות יישומים בהגדרות -->
+    <string name="maint_capability_selected_settings_title">בקרות יישומים בהגדרות</string>
+    <string name="maint_capability_selected_settings_consequence">עצירה כפויה, ניקוי נתונים וניקוי מטמון הופכים לזמינים בהגדרות. תאריך ושעה, משתמשים ופרופילים, איפוס לנתוני יצרן ו-⁦Safe Boot⁩ אינם חלק מהיכולת הזו ונשארים סגורים.</string>
+
+    <!-- יכולת: העברת קבצים ב-USB -->
+    <string name="maint_capability_usb_file_transfer_title">העברת קבצים ב-⁦USB⁩</string>
+    <string name="maint_capability_usb_file_transfer_consequence">ניתן לחבר את המכשיר כאחסון דרך כבל, ולכן אפשר להעתיק אליו קבצים וממנו במהלך הביקור.</string>
+
+    <!-- יכולת: אפשרויות מפתח ו-ADB -->
+    <string name="maint_capability_adb_debugging_title">אפשרויות מפתח וניפוי שגיאות ב-⁦USB⁩</string>
+    <string name="maint_capability_adb_debugging_consequence">אפשרויות המפתח ו-⁦ADB⁩ הופכים לזמינים. כבל ומארח מורשה יכולים אז להפעיל את המכשיר הזה מחוץ לכל מה שהמסוף הזה אוכף. זהו ערוץ מורשה ולא יכולת למשתמש: פתחו אותו רק למשימה שמחייבת זאת, וסגרו את החלון מיד עם סיומה.</string>
+
+    <!-- יומן: כיצד נסגר החלון -->
+    <string name="maint_audit_close_expired">חלון התחזוקה הגיע לסוף זמנו.</string>
+    <string name="maint_audit_close_reboot">חלון התחזוקה הסתיים מפני שהמכשיר הופעל מחדש.</string>
+    <string name="maint_audit_close_administrator_cancelled">מנהל מערכת סגר את חלון התחזוקה.</string>
+    <string name="maint_audit_close_clock_anomaly">חלון התחזוקה נסגר מפני שלא ניתן היה לסמוך על קריאות השעון.</string>
+    <string name="maint_audit_close_unreadable_record">לא ניתן היה לקרוא רשומת תחזוקה שמורה, ולכן המדיניות הקודמת שוחזרה.</string>
+    <string name="maint_audit_close_open_failed">חלון התחזוקה בוטל מפני שלא ניתן היה לאמת את פתיחתו.</string>
+
+    <!-- יומן: פעולות מנהל המערכת -->
+    <string name="maint_audit_opened">חלון תחזוקה נפתח: %1$s</string>
+    <string name="maint_audit_open_failed">חלון תחזוקה נדחה או לא אומת: %1$s</string>
+    <string name="maint_audit_closed">חלון תחזוקה נסגר והמדיניות שוחזרה: %1$s</string>
+    <string name="maint_audit_restore_failed">שחזור התחזוקה לא אומת: %1$s</string>
+</resources>
