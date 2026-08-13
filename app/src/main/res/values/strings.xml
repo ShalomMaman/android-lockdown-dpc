@@ -180,6 +180,13 @@
     <string name="admin_kiosk_row">Operating profile</string>
     <string name="admin_management_row">Management connectivity</string>
     <string name="admin_management_supporting">Packages that keep working while protection is on</string>
+    <!--
+        The console rows for system policy, maintenance, management identity and
+        device health are owned by each feature's own resource file
+        (system_policy_strings.xml, maintenance_strings.xml,
+        management_identity_strings.xml, device_health_strings.xml), so a feature
+        and the row that opens it are translated together.
+    -->
     <string name="kiosk_title">Operating profile</string>
     <string name="kiosk_subtitle">Choose how this device behaves. Kiosk mode is never turned on by an update or by a reboot; it takes an explicit choice on this screen and an administrator PIN.</string>
     <string name="kiosk_section_profile">Choose a profile</string>

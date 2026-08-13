@@ -113,6 +113,33 @@ public final class MaintenanceStore {
     }
 
     /**
+     * Records the intent to relax, before anything is sent to the device.
+     *
+     * <p>The dangerous gap is between clearing a restriction and recording that
+     * it was cleared: a process kill in between would otherwise leave a device
+     * with debugging enabled and nothing on disk saying so, and the next pass
+     * would find no window, no pending flag and nothing to restore. Writing the
+     * flag first costs, at worst, one redundant re-apply of the base policy.
+     *
+     * <p>{@code commit()} rather than {@code apply()} on purpose: the point is
+     * that the record reaches disk before the first {@code DevicePolicyManager}
+     * call, and an asynchronous write is exactly the race being closed.
+     */
+    public static synchronized void markRestorePending(Context context) {
+        prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, true).commit();
+    }
+
+    /**
+     * Withdraws the intent when nothing was sent after all.
+     *
+     * <p>Only legitimate for a request the state machine refused before any
+     * device call — never as a way to forget a relaxation that did happen.
+     */
+    public static synchronized void clearRestorePending(Context context) {
+        prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
+    }
+
+    /**
      * Persists exactly what an outcome hands back.
      *
      * <p>The storage rule in one place so no caller can get it wrong: a window is

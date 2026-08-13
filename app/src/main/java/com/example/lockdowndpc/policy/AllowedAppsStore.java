@@ -17,6 +17,7 @@ public final class AllowedAppsStore {
     private static final String KEY_ENABLED = "protection_enabled";
     private static final String KEY_POLICY_STATE = "policy_state";
     private static final String KEY_POLICY_ERROR = "policy_error";
+    private static final String KEY_POLICY_VERIFIED_AT = "policy_verified_at";
     private static final String KEY_ALLOWLIST_CONFIGURED = "allowlist_configured";
     private static final String KEY_MANAGED_PACKAGES = "managed_packages";
     private static final String KEY_MODE = "protection_mode";
@@ -330,8 +331,21 @@ public final class AllowedAppsStore {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, true)
                 .putString(KEY_POLICY_STATE, PolicyState.ACTIVE.name())
+                .putLong(KEY_POLICY_VERIFIED_AT, System.currentTimeMillis())
                 .remove(KEY_POLICY_ERROR)
                 .commit();
+    }
+
+    /**
+     * When protection was last read back as applied, or 0 when it never has been.
+     *
+     * <p>Written only here, on the one path that has verified the policy rather
+     * than merely requested it. A device that reports {@code ACTIVE} with a zero
+     * here has a stored state from before this record existed, which the health
+     * report treats as unproven rather than as healthy.
+     */
+    public static long getPolicyVerifiedAt(Context context) {
+        return prefs(context).getLong(KEY_POLICY_VERIFIED_AT, 0L);
     }
 
     public static void markApplyFailed(Context context, String error) {

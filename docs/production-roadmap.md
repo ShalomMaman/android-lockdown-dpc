@@ -10,48 +10,59 @@ The public [Device Guard Production Roadmap](https://github.com/users/ShalomMama
 is the execution source of truth. This document preserves the rationale and
 security boundary; the linked Issues own scope, priority and acceptance:
 
-- **Pilot 0.5.2:** [system-application inventory](https://github.com/ShalomMaman/android-lockdown-dpc/issues/18),
+- **Pilot 0.5.2 — implemented in this release:**
+  [system-application inventory](https://github.com/ShalomMaman/android-lockdown-dpc/issues/18),
   [verified system controls](https://github.com/ShalomMaman/android-lockdown-dpc/issues/20),
   [timed maintenance mode](https://github.com/ShalomMaman/android-lockdown-dpc/issues/26), and
   [management-package identity pins](https://github.com/ShalomMaman/android-lockdown-dpc/issues/27).
-- **Pilot 0.5.3:** [real signed self-update drill](https://github.com/ShalomMaman/android-lockdown-dpc/issues/19),
+  All four are covered by JVM tests and none has been exercised on hardware.
+- **Pilot 0.5.3 — the hardware gates:**
+  [real signed self-update drill](https://github.com/ShalomMaman/android-lockdown-dpc/issues/19),
   [physical kiosk validation](https://github.com/ShalomMaman/android-lockdown-dpc/issues/22),
   [Android/OEM matrix](https://github.com/ShalomMaman/android-lockdown-dpc/issues/23), and
   [repeatable Device Owner provisioning](https://github.com/ShalomMaman/android-lockdown-dpc/issues/28).
-- **1.0:** [final production identity and signing](https://github.com/ShalomMaman/android-lockdown-dpc/issues/25)
-  and [privacy-preserving fleet health](https://github.com/ShalomMaman/android-lockdown-dpc/issues/24).
+  The executable procedure for #22 and #23 is [`hardware-validation.md`](hardware-validation.md);
+  results are recorded in [`device-matrix.md`](device-matrix.md). The offline half
+  of #19 is implemented in `tools/update_drill.py` and the on-device half is
+  documented in [`update-drill.md`](update-drill.md); #28 tooling and runbook are
+  `tools/provisioning_payload.py` and [`provisioning.md`](provisioning.md).
+- **1.0:** [final production identity and signing](https://github.com/ShalomMaman/android-lockdown-dpc/issues/25).
+  [Privacy-preserving fleet health](https://github.com/ShalomMaman/android-lockdown-dpc/issues/24)
+  is implemented in this release as a local, on-device report plus an
+  operator-initiated redacted export: Device Guard gains no telemetry, no
+  analytics endpoint and no default off-device transmission, and a fleet view is
+  assembled by whoever collects the exports. That is a security boundary, not a
+  deferral.
 
-## What Pilot 0.5.1 does today
+## What Pilot 0.5.2 does today
 
-The application picker is a **third-party application picker**. It enumerates
-installed and previously managed packages, then deliberately removes:
+The 0.5.2 console implements the administrator experience the rest of this
+document describes: a searchable system-application inventory with safety tiers,
+verified system policy controls, timed maintenance mode, and management identity
+pinning. The remaining gates are hardware gates.
 
-- Android system and updated-system applications;
-- Device Guard itself;
-- configured management transports such as Tailscale;
-- packages in the built-in browser, store and social-media catalogues.
+The application picker is no longer a third-party-only picker. It enumerates
+installed and previously managed packages and presents system applications
+behind the safety tiers described below, while still refusing to make protected
+core components selectable. Device Guard itself and a verified management
+transport are never selectable.
 
-Known browsers, stores and social applications can still be blocked by policy,
-but some are classified by a built-in package catalogue rather than presented
-as administrator-selectable rows. This is why Google Play, Chrome and other
-system applications may be absent from the list even while protection blocks
-them.
+The `ADMIN_SELECTED_SYSTEM` classification is now written by an administrator
+screen rather than by nothing, so an opted-in system package is a recorded
+administrator decision with a risk acceptance behind it.
 
-The policy backend already has an `ADMIN_SELECTED_SYSTEM` classification and a
-storage API for explicitly opted-in system packages. Pilot 0.5.1 ships no
-administrator screen that writes this setting. Therefore the presence of that
-backend classification must not be described as user-facing system-app
-selection.
-
-| Capability | Pilot 0.5.1 status |
+| Capability | Pilot 0.5.2 status |
 | --- | --- |
 | Select ordinary installed applications | Available |
 | Remember and display DPC-hidden third-party applications | Available |
 | Block known stores, browsers and social applications | Available through built-in catalogues |
-| Browse and select arbitrary system applications | **Not available** |
-| Change the protected essential-system catalogue in the console | **Not available** |
-| Disable developer options and ADB | **Not enabled; ADB remains pilot break-glass access** |
-| Signed application self-update | Available and verified on the pilot device |
+| Browse and select system applications | Available, behind the safety tiers below |
+| Change the protected essential-system catalogue in the console | **Not available, deliberately.** Protected core is a code catalogue, not a setting |
+| Disable developer options and ADB | Available as a control. Off by default on the pilot profile — ADB is still the documented recovery path — and on by default on the production profile |
+| Timed maintenance mode with automatic restore | Available; **not exercised on hardware** |
+| Pin and verify a management package's signing certificate | Available; **no real signer has been read from a real device** |
+| Local device health report and redacted export | Available. No telemetry, no endpoint, no default off-device transmission |
+| Signed application self-update | Available in the pilot channel. The higher-version drill is rehearsed offline only; see [`update-drill.md`](update-drill.md) |
 | Single-app and single-site kiosk | Implemented, but still requires dedicated-device hardware validation |
 
 ## Planned administrator experience
@@ -210,15 +221,14 @@ signed self-update that gate 3 below requires before ADB can be withdrawn.
 
 ### Open integration requirements
 
-Two items are deliberately outside this change and are required before the
-production profile is complete:
+The console entry point is now wired: `MainActivity` opens `SystemPolicyActivity`,
+`MaintenanceActivity`, `ManagementIdentityActivity` and `DeviceHealthActivity`
+behind `requireSession()`, and each of those screens refuses to draw without a
+live administrator session of its own.
 
-1. **Console entry point.** `SystemPolicyActivity` is implemented, declared and
-   unexported, and the strings `admin_system_policy_row` and
-   `admin_system_policy_supporting` exist for it, but no row in `MainActivity`
-   opens it yet. It needs an `ActionRow` in the protection section that starts
-   the activity behind `requireSession()`, exactly as the app-list row does.
-2. **Production identity constant.** `SystemPolicyProfile.PRODUCTION_APPLICATION_ID`
+One item remains:
+
+1. **Production identity constant.** `SystemPolicyProfile.PRODUCTION_APPLICATION_ID`
    duplicates the application ID literal in `gradle/production-identity.gradle`.
    If issue #25 changes that ID, the constant must move with it. The safe failure
    mode if it is forgotten is that a production device is treated as a pilot.
@@ -227,11 +237,11 @@ production profile is complete:
 
 ## Maintenance mode
 
-Production deployments should disable debugging and routine escape surfaces by
-default. Authorized maintenance should be a narrow, audited exception rather
-than a general pause of protection.
+Production deployments disable debugging and routine escape surfaces by default.
+Authorized maintenance is a narrow, audited exception rather than a general
+pause of protection. This is implemented in `maintenance/` as of 0.5.2.
 
-An administrator should be able to choose which capability to open:
+An administrator chooses which capability to open:
 
 - application-store access;
 - installation of a local APK;
@@ -239,19 +249,59 @@ An administrator should be able to choose which capability to open:
 - USB file transfer;
 - ADB/debugging as an explicit break-glass option.
 
-Maintenance mode should require an active administrator PIN session, have a
-short configurable expiry, close on reboot, and restore and verify the previous
-policy automatically. The audit log should record the administrator action,
-opened capabilities, start, expiry, cancellation and final reconciliation
-result, but no PIN or recovery secret.
+A window requires an active administrator PIN session, is bounded by a maximum
+of four hours, and closes on expiry, on reboot, on a suspicious clock and on an
+administrator cancel. Every close path restores the administrator's own stored
+choices — not an inverse of what the window did, so a half-applied window still
+lands in the same place — and reads the result back through the same
+`SystemPolicyEnforcer` every other pass uses. A restore that cannot be proved is
+reported as a failure and the window record is kept for the next pass rather
+than being forgotten. The audit log records the action, the opened capability
+keys, the duration, the close reason and the restore result, and no PIN,
+recovery code or kiosk address.
 
-ADB maintenance needs an additional warning because clearing the debugging
-restriction can expose a privileged transport. It should not be enabled merely
-because Tailscale is connected, and it should never remain open indefinitely.
+Expiry is measured against the monotonic clock, so moving the calendar clock
+cannot extend a window; a monotonic reading that has gone backwards, or a
+calendar clock that has run far ahead of it, is read as a restart and closes the
+window.
+
+ADB maintenance carries an additional warning because clearing the debugging
+restriction exposes a privileged transport. It is never implied by another
+capability, is never pre-selected, and being reachable over the management
+transport is not a reason to open it.
+
+What is **not** proven: none of this has run on a device. The reboot detector,
+the restore path and the break-glass warning are covered by JVM tests only, and
+group M of [`hardware-validation.md`](hardware-validation.md) is what closes
+that gap.
+
+## Known gaps in the 0.5.2 implementation
+
+These are recorded rather than hidden, and none of them is a hardware gate:
+
+1. **The health export carries no audit tail.** `DeviceHealthRedaction` enforces
+   an allowlist of stable audit event codes, but `AuditLog` still stores
+   localized prose with no machine code, so the collector passes an empty list
+   and every export omits the section. The fail-closed end works — nothing
+   untrusted escapes — but the allowlist is a contract for a future `AuditLog`,
+   not evidence that entries travel today. Giving `AuditLog` an event code
+   alongside its prose is the fix.
+2. **Maintenance-mode enforcement outside the console is unproven.** Expiry is
+   armed on `JobScheduler` and re-checked on boot, package replacement and a
+   fifteen-minute sweep, so a window no longer depends on its screen being open.
+   None of that has run on a device, and OEM job throttling is exactly the kind
+   of behaviour a JVM test cannot reach. Group M of
+   [`hardware-validation.md`](hardware-validation.md) is what closes it.
+3. **The production identity constant is duplicated**, as described above.
 
 ## Acceptance criteria before customer production
 
-The following are release gates rather than optional polish:
+The following are release gates rather than optional polish. Gates 4, 5, 6 and 7
+are executed with [`hardware-validation.md`](hardware-validation.md) and
+evidenced in [`device-matrix.md`](device-matrix.md); gate 2 uses
+[`provisioning.md`](provisioning.md) and gate 3 uses
+[`update-drill.md`](update-drill.md). As of 0.5.2 none of them is met, because
+no case has been executed on hardware.
 
 1. Fix the final production application ID and APK signing key before enrolling
    the first customer device.
@@ -269,14 +319,21 @@ The following are release gates rather than optional polish:
 8. Document recovery when the update endpoint, Wi-Fi, VPN, WebView or target
    kiosk application is unavailable.
 
-## Proposed delivery sequence
+## Delivery sequence
 
-- **0.5.2:** system-application inventory, safety classifications, system policy
-  controls and timed maintenance mode.
-- **0.5.3:** physical-device and OEM fixes, signed higher-version self-update
-  drill, provisioning automation and recovery runbooks.
-- **1.0 production candidate:** fixed production identity/signing, supported
-  device matrix, staged rollout and fleet-level status reporting.
+- **0.5.2 — delivered.** System-application inventory, safety classifications,
+  system policy controls, timed maintenance mode, management identity pinning
+  and the local device health report, plus the provisioning, update-drill and
+  hardware-validation tooling and runbooks.
+- **0.5.3 — hardware.** Execute the validation runbook on real Device Owner
+  devices, complete the signed higher-version self-update on hardware, rehearse
+  provisioning, and fix what those runs find. This is the release that turns
+  "implemented" into "proven".
+- **1.0 production candidate:** fixed production identity and signing, a
+  supported-device matrix with real evidence in it, and staged rollout.
+
+The order is deliberate: everything that can be proved without hardware has been
+proved, so a device is now needed for evidence rather than for development.
 
 Version numbers are planning labels and may change. The security gates above do
 not.

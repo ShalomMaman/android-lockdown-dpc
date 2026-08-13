@@ -242,7 +242,15 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     ),
                 )
             }
-            message = UiMessage(context.getString(resultTemplate, identity), isError = false)
+            // The tone comes from the re-read, not from the write having
+            // returned. A well-formed but wrong digest is stored successfully
+            // and leaves the package refused, which is the state that will
+            // withhold management privilege at the next apply — it must not be
+            // announced in the same neutral line as a success.
+            message = UiMessage(
+                text = context.getString(resultTemplate, identity),
+                isError = after?.status?.refused() ?: true,
+            )
             auditRefusals(updated)
         }
     }

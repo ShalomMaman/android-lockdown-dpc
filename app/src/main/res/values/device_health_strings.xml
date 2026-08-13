@@ -164,6 +164,10 @@
     <string name="health_finding_platform_not_readable">The Android release or the firmware build of this device could not be read.</string>
 
     <!-- Console entry and export -->
+    <string name="health_finding_maintenance_break_glass_open">A break-glass maintenance window is open: developer options and ADB are deliberately available on this device right now.</string>
+    <string name="health_finding_maintenance_open">A maintenance window is open, so selected restrictions are deliberately withdrawn until it closes.</string>
+    <string name="health_finding_maintenance_restore_owed">A maintenance window closed without a verified restore. This device may still be carrying withdrawn restrictions.</string>
+    <string name="health_finding_maintenance_unknown">The maintenance record could not be read, so it is not known whether restrictions are currently withdrawn.</string>
     <string name="health_row_title">Device health</string>
     <string name="health_row_supporting">Policy, kiosk, updates and management identity in one answer</string>
     <string name="health_export_action">Copy a redacted export</string>

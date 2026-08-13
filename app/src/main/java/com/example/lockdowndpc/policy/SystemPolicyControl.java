@@ -288,7 +288,7 @@ public enum SystemPolicyControl {
 
     /** Only the restrictions worth sending on this release. */
     public List<Restriction> supportedRestrictions(int sdkInt) {
-        return restrictions.stream().filter(r -> r.supportedOn(sdkInt)).toList();
+        return restrictions.stream().filter(r -> r.supportedOn(sdkInt)).collect(java.util.stream.Collectors.toList());
     }
 
     /**
@@ -296,7 +296,7 @@ public enum SystemPolicyControl {
      * Shown rather than hidden: a partially supported control is a real gap.
      */
     public List<Restriction> unsupportedRestrictions(int sdkInt) {
-        return restrictions.stream().filter(r -> !r.supportedOn(sdkInt)).toList();
+        return restrictions.stream().filter(r -> !r.supportedOn(sdkInt)).collect(java.util.stream.Collectors.toList());
     }
 
     /** Whether this control is on when the administrator has expressed no choice. */
@@ -331,6 +331,6 @@ public enum SystemPolicyControl {
                 .flatMap(control -> control.supportedRestrictions(sdkInt).stream())
                 .map(Restriction::key)
                 .distinct()
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 }

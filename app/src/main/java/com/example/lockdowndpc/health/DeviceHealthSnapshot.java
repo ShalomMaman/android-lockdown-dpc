@@ -11,7 +11,11 @@ import java.util.List;
  * {@code KioskConfigStore}, {@code UpdateStateStore}, {@code LockdownPackages} —
  * so that every rule in {@link DeviceHealthAssessor} and every rule in
  * {@link DeviceHealthRedaction} is an ordinary JVM test rather than an
- * instrumentation run. The health package therefore holds no Android type at all.
+ * instrumentation run. This record, {@link DeviceHealthAssessor} and
+ * {@link DeviceHealthRedaction} therefore hold no Android type; only
+ * {@code DeviceHealthReport}, which resolves string resources, and
+ * {@code DeviceHealthCollector}, which reads the device, do — the same split
+ * {@code SystemPolicyControl} and {@code SystemPolicyLabels} make.
  *
  * <p>The vocabulary is deliberately verification-honest and mirrors
  * {@code SystemPolicyOutcome}: a field says what was <em>observed</em>, never what
@@ -31,7 +35,8 @@ public record DeviceHealthSnapshot(
         List<ManagementIdentity> managementIdentities,
         Reconciliation reconciliation,
         Platform platform,
-        List<AuditEvent> audit
+        List<AuditEvent> audit,
+        Maintenance maintenance
 ) {
 
     public DeviceHealthSnapshot {
@@ -42,6 +47,24 @@ public record DeviceHealthSnapshot(
         reconciliation = reconciliation == null ? Reconciliation.unknown() : reconciliation;
         platform = platform == null ? Platform.unreadable() : platform;
         audit = copyOf(audit);
+        maintenance = maintenance == null ? Maintenance.closed() : maintenance;
+    }
+
+    /**
+     * Convenience for callers written before maintenance was part of the
+     * snapshot. A device with no maintenance record is a device with no window.
+     */
+    public DeviceHealthSnapshot(
+            Policy policy,
+            Kiosk kiosk,
+            Updates updates,
+            List<ManagementIdentity> managementIdentities,
+            Reconciliation reconciliation,
+            Platform platform,
+            List<AuditEvent> audit
+    ) {
+        this(policy, kiosk, updates, managementIdentities, reconciliation, platform, audit,
+                Maintenance.closed());
     }
 
     /**
@@ -59,7 +82,8 @@ public record DeviceHealthSnapshot(
                 List.of(),
                 Reconciliation.unknown(),
                 Platform.unreadable(),
-                List.of()
+                List.of(),
+                Maintenance.unknown()
         );
     }
 
@@ -343,6 +367,56 @@ public record DeviceHealthSnapshot(
 
         public static Reconciliation neverRun() {
             return new Reconciliation(ReconciliationOutcome.NEVER_RUN, 0L, "", "");
+        }
+    }
+
+    /** Whether a maintenance window is deliberately weakening this device. */
+    public enum MaintenancePresence {
+        /** Nothing is open and nothing is owed. */
+        CLOSED,
+        /** A window is in force right now. */
+        OPEN,
+        /**
+         * A window closed but its restore was never proved, so the device may
+         * still be carrying relaxations nobody can see.
+         */
+        RESTORE_OWED,
+        /** The record could not be read. Never treated as closed. */
+        UNKNOWN
+    }
+
+    /**
+     * The maintenance dimension.
+     *
+     * <p>It exists because every other section of this report can be perfect while
+     * a technician has deliberately cleared {@code DISALLOW_DEBUGGING_FEATURES}
+     * for the afternoon. A device inside an open window is not unhealthy — it is
+     * doing what it was told — but it is emphatically not a device anyone should
+     * read as fully protected, and an owed restore is worse than either.
+     *
+     * @param presence        what the maintenance record says
+     * @param capabilityKeys  the stable capability keys, never operator prose
+     * @param breakGlass      whether a privileged transport is among them
+     * @param expiresAtMillis the calendar estimate of the deadline, 0 when closed
+     */
+    public record Maintenance(
+            MaintenancePresence presence,
+            List<String> capabilityKeys,
+            boolean breakGlass,
+            long expiresAtMillis
+    ) {
+        public Maintenance {
+            presence = presence == null ? MaintenancePresence.UNKNOWN : presence;
+            capabilityKeys = copyOf(capabilityKeys);
+            expiresAtMillis = Math.max(0L, expiresAtMillis);
+        }
+
+        public static Maintenance closed() {
+            return new Maintenance(MaintenancePresence.CLOSED, List.of(), false, 0L);
+        }
+
+        public static Maintenance unknown() {
+            return new Maintenance(MaintenancePresence.UNKNOWN, List.of(), false, 0L);
         }
     }
 

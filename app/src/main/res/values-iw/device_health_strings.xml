@@ -166,6 +166,10 @@
     <string name="health_finding_platform_not_readable">לא ניתן היה לקרוא את גרסת ⁦Android⁩ או את גרסת הקושחה של המכשיר הזה.</string>
 
     <!-- Console entry and export -->
+    <string name="health_finding_maintenance_break_glass_open">חלון תחזוקה חרום פתוח: אפשרויות מפתח ו-⁦ADB⁩ זמינים במכשיר הזה כרגע, במכוון.</string>
+    <string name="health_finding_maintenance_open">חלון תחזוקה פתוח, ולכן הגבלות נבחרות מוסרות במכוון עד לסגירתו.</string>
+    <string name="health_finding_maintenance_restore_owed">חלון תחזוקה נסגר בלי שחזור מאומת. ייתכן שהמכשיר עדיין נשאר עם הגבלות שהוסרו.</string>
+    <string name="health_finding_maintenance_unknown">לא ניתן לקרוא את רשומת התחזוקה, ולכן לא ידוע אם הגבלות מוסרות כרגע.</string>
     <string name="health_row_title">בריאות המכשיר</string>
     <string name="health_row_supporting">מדיניות, קיוסק, עדכונים וזהות ניהול בתשובה אחת</string>
     <string name="health_export_action">העתקת ייצוא מצונזר</string>

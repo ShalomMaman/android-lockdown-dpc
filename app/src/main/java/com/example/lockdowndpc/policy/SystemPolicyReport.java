@@ -34,19 +34,19 @@ public record SystemPolicyReport(List<SystemPolicyControlStatus> statuses) {
      * {@code FAILED} protection state the console shows as a fault.
      */
     public List<SystemPolicyControlStatus> faults() {
-        return statuses.stream().filter(SystemPolicyControlStatus::faultsProtection).toList();
+        return statuses.stream().filter(SystemPolicyControlStatus::faultsProtection).collect(java.util.stream.Collectors.toList());
     }
 
     /** Every disagreement, including the advisory ones that do not fault. */
     public List<SystemPolicyControlStatus> failures() {
-        return statuses.stream().filter(SystemPolicyControlStatus::failed).toList();
+        return statuses.stream().filter(SystemPolicyControlStatus::failed).collect(java.util.stream.Collectors.toList());
     }
 
     /** Failures that are recorded and shown but deliberately do not fault protection. */
     public List<SystemPolicyControlStatus> nonFaultingFailures() {
         return statuses.stream()
                 .filter(status -> status.failed() && !status.faultsProtection())
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 
     /** Controls the administrator asked for that this Android release cannot honour. */
@@ -54,7 +54,7 @@ public record SystemPolicyReport(List<SystemPolicyControlStatus> statuses) {
         return statuses.stream()
                 .filter(status -> status.requested()
                         && status.outcome() == SystemPolicyOutcome.UNSUPPORTED)
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 
     /** Whether this pass leaves protection unable to claim it is active. */

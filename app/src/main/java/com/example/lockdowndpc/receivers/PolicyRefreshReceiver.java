@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
+import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.updates.UpdateScheduler;
@@ -22,6 +23,14 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
         if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(action)) {
             SecureUpdateManager.onPackageReplaced(context.getApplicationContext());
         }
+        // A maintenance window never survives a restart, and an upgrade must not
+        // be a way to keep one open either. This closes anything that lapsed
+        // while the device was off and restores the base policy before the
+        // package sweep below re-asserts the rest of it. It is queued on the
+        // shared policy thread — it is DevicePolicyManager work — and on a device
+        // with nothing open it reads one preference file and returns.
+        PolicyReconciliationCoordinator.runOnPolicyThread(
+                () -> MaintenanceGuard.refresh(context.getApplicationContext()));
         // An active kiosk is re-asserted first so lock task, the lock-task
         // feature set and the kiosk HOME preference are back before the package
         // sweep runs. This is queued on the shared policy executor rather than

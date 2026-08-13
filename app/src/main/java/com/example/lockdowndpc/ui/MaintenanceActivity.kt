@@ -55,6 +55,7 @@ import com.example.lockdowndpc.admin.LockdownAdminReceiver
 import com.example.lockdowndpc.maintenance.MaintenanceCapability
 import com.example.lockdowndpc.maintenance.MaintenanceCoordinator
 import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOutcome
+import com.example.lockdowndpc.maintenance.MaintenanceGuard
 import com.example.lockdowndpc.maintenance.MaintenanceLabels
 import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason
@@ -943,19 +944,8 @@ private class MaintenanceResultView(
  * The coordinator for this device, or `null` when this build is not the device
  * owner and therefore cannot relax or restore anything.
  */
-private fun maintenanceCoordinatorOf(context: Context): MaintenanceCoordinator? {
-    val dpm = context.getSystemService(DevicePolicyManager::class.java) ?: return null
-    if (!dpm.isDeviceOwnerApp(context.packageName)) {
-        return null
-    }
-    return MaintenanceCoordinator(
-        Build.VERSION.SDK_INT,
-        SystemPolicyStore.effectiveProfile(context),
-        SystemPolicyStore.explicitChoices(context),
-        SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
-        MaintenanceStore.deviceClock(),
-    )
-}
+private fun maintenanceCoordinatorOf(context: Context): MaintenanceCoordinator? =
+    MaintenanceGuard.coordinatorFor(context)
 
 /**
  * The liveness pass the screen opens with.
@@ -1013,7 +1003,10 @@ private fun openMaintenance(
         EnumSet.copyOf(capabilities)
     }
     val request = OpenRequest(requested, durationMillis, AdminSession.isUnlocked())
-    val outcome = record(context, coordinator.open(openWindowAfter(refreshed), request))
+    // Through the guard: it marks the intent to relax before the first
+    // device call, so a crash between relaxing and recording still leaves a
+    // restore owed.
+    val outcome = MaintenanceGuard.open(context, coordinator, openWindowAfter(refreshed), request)
     return snapshotOf(context, outcome, reportUnchanged = true)
 }
 
@@ -1023,13 +1016,13 @@ private fun closeMaintenance(context: Context, reason: CloseReason): Maintenance
         maintenanceCoordinatorOf(context) ?: return MaintenanceSnapshot.notDeviceOwner()
     val current = MaintenanceStore.readWindow(context)
     val outcome = if (reason == CloseReason.ADMINISTRATOR_CANCELLED) {
-        coordinator.cancel(current)
+        MaintenanceGuard.cancel(context, coordinator, current)
     } else {
         // Expiry is the state machine's call, not this screen's: refresh re-reads
         // the clocks and closes only if they say the window is over.
-        coordinator.refresh(current)
+        MaintenanceGuard.record(context, coordinator.refresh(current))
     }
-    return snapshotOf(context, record(context, outcome), reportUnchanged = true)
+    return snapshotOf(context, outcome, reportUnchanged = true)
 }
 
 /**
@@ -1039,32 +1032,8 @@ private fun closeMaintenance(context: Context, reason: CloseReason): Maintenance
  * capability keys, control keys and a duration in milliseconds — and nothing
  * else. No PIN, no recovery code, no kiosk URL.
  */
-private fun record(context: Context, outcome: MaintenanceOutcome): MaintenanceOutcome {
-    MaintenanceStore.apply(context, outcome)
-    val template = when (maintenanceResultKindOf(outcome)) {
-        MaintenanceResultKind.OPENED -> R.string.maint_audit_opened
-        MaintenanceResultKind.OPEN_REFUSED,
-        MaintenanceResultKind.OPEN_FAILED_RESTORED,
-        -> R.string.maint_audit_open_failed
-
-        MaintenanceResultKind.OPEN_FAILED_RESTORE_FAILED,
-        MaintenanceResultKind.CLOSE_RESTORE_FAILED,
-        -> R.string.maint_audit_restore_failed
-
-        MaintenanceResultKind.CLOSED_RESTORE_VERIFIED -> R.string.maint_audit_closed
-        // A liveness pass that changed nothing is not an administrator action,
-        // and logging it would push real events out of a fifty-entry log.
-        MaintenanceResultKind.STILL_OPEN, MaintenanceResultKind.NOT_OPEN -> 0
-    }
-    if (template == 0) {
-        return outcome
-    }
-    outcome.closeReason()?.let { closeReason ->
-        AuditLog.append(context, context.getString(MaintenanceLabels.closeAudit(closeReason)))
-    }
-    AuditLog.append(context, context.getString(template, outcome.auditSummary().bidiIsolated()))
-    return outcome
-}
+private fun record(context: Context, outcome: MaintenanceOutcome): MaintenanceOutcome =
+    MaintenanceGuard.record(context, outcome)
 
 /**
  * Turns an outcome into what the screen shows.

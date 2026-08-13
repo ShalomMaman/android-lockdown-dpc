@@ -161,6 +161,16 @@
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <!--
+            Closes a maintenance window that has run out, whether or not the
+            console is open. Exported with BIND_JOB_SERVICE because that is how
+            JobScheduler binds; the permission means only the platform can.
+        -->
+        <service
+            android:name=".maintenance.MaintenanceGuardJobService"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <receiver
             android:name=".updates.UpdateInstallReceiver"
             android:exported="false" />

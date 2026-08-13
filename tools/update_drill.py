@@ -26,7 +26,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 import publish_update
 import verify_pilot_apk
@@ -1070,11 +1070,42 @@ def run_drill(args: argparse.Namespace) -> dict[str, object]:
         "to": to_facts.to_json(),
         "envelope": {
             "path": str(envelope_path),
-            "payload": payload_json,
+            "payload": redacted_payload(payload_json),
         },
         "checks": recorder.checks,
         "onDeviceHalf": "not-performed",
     }
+
+
+
+def redacted_payload(payload: object) -> object:
+    """The payload as it may safely be written to an evidence file.
+
+    A drill record is meant to be attached to an issue or committed next to a
+    release, and ``apkUrl`` may legitimately carry a query string of up to 2048
+    characters -- which is exactly the shape of a pre-signed object-storage URL
+    whose query *is* the download credential. Recording it verbatim would turn
+    an evidence file into a live credential.
+
+    The query and fragment are therefore dropped and the fact is stated, in the
+    same refuse-don't-repair spirit as the client's own URL rules: scheme, host,
+    port and path are what identify the artefact, and nothing is silently
+    rewritten to look clean when it was not.
+    """
+    if not isinstance(payload, dict):
+        # A structurally broken envelope has no payload to redact, and the drill
+        # still has to record that fact rather than crash on it.
+        return payload
+    redacted = dict(payload)
+    raw = redacted.get("apkUrl")
+    if not isinstance(raw, str):
+        return redacted
+    split = urlsplit(raw)
+    if not split.query and not split.fragment:
+        return redacted
+    redacted["apkUrl"] = urlunsplit((split.scheme, split.netloc, split.path, "", ""))
+    redacted["apkUrlRedacted"] = "query-and-fragment-removed"
+    return redacted
 
 
 # --------------------------------------------------------------------------- #

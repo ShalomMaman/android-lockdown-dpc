@@ -137,6 +137,11 @@ public final class DeviceHealthAssessor {
         SYSTEM_CONTROL_ADVISORY_FAILED("system-control.advisory-failed"),
         SYSTEM_CONTROL_UNSUPPORTED("system-control.unsupported"),
 
+        MAINTENANCE_BREAK_GLASS_OPEN("maintenance.break-glass-open"),
+        MAINTENANCE_OPEN("maintenance.open"),
+        MAINTENANCE_RESTORE_OWED("maintenance.restore-owed"),
+        MAINTENANCE_UNKNOWN("maintenance.unknown"),
+
         MANAGEMENT_IDENTITY_REJECTED("management.identity-rejected"),
         MANAGEMENT_IDENTITY_UNPROVEN("management.identity-unproven"),
         MANAGEMENT_IDENTITY_MISSING("management.identity-missing"),
@@ -212,12 +217,12 @@ public final class DeviceHealthAssessor {
             return findings.stream()
                     .filter(entry -> entry.severity() == severity)
                     .map(DeviceHealthFinding::finding)
-                    .toList();
+                    .collect(java.util.stream.Collectors.toList());
         }
 
         /** The findings in the order the report shows them. */
         public List<Finding> codesInOrder() {
-            return findings.stream().map(DeviceHealthFinding::finding).toList();
+            return findings.stream().map(DeviceHealthFinding::finding).collect(java.util.stream.Collectors.toList());
         }
     }
 
@@ -250,6 +255,7 @@ public final class DeviceHealthAssessor {
         List<DeviceHealthFinding> findings = new ArrayList<>();
         assessPolicy(snapshot.policy(), nowMillis, findings);
         assessSystemControls(snapshot.policy().systemControls(), findings);
+        assessMaintenance(snapshot.maintenance(), findings);
         assessManagement(snapshot.managementIdentities(), findings);
         assessReconciliation(snapshot.reconciliation(), findings);
         assessKiosk(snapshot.kiosk(), findings);
@@ -336,6 +342,33 @@ public final class DeviceHealthAssessor {
             // An older Android is not a broken device. Reported so nobody reads a
             // blank row as enforcement, but it does not degrade the device.
             findings.add(info(Finding.SYSTEM_CONTROL_UNSUPPORTED));
+        }
+    }
+
+    /**
+     * The one section that describes protection being deliberately withdrawn.
+     *
+     * <p>An open window is not a fault — it is an administrator's decision — but
+     * it is never {@code HEALTHY} either, because "healthy" is read as "fully
+     * protected" and for the length of the window the device is not. A
+     * break-glass window, which has cleared a privileged transport, and an owed
+     * restore, which means relaxations may still be in force with nothing
+     * watching them, are both critical.
+     */
+    private static void assessMaintenance(
+            DeviceHealthSnapshot.Maintenance maintenance,
+            List<DeviceHealthFinding> findings
+    ) {
+        switch (maintenance.presence()) {
+            case OPEN -> findings.add(maintenance.breakGlass()
+                    ? critical(Finding.MAINTENANCE_BREAK_GLASS_OPEN)
+                    : unverified(Finding.MAINTENANCE_OPEN));
+            case RESTORE_OWED -> findings.add(critical(Finding.MAINTENANCE_RESTORE_OWED));
+            case UNKNOWN -> findings.add(unverified(Finding.MAINTENANCE_UNKNOWN));
+            // A device with no window contributes no finding: it is the ordinary
+            // case, and a line saying "no maintenance window" on every report is
+            // the kind of noise that hides the lines that matter.
+            case CLOSED -> { }
         }
     }
 

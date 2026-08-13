@@ -381,6 +381,11 @@ public final class DeviceHealthReport {
             case SYSTEM_CONTROL_ADVISORY_FAILED ->
                     R.string.health_finding_system_control_advisory_failed;
             case SYSTEM_CONTROL_UNSUPPORTED -> R.string.health_finding_system_control_unsupported;
+            case MAINTENANCE_BREAK_GLASS_OPEN ->
+                    R.string.health_finding_maintenance_break_glass_open;
+            case MAINTENANCE_OPEN -> R.string.health_finding_maintenance_open;
+            case MAINTENANCE_RESTORE_OWED -> R.string.health_finding_maintenance_restore_owed;
+            case MAINTENANCE_UNKNOWN -> R.string.health_finding_maintenance_unknown;
             case MANAGEMENT_IDENTITY_REJECTED ->
                     R.string.health_finding_management_identity_rejected;
             case MANAGEMENT_IDENTITY_UNPROVEN ->

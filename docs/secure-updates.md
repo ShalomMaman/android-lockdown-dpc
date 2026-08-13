@@ -101,6 +101,15 @@ This final gate verifies the manifest ECDSA signature, current validity, immutab
 HTTPS asset URL, and exact APK hash, size, identity, version, signer, and embedded
 channel. It uses only public material.
 
+Before replacing `latest.json`, rehearse and record the offline half of the
+update drill with `tools/update_drill.py`, which additionally proves that the
+installed and candidate APKs form a legal in-place update pair and that the
+envelope cannot be a downgrade or a replay. The full procedure, including the
+on-device half this repository cannot automate, is in
+[`update-drill.md`](update-drill.md). ADB must remain the working recovery path
+until one real signed self-update from the installed version to a higher version
+has completed on hardware.
+
 The device also records the highest authorized version code it has accepted. A compromised file host therefore cannot replay an older signed manifest after the device has observed a newer one.
 
 ## Bootstrap and rollback
@@ -109,4 +118,4 @@ A device running a version without the updater needs one bootstrap installation 
 
 Android does not allow a normal update to replace an application ID or unrelated APK signer. The pilot remains `com.example.lockdowndpc` with its existing pilot signer. New customer devices must be provisioned with the production identity and key. Ship a corrective release or rollback as a new, higher `versionCode`, never as a downgrade.
 
-On Android 9 and newer, the client accepts certificate rotation only when the new APK contains a platform-verified signing lineage that includes the currently installed signer. Multi-signer packages require an exact signer set and cannot use this rotation path. Rehearse every signer rotation on a test device before customer release.
+On Android 9 and newer, the client accepts certificate rotation only when the new APK contains a platform-verified signing lineage that includes the currently installed signer. Multi-signer packages require an exact signer set and cannot use this rotation path. Rehearse every signer rotation on a test device before customer release: `tools/update_drill.py` deliberately reports any signer change as an unrecoverable in-place-update failure, because it compares digests and cannot see the lineage the platform would accept. A rotation that the drill refuses may still be legitimate — and must then be proven on hardware, following [`update-drill.md`](update-drill.md), rather than assumed.

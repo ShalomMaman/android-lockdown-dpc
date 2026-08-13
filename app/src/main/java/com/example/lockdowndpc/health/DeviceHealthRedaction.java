@@ -64,6 +64,18 @@ import java.util.Set;
  * <p>Nothing here transmits anything. {@link #redact} produces a value;
  * {@link DeviceHealthReport#export} turns it into a string; an administrator
  * decides what happens to that string.
+ *
+ * <h2>The audit tail is empty today, deliberately</h2>
+ *
+ * <p>Rule 4 above is enforced, but as of 0.5.2 nothing produces the codes it
+ * allows: {@code AuditLog} stores localized prose with no machine code, so
+ * {@code DeviceHealthCollector} passes an empty audit list and every export
+ * carries no audit section at all. That is the fail-closed end of the
+ * behaviour — nothing untrusted escapes — but it must not be read as "the export
+ * carries a redacted audit trail", because it currently carries none. The
+ * allowlist is the contract a future {@code AuditLog} event code has to satisfy
+ * before an entry may travel; it is not evidence that entries are travelling.
+ * The gap is recorded in {@code docs/production-roadmap.md}.
  */
 public final class DeviceHealthRedaction {
 
@@ -368,7 +380,7 @@ public final class DeviceHealthRedaction {
 
     /** Every audit code an export may carry, sorted, for documentation and tests. */
     public static List<String> allowedAuditEventCodes() {
-        return ALLOWED_AUDIT_EVENT_CODES.stream().sorted().toList();
+        return ALLOWED_AUDIT_EVENT_CODES.stream().sorted().collect(java.util.stream.Collectors.toList());
     }
 
     @FunctionalInterface

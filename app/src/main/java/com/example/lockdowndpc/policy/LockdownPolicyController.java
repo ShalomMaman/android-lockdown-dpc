@@ -22,6 +22,9 @@ import com.example.lockdowndpc.kiosk.KioskConfigStore;
 import com.example.lockdowndpc.kiosk.KioskAppCatalog;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
+import com.example.lockdowndpc.maintenance.MaintenancePlan;
+import com.example.lockdowndpc.maintenance.MaintenanceStore;
+import com.example.lockdowndpc.maintenance.MaintenanceWindow;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
 
 import java.security.MessageDigest;
@@ -30,6 +33,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public final class LockdownPolicyController {
@@ -178,16 +182,49 @@ public final class LockdownPolicyController {
             ComponentName admin,
             List<String> errors
     ) {
+        SystemPolicyProfile profile = SystemPolicyStore.effectiveProfile(context);
+        Map<SystemPolicyControl, Boolean> choices = effectiveChoicesFor(context, profile);
         SystemPolicyReport report = SystemPolicyEnforcer.enforce(
                 Build.VERSION.SDK_INT,
-                SystemPolicyStore.effectiveProfile(context),
-                SystemPolicyStore.explicitChoices(context),
+                profile,
+                choices,
                 new SystemPolicyDeviceGateway(dpm, admin)
         );
         recordSystemPolicy(context, report);
         for (SystemPolicyControlStatus fault : report.faults()) {
             errors.add("system-policy:" + fault.summary());
         }
+    }
+
+    /**
+     * The choices this pass should actually apply, maintenance included.
+     *
+     * <p>An apply is not the only thing that reaches this code: a reboot, a
+     * package install and a periodic sweep all reconcile the policy. Without this,
+     * any of them landing during an open maintenance window would silently
+     * re-assert the restrictions the window had cleared — the technician would be
+     * looking at a console that says a capability is open while the device had
+     * already taken it away again. So the window, when one is live, is part of
+     * what the base policy means.
+     *
+     * <p>A window that has lapsed is deliberately ignored here rather than
+     * closed: closing is {@code MaintenanceGuard}'s job, it has to be read back,
+     * and this pass re-applies the base policy anyway, which is the same device
+     * state a restore would produce.
+     */
+    private static Map<SystemPolicyControl, Boolean> effectiveChoicesFor(
+            Context context,
+            SystemPolicyProfile profile
+    ) {
+        Map<SystemPolicyControl, Boolean> stored = SystemPolicyStore.explicitChoices(context);
+        MaintenanceWindow window = MaintenanceStore.readWindow(context);
+        if (window == null) {
+            return stored;
+        }
+        if (window.expiredAt(MaintenanceStore.deviceClock().elapsedSinceBootMillis())) {
+            return stored;
+        }
+        return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
     }
 
     /**
