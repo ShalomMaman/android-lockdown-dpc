@@ -163,7 +163,7 @@ public final class MaintenanceStore {
         } else {
             durable = clearWindow(context);
         }
-        if (outcome.restoreVerified()) {
+        if (outcome.restoreProven()) {
             durable &= prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
         }
         return durable;

@@ -146,6 +146,27 @@ public final class SystemAppSelectionTest {
                 UnsupportedOperationException.class, () -> result.revoked().add("com.other"));
     }
 
+    @Test
+    public void theRecordedAndObservedVersionShareOneDefinition() {
+        // The regression this guards: the console recorded "1.2.3 (10203)" while
+        // the engine observed "1.2.3", so matches() was unsatisfiable and every
+        // opted-in package was revoked on every pass. Both sides now call
+        // PackageIdentity.versionText; this pins the format so a change to one
+        // side without the other fails here instead of on a fleet.
+        String recorded = PackageIdentity.versionText("1.2.3", 10203L);
+
+        assertEquals("1.2.3 (10203)", recorded);
+        Revalidation result = revalidate(
+                acceptance(SIGNER, recorded),
+                new InstalledIdentity(SIGNER, PackageIdentity.versionText("1.2.3", 10203L)));
+        assertEquals(Set.of(PACKAGE), result.managed());
+    }
+
+    @Test
+    public void aNullVersionNameStillProducesAComparableString() {
+        assertEquals(" (7)", PackageIdentity.versionText(null, 7L));
+    }
+
     private static SystemAppRiskAcceptance acceptance(String signer, String version) {
         return new SystemAppRiskAcceptance(PACKAGE, signer, version, "enabled", "build", 0L);
     }

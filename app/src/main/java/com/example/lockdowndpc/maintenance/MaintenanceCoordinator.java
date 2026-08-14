@@ -138,6 +138,23 @@ public final class MaintenanceCoordinator {
         }
 
         /**
+         * Whether the base policy is proven back in force, whatever phase said so.
+         *
+         * <p>{@link #restoreVerified()} is deliberately phase-specific, and that
+         * specificity once hid a proven restore: a failed open restores the base
+         * policy, verifies it, and then reports the whole operation as
+         * {@link Phase#OPEN} — so the pending-restore flag stayed set and the
+         * next pass re-restored a device that was already proven clean, while
+         * the audit line claimed the restore had failed. The construction rule
+         * makes the truth recoverable: a window is kept <em>only</em> when the
+         * device may still be relaxed, so a closed outcome with no window to
+         * store is a proven restore.
+         */
+        public boolean restoreProven() {
+            return closeReason != null && window == null;
+        }
+
+        /**
          * A stable, non-sensitive audit line.
          *
          * <p>Capability keys, control keys and a duration in milliseconds. No

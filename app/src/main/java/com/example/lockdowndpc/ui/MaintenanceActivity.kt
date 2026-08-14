@@ -68,14 +68,16 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway
 import com.example.lockdowndpc.policy.SystemPolicyLabels
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemPolicyStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Date
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 import java.util.EnumSet
 
 /**
@@ -165,7 +167,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         blocked = null
         coroutineScope.launch {
             val app = context.applicationContext
-            val result = withContext(Dispatchers.IO) { action(app) }
+            val result = onPolicyThread { action(app) }
             working = false
             loading = false
             snapshot = result
@@ -179,7 +181,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
 
     LaunchedEffect(Unit) {
         val app = context.applicationContext
-        val result = withContext(Dispatchers.IO) { loadMaintenance(app) }
+        val result = onPolicyThread { loadMaintenance(app) }
         snapshot = result
         elapsedNow = SystemClock.elapsedRealtime()
         loading = false
@@ -911,6 +913,27 @@ private fun formatClockTime(millis: Long): String {
     return DateFormat.getTimeFormat(context).format(Date(millis)).bidiIsolated()
 }
 
+/**
+ * Runs one device pass on the same single policy thread every other writer of
+ * these restrictions uses, and suspends until it returns.
+ *
+ * Dispatchers.IO was wrong here, not merely untidy: a console pass on an IO
+ * thread could interleave with a reconciliation pass on the policy thread, each
+ * holding a different lock, each reading back the other's half-applied writes as
+ * its own verified result. One thread for all DevicePolicyManager work is the
+ * invariant; this is the console honouring it.
+ */
+private suspend fun <T> onPolicyThread(block: () -> T): T =
+    suspendCancellableCoroutine { continuation ->
+        PolicyReconciliationCoordinator.runOnPolicyThread {
+            try {
+                continuation.resume(block())
+            } catch (throwable: Throwable) {
+                continuation.resumeWithException(throwable)
+            }
+        }
+    }
+
 // ------------------------------------------------------------ the device work
 
 /**
@@ -957,24 +980,22 @@ private fun maintenanceCoordinatorOf(context: Context): MaintenanceCoordinator? 
  * anything else.
  */
 private fun loadMaintenance(context: Context): MaintenanceSnapshot {
-    val coordinator =
-        maintenanceCoordinatorOf(context) ?: return MaintenanceSnapshot.notDeviceOwner()
-    return snapshotOf(context, refreshOnce(context, coordinator), reportUnchanged = false)
+    val outcome = refreshOnce(context) ?: return MaintenanceSnapshot.notDeviceOwner()
+    return snapshotOf(context, outcome, reportUnchanged = false)
 }
 
-private fun refreshOnce(
-    context: Context,
-    coordinator: MaintenanceCoordinator,
-): MaintenanceOutcome {
-    val stored = MaintenanceStore.readWindow(context)
-    if (stored == null && MaintenanceStore.restorePending(context)) {
-        // The record was unusable, or an earlier restore was never proved. The
-        // only safe reading is "something may still be relaxed", so the base
-        // policy is applied again and read back.
-        return record(context, coordinator.restore(null, CloseReason.UNREADABLE_RECORD))
-    }
-    return record(context, coordinator.refresh(stored))
-}
+/**
+ * The guard's liveness pass, not a private copy of it.
+ *
+ * This function once re-implemented the guard's body and drifted immediately:
+ * it lacked the protection-paused stand-down, so opening this screen on a
+ * paused device with a leftover owed-restore flag re-asserted the full base
+ * restriction set onto a device the console showed as paused. Delegating is
+ * the fix that stays fixed — a rule added to [MaintenanceGuard.refresh] cannot
+ * miss the console path, because the console path is the same code.
+ */
+private fun refreshOnce(context: Context): MaintenanceOutcome? =
+    MaintenanceGuard.refresh(context)
 
 /**
  * Opens a window.
@@ -990,7 +1011,7 @@ private fun openMaintenance(
 ): MaintenanceSnapshot {
     val coordinator =
         maintenanceCoordinatorOf(context) ?: return MaintenanceSnapshot.notDeviceOwner()
-    val refreshed = refreshOnce(context, coordinator)
+    val refreshed = refreshOnce(context) ?: return MaintenanceSnapshot.notDeviceOwner()
     if (refreshed.windowMustBeStored() && !refreshed.windowOpen()) {
         // A restore is still owed. Opening now would stack a new window on a
         // device whose previous relaxations were never proved to be gone.
@@ -1024,9 +1045,10 @@ private fun closeMaintenance(context: Context, reason: CloseReason): Maintenance
     val outcome = if (reason == CloseReason.ADMINISTRATOR_CANCELLED) {
         MaintenanceGuard.cancel(context, coordinator, current)
     } else {
-        // Expiry is the state machine's call, not this screen's: refresh re-reads
-        // the clocks and closes only if they say the window is over.
-        MaintenanceGuard.record(context, coordinator.refresh(current))
+        // Expiry is the state machine's call, not this screen's: the guard's
+        // pass re-reads the clocks and closes only if they say the window is
+        // over — and it carries the paused stand-down the screen must not skip.
+        refreshOnce(context) ?: return MaintenanceSnapshot.notDeviceOwner()
     }
     return snapshotOf(context, outcome, reportUnchanged = true)
 }

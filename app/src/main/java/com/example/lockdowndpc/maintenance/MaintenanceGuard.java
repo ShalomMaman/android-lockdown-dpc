@@ -135,6 +135,11 @@ public final class MaintenanceGuard {
             OpenRequest request
     ) {
         Context appContext = context.getApplicationContext();
+        // Whether a restore was already owed before this call. A refusal below
+        // may only withdraw the intent this call created — clearing a
+        // pre-existing debt (a discarded record, a failed earlier restore) would
+        // silently trust a device that may still be relaxed, forever.
+        boolean alreadyOwed = MaintenanceStore.restorePending(appContext);
         if (!MaintenanceStore.markRestorePending(appContext)) {
             // The write-ahead record did not reach storage, so a crash after the
             // first DevicePolicyManager call would leave a relaxed device with
@@ -145,9 +150,11 @@ public final class MaintenanceGuard {
         }
         MaintenanceOutcome outcome = coordinator.open(current, request);
         if (outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED
-                && !outcome.windowMustBeStored()) {
-            // A refusal is decided before anything reaches the device, so there
-            // is nothing owed and the flag would only cause a pointless re-apply.
+                && !outcome.windowMustBeStored()
+                && !alreadyOwed) {
+            // A refusal is decided before anything reaches the device, so the
+            // intent this call wrote is withdrawn — but only that intent. A debt
+            // that predates the call stays owed.
             MaintenanceStore.clearRestorePending(appContext);
         }
         MaintenanceOutcome recorded = record(appContext, outcome);
@@ -354,8 +361,11 @@ public final class MaintenanceGuard {
             case OPEN:
                 if (outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED) {
                     template = R.string.maint_audit_opened;
-                } else if (outcome.restoreVerified()
+                } else if (outcome.restoreProven()
                         || outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED) {
+                    // restoreProven, not restoreVerified: a failed open reports
+                    // itself as Phase.OPEN, so the phase-specific check read a
+                    // verified restore as a failed one and wrote the wrong line.
                     template = R.string.maint_audit_open_failed;
                 } else {
                     template = R.string.maint_audit_restore_failed;

@@ -452,6 +452,21 @@ public final class DeviceHealthAssessorTest {
     }
 
     @Test
+    public void anUnreadableUpdateStoreIsUnverifiedNotMerelyChannelDisabled() {
+        // Updates.unknown() carries channelEnabled=false, and the channel guard
+        // once ran first — so a store-read failure was reported as the calm,
+        // known "channel disabled" limitation instead of as an unknown state.
+        // Unknown must never collapse into a milder claim.
+        DeviceHealthSnapshot snapshot = withUpdates(proven(), Updates.unknown());
+
+        Assessment assessment = assess(snapshot);
+
+        assertEquals(DeviceHealthStatus.UNVERIFIED, assessment.status());
+        assertTrue(assessment.has(Finding.UPDATE_STATE_UNKNOWN));
+        assertFalse(assessment.has(Finding.UPDATE_CHANNEL_DISABLED));
+    }
+
+    @Test
     public void aDeviceThatCannotSayWhatFirmwareItRunsDegrades() {
         DeviceHealthSnapshot snapshot = withPlatform(proven(), Platform.unreadable());
 

@@ -454,6 +454,15 @@ public final class DeviceHealthAssessor {
             long nowMillis,
             List<DeviceHealthFinding> findings
     ) {
+        if (updates.state() == UpdateState.UNKNOWN) {
+            // Checked before the channel guard, deliberately. Updates.unknown()
+            // carries channelEnabled=false, so a store-read failure would
+            // otherwise be reported as the calm, known "channel disabled"
+            // limitation — an unreadable state dressed up as a configured one.
+            // Unknown is never allowed to collapse into a milder claim.
+            findings.add(unverified(Finding.UPDATE_STATE_UNKNOWN));
+            return;
+        }
         if (!updates.channelEnabled() || updates.state() == UpdateState.NOT_CONFIGURED) {
             // A device with no update channel cannot be given a fix, which is a
             // known limitation rather than an unknown state.

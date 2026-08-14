@@ -24,6 +24,7 @@ import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.maintenance.MaintenancePlan;
+import com.example.lockdowndpc.maintenance.MaintenanceStateMachine;
 import com.example.lockdowndpc.maintenance.MaintenanceStore;
 import com.example.lockdowndpc.maintenance.MaintenanceWindow;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
@@ -228,7 +229,17 @@ public final class LockdownPolicyController {
         if (window == null) {
             return stored;
         }
-        if (window.expiredAt(MaintenanceStore.deviceClock().elapsedSinceBootMillis())) {
+        // The full liveness evaluation, not a bare expiry check. An expiry-only
+        // test reads a pre-reboot window as live — after a restart the monotonic
+        // clock is near zero, comfortably below the old deadline — so a boot-time
+        // reconcile would re-apply the window's relaxations and record the pass
+        // as verified. The state machine's reboot and clock checks are the same
+        // ones MaintenanceGuard closes the window with; this pass merely ignores
+        // a window the guard would not honour, and leaves the closing (which
+        // must be read back and audited) to the guard.
+        MaintenanceStateMachine.Evaluation evaluation =
+                MaintenanceStateMachine.evaluate(window, MaintenanceStore.deviceClock());
+        if (!evaluation.open()) {
             return stored;
         }
         return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
@@ -548,13 +559,13 @@ public final class LockdownPolicyController {
             if (!isInstalled(pm, packageName)) {
                 return SystemAppSelection.InstalledIdentity.unreadable();
             }
-            Set<String> digests = signingCertificateDigests(context, packageName);
-            // A package with several signers has no single identity to compare, so
-            // the acceptance cannot be reconfirmed and the selection lapses.
-            String digest = digests.size() == 1 ? digests.iterator().next() : "";
-            PackageInfo info = getPackageInfo(pm, packageName, 0);
-            String version = info.versionName == null ? "" : info.versionName;
-            return new SystemAppSelection.InstalledIdentity(digest, version);
+            // Both readings come from PackageIdentity, the same definition the
+            // console records the acceptance with. Computing either here in a
+            // second format is how every acceptance once became unsatisfiable
+            // and every opted-in package was silently revoked on each pass.
+            return new SystemAppSelection.InstalledIdentity(
+                    PackageIdentity.currentSignerSha256(pm, packageName),
+                    PackageIdentity.versionText(getPackageInfo(pm, packageName, 0)));
         } catch (RuntimeException | PackageManager.NameNotFoundException exception) {
             return SystemAppSelection.InstalledIdentity.unreadable();
         }

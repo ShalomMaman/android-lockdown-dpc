@@ -119,6 +119,11 @@ public final class MaintenanceCoordinatorTest {
         assertEquals("open-failed-policy-restored", outcome.reason());
         assertFalse(outcome.failures().isEmpty());
         assertTrue(gateway.inForce.contains(DEBUGGING));
+        // Proven, though the phase is OPEN: the phase-specific restoreVerified()
+        // once hid this, so the pending-restore flag survived a verified restore
+        // and the next pass re-restored a device already proven clean.
+        assertTrue(outcome.restoreProven());
+        assertFalse(outcome.restoreVerified());
     }
 
     @Test
@@ -141,6 +146,7 @@ public final class MaintenanceCoordinatorTest {
         assertEquals(MaintenanceStatus.FAILED, outcome.status());
         assertEquals("open-failed-restore-failed", outcome.reason());
         assertNotNull("a device that may still be relaxed keeps its window", outcome.window());
+        assertFalse("an unproven restore is never a proven one", outcome.restoreProven());
         assertTrue(outcome.windowMustBeStored());
         assertFalse("a window with a close reason is not an open window", outcome.windowOpen());
         assertFalse(outcome.restoreVerified());

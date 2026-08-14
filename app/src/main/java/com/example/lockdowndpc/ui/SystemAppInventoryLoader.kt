@@ -6,20 +6,18 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
-import android.content.pm.Signature
 import android.os.Build
 import android.provider.Settings
 import android.webkit.WebView
 import com.example.lockdowndpc.admin.LockdownAdminReceiver
 import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.PackageIdentity
 import com.example.lockdowndpc.policy.LockdownPackages
 import com.example.lockdowndpc.policy.SystemAppClassifier
 import com.example.lockdowndpc.policy.SystemAppClassifier.PackageSnapshot
 import com.example.lockdowndpc.policy.SystemAppClassifier.ProtectedContext
 import com.example.lockdowndpc.policy.SystemAppClassifier.RiskAcceptanceStatus
 import com.example.lockdowndpc.security.AppLabelSanitizer
-import java.security.MessageDigest
-import java.security.NoSuchAlgorithmException
 import java.util.Locale
 
 /**
@@ -200,46 +198,19 @@ private fun hiddenProbe(context: Context): ((String) -> Boolean)? {
 }
 
 /**
- * Lower-case hex SHA-256 of the installed signer, or empty when the platform
- * reports none. Deliberately mirrors `LockdownPolicyController`'s digest
- * handling so a digest recorded in a risk acceptance is comparable with the one
- * the policy engine would compute.
+ * The canonical identity readings a risk acceptance is recorded with.
+ *
+ * Thin delegates to [PackageIdentity], which is the single definition shared
+ * with the policy engine's revalidation pass. Recording one format here and
+ * observing another there is exactly how every acceptance once became
+ * unsatisfiable, so neither reading is computed in this file any more.
  */
-internal fun signerDigestOf(pm: PackageManager, packageName: String): String = try {
-    val signatures: Array<Signature>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        val info = packageInfo(pm, packageName, PackageManager.GET_SIGNING_CERTIFICATES)
-        info.signingInfo?.let {
-            if (it.hasMultipleSigners()) it.apkContentsSigners else it.signingCertificateHistory
-        }
-    } else {
-        @Suppress("DEPRECATION")
-        packageInfo(pm, packageName, PackageManager.GET_SIGNATURES).signatures
-    }
-    val first = signatures?.firstOrNull()
-    if (first == null) {
-        ""
-    } else {
-        val sha256 = MessageDigest.getInstance("SHA-256")
-        sha256.digest(first.toByteArray()).joinToString("") { "%02x".format(Locale.ROOT, it) }
-    }
-} catch (ignored: PackageManager.NameNotFoundException) {
-    ""
-} catch (ignored: NoSuchAlgorithmException) {
-    ""
-} catch (ignored: RuntimeException) {
-    ""
-}
+internal fun signerDigestOf(pm: PackageManager, packageName: String): String =
+    PackageIdentity.currentSignerSha256(pm, packageName)
 
 /** `versionName (versionCode)`, stable enough to detect an OEM update in place. */
 internal fun versionOf(pm: PackageManager, packageName: String): String = try {
-    val info = packageInfo(pm, packageName, 0)
-    val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        info.longVersionCode
-    } else {
-        @Suppress("DEPRECATION")
-        info.versionCode.toLong()
-    }
-    "${info.versionName.orEmpty()} ($code)"
+    PackageIdentity.versionText(packageInfo(pm, packageName, 0))
 } catch (ignored: PackageManager.NameNotFoundException) {
     ""
 } catch (ignored: RuntimeException) {
