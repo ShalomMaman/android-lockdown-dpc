@@ -582,7 +582,9 @@ public final class DeviceHealthAssessorTest {
                 proven().managementIdentities(),
                 proven().reconciliation(),
                 proven().platform(),
-                List.of(new AuditEvent(NOW - HOUR, "policy.apply", "by an administrator")));
+                List.of(new AuditEvent(NOW - HOUR, "policy.apply", "by an administrator")),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
 
         assertEquals(assess(proven()).status(), assess(withAudit).status());
     }
@@ -600,7 +602,9 @@ public final class DeviceHealthAssessorTest {
                 List.of(new ManagementIdentity("com.tailscale.ipn", IdentityVerdict.PINNED_MATCH)),
                 new Reconciliation(ReconciliationOutcome.VERIFIED, NOW - HOUR, "boot", ""),
                 new Platform("14", 34, "brand/product:14/UP1A/9999:user/release-keys", "0.5.1", 51L),
-                List.of());
+                List.of(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static Policy policy(
@@ -621,7 +625,9 @@ public final class DeviceHealthAssessorTest {
     private static DeviceHealthSnapshot withPolicy(DeviceHealthSnapshot base, Policy policy) {
         return new DeviceHealthSnapshot(
                 policy, base.kiosk(), base.updates(), base.managementIdentities(),
-                base.reconciliation(), base.platform(), base.audit());
+                base.reconciliation(), base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withSystemControls(
@@ -641,13 +647,17 @@ public final class DeviceHealthAssessorTest {
     private static DeviceHealthSnapshot withKiosk(DeviceHealthSnapshot base, Kiosk kiosk) {
         return new DeviceHealthSnapshot(
                 base.policy(), kiosk, base.updates(), base.managementIdentities(),
-                base.reconciliation(), base.platform(), base.audit());
+                base.reconciliation(), base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withUpdates(DeviceHealthSnapshot base, Updates updates) {
         return new DeviceHealthSnapshot(
                 base.policy(), base.kiosk(), updates, base.managementIdentities(),
-                base.reconciliation(), base.platform(), base.audit());
+                base.reconciliation(), base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withIdentities(
@@ -656,7 +666,9 @@ public final class DeviceHealthAssessorTest {
     ) {
         return new DeviceHealthSnapshot(
                 base.policy(), base.kiosk(), base.updates(), identities,
-                base.reconciliation(), base.platform(), base.audit());
+                base.reconciliation(), base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withReconciliation(
@@ -665,12 +677,16 @@ public final class DeviceHealthAssessorTest {
     ) {
         return new DeviceHealthSnapshot(
                 base.policy(), base.kiosk(), base.updates(), base.managementIdentities(),
-                reconciliation, base.platform(), base.audit());
+                reconciliation, base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withPlatform(DeviceHealthSnapshot base, Platform platform) {
         return new DeviceHealthSnapshot(
                 base.policy(), base.kiosk(), base.updates(), base.managementIdentities(),
-                base.reconciliation(), platform, base.audit());
+                base.reconciliation(), platform, base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 }

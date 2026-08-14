@@ -23,6 +23,13 @@ import java.util.List;
  * because "the adapter could not read this" is a real device state, and the one
  * thing it must never collapse into is the healthy one.
  *
+ * <p>There is deliberately no convenience constructor that omits a component.
+ * One existed for {@link Maintenance} and it silently defaulted to
+ * {@code closed()}, which is how {@link DeviceHealthRedaction} came to drop an
+ * open break-glass window from the export while the local screen still showed
+ * it. Every caller states every dimension, so forgetting one is a compile error
+ * rather than a milder status.
+ *
  * <p>Nothing here leaves the device on its own. The snapshot exists to be
  * rendered locally by {@link DeviceHealthReport}; the export is written only when
  * an administrator asks for it, and only after {@link DeviceHealthRedaction} has
@@ -48,23 +55,6 @@ public record DeviceHealthSnapshot(
         platform = platform == null ? Platform.unreadable() : platform;
         audit = copyOf(audit);
         maintenance = maintenance == null ? Maintenance.closed() : maintenance;
-    }
-
-    /**
-     * Convenience for callers written before maintenance was part of the
-     * snapshot. A device with no maintenance record is a device with no window.
-     */
-    public DeviceHealthSnapshot(
-            Policy policy,
-            Kiosk kiosk,
-            Updates updates,
-            List<ManagementIdentity> managementIdentities,
-            Reconciliation reconciliation,
-            Platform platform,
-            List<AuditEvent> audit
-    ) {
-        this(policy, kiosk, updates, managementIdentities, reconciliation, platform, audit,
-                Maintenance.closed());
     }
 
     /**

@@ -285,6 +285,69 @@ public final class DeviceHealthRedactionTest {
         assertTrue(export.contains("generated-at=" + NOW));
     }
 
+    @Test
+    public void redactionNeverSoftensAnOpenBreakGlassWindow() {
+        // The regression this guards: redact() once rebuilt the snapshot without
+        // its maintenance dimension, so an export of a device with the debugging
+        // transport deliberately open reported a milder status than the screen in
+        // front of the administrator. An export that is calmer than the truth is
+        // worse than no export.
+        DeviceHealthSnapshot open = withMaintenance(new DeviceHealthSnapshot.Maintenance(
+                DeviceHealthSnapshot.MaintenancePresence.OPEN,
+                List.of("adb_debugging"),
+                true,
+                NOW + HOUR));
+
+        DeviceHealthSnapshot redacted = DeviceHealthRedaction.redact(open);
+
+        assertEquals(open.maintenance(), redacted.maintenance());
+        assertEquals(
+                DeviceHealthAssessor.assess(open, NOW).status(),
+                DeviceHealthAssessor.assess(redacted, NOW).status());
+        assertTrue(DeviceHealthAssessor.assess(redacted, NOW)
+                .has(DeviceHealthAssessor.Finding.MAINTENANCE_BREAK_GLASS_OPEN));
+    }
+
+    @Test
+    public void redactionKeepsAnOwedRestoreVisible() {
+        DeviceHealthSnapshot owed = withMaintenance(new DeviceHealthSnapshot.Maintenance(
+                DeviceHealthSnapshot.MaintenancePresence.RESTORE_OWED, List.of(), false, 0L));
+
+        DeviceHealthSnapshot redacted = DeviceHealthRedaction.redact(owed);
+
+        assertTrue(DeviceHealthAssessor.assess(redacted, NOW)
+                .has(DeviceHealthAssessor.Finding.MAINTENANCE_RESTORE_OWED));
+    }
+
+    @Test
+    public void everyDimensionSurvivesRedactionUnlessItIsDeliberatelyDropped() {
+        // Guards the shape of the record rather than one field: if a dimension is
+        // ever added and redact() forgets it, the assessment of the redacted
+        // snapshot stops matching the assessment of the raw one, which is the
+        // exact failure mode this class promises does not happen.
+        DeviceHealthSnapshot raw = hostile();
+
+        assertEquals(
+                DeviceHealthAssessor.assess(raw, NOW).codesInOrder(),
+                DeviceHealthAssessor.assess(DeviceHealthRedaction.redact(raw), NOW).codesInOrder());
+    }
+
+    /** The hostile device, with one maintenance dimension replaced. */
+    private static DeviceHealthSnapshot withMaintenance(
+            DeviceHealthSnapshot.Maintenance maintenance
+    ) {
+        DeviceHealthSnapshot base = hostile();
+        return new DeviceHealthSnapshot(
+                base.policy(),
+                base.kiosk(),
+                base.updates(),
+                base.managementIdentities(),
+                base.reconciliation(),
+                base.platform(),
+                base.audit(),
+                maintenance);
+    }
+
     /** A device carrying every value an export must not repeat. */
     private static DeviceHealthSnapshot hostile() {
         return new DeviceHealthSnapshot(
@@ -323,7 +386,9 @@ public final class DeviceHealthRedactionTest {
                         new AuditEvent(NOW - 2L * HOUR, "policy.apply",
                                 "administrator PIN " + ADMIN_PIN),
                         new AuditEvent(NOW - HOUR, "custom.exfil",
-                                "recovery code " + RECOVERY_CODE)));
+                                "recovery code " + RECOVERY_CODE)),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withErrors(
@@ -340,7 +405,9 @@ public final class DeviceHealthRedactionTest {
                         policy.packages(),
                         policy.systemControls()),
                 base.kiosk(), base.updates(), base.managementIdentities(),
-                base.reconciliation(), base.platform(), base.audit());
+                base.reconciliation(), base.platform(), base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static DeviceHealthSnapshot withPlatform(
@@ -349,7 +416,9 @@ public final class DeviceHealthRedactionTest {
     ) {
         return new DeviceHealthSnapshot(
                 base.policy(), base.kiosk(), base.updates(), base.managementIdentities(),
-                base.reconciliation(), platform, base.audit());
+                base.reconciliation(), platform, base.audit(),
+                DeviceHealthSnapshot.Maintenance.closed()
+        );
     }
 
     private static int countLinesStartingWith(String text, String prefix) {

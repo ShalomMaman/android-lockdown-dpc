@@ -156,7 +156,13 @@ public final class DeviceHealthRedaction {
                 redactIdentities(raw.managementIdentities()),
                 redactReconciliation(raw.reconciliation()),
                 redactPlatform(raw.platform()),
-                redactAudit(raw.audit())
+                redactAudit(raw.audit()),
+                // Carried, not dropped. A window's capability keys come from a
+                // fixed enum and its deadline is a clock reading, so none of it is
+                // operator-supplied text — and losing it would let an export claim
+                // a milder status than the screen shows for a device whose
+                // debugging transport is deliberately open.
+                raw.maintenance()
         );
     }
 

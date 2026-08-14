@@ -63,6 +63,7 @@ import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.MaintenanceSt
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest
 import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.maintenance.MaintenanceWindow
+import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway
@@ -1002,7 +1003,12 @@ private fun openMaintenance(
     } else {
         EnumSet.copyOf(capabilities)
     }
-    val request = OpenRequest(requested, durationMillis, AdminSession.isUnlocked())
+    val request = OpenRequest(
+        requested,
+        durationMillis,
+        AdminSession.isUnlocked(),
+        AllowedAppsStore.isProtectionEnabled(context),
+    )
     // Through the guard: it marks the intent to relax before the first
     // device call, so a crash between relaxing and recording still leaves a
     // restore owed.

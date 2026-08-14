@@ -125,8 +125,12 @@ public final class MaintenanceStore {
      * that the record reaches disk before the first {@code DevicePolicyManager}
      * call, and an asynchronous write is exactly the race being closed.
      */
-    public static synchronized void markRestorePending(Context context) {
-        prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, true).commit();
+    public static synchronized boolean markRestorePending(Context context) {
+        // The return value is the whole point. SharedPreferences.commit()
+        // reports false when the values did not reach storage, and a caller that
+        // ignores that would relax a device on the strength of a record that
+        // does not exist. The caller must refuse to open when this is false.
+        return prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, true).commit();
     }
 
     /**
@@ -135,8 +139,8 @@ public final class MaintenanceStore {
      * <p>Only legitimate for a request the state machine refused before any
      * device call — never as a way to forget a relaxation that did happen.
      */
-    public static synchronized void clearRestorePending(Context context) {
-        prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
+    public static synchronized boolean clearRestorePending(Context context) {
+        return prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
     }
 
     /**
@@ -146,21 +150,32 @@ public final class MaintenanceStore {
      * stored whenever the outcome carries one — an open window, or a window whose
      * restore could not be verified — and the pending flag survives until a
      * restore has actually been read back.
+     *
+     * @return whether every write reached storage. A caller that has just relaxed
+     *         a device and gets {@code false} is holding a device whose state no
+     *         later pass can reconstruct, and must close the window rather than
+     *         report it as open.
      */
-    public static synchronized void apply(Context context, MaintenanceOutcome outcome) {
+    public static synchronized boolean apply(Context context, MaintenanceOutcome outcome) {
+        boolean durable;
         if (outcome.windowMustBeStored()) {
-            saveWindow(context, outcome.window());
+            durable = saveWindow(context, outcome.window());
         } else {
-            clearWindow(context);
+            durable = clearWindow(context);
         }
         if (outcome.restoreVerified()) {
-            prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
+            durable &= prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, false).commit();
         }
+        return durable;
     }
 
-    /** Writes the window and marks a restore as owed. */
-    public static synchronized void saveWindow(Context context, MaintenanceWindow window) {
-        prefs(context).edit()
+    /**
+     * Writes the window and marks a restore as owed.
+     *
+     * @return whether the record actually reached storage
+     */
+    public static synchronized boolean saveWindow(Context context, MaintenanceWindow window) {
+        return prefs(context).edit()
                 .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
                 .putString(KEY_CAPABILITIES, window.capabilitySummary())
                 .putLong(KEY_DURATION, window.durationMillis())
@@ -172,9 +187,13 @@ public final class MaintenanceStore {
                 .commit();
     }
 
-    /** Removes the window. The pending flag is deliberately untouched. */
-    public static synchronized void clearWindow(Context context) {
-        prefs(context).edit()
+    /**
+     * Removes the window. The pending flag is deliberately untouched.
+     *
+     * @return whether the removal actually reached storage
+     */
+    public static synchronized boolean clearWindow(Context context) {
+        return prefs(context).edit()
                 .remove(KEY_CAPABILITIES)
                 .remove(KEY_DURATION)
                 .remove(KEY_OPENED_WALL)

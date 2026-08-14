@@ -22,6 +22,7 @@ import com.example.lockdowndpc.kiosk.KioskConfigStore;
 import com.example.lockdowndpc.kiosk.KioskAppCatalog;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
+import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.maintenance.MaintenancePlan;
 import com.example.lockdowndpc.maintenance.MaintenanceStore;
 import com.example.lockdowndpc.maintenance.MaintenanceWindow;
@@ -88,6 +89,12 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
+        // Maintenance is an exception to an enforced policy, so pausing ends it.
+        // The record is dropped before the restrictions are released rather than
+        // after: if this pass dies midway, the next maintenance refresh must not
+        // find a window and "restore" the base policy onto a device an
+        // administrator has just paused.
+        closeMaintenanceForPause(context);
         releaseSystemPolicy(context, dpm, admin, errors);
         try {
             dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
@@ -225,6 +232,32 @@ public final class LockdownPolicyController {
             return stored;
         }
         return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
+    }
+
+    /**
+     * Ends any maintenance window because protection is being paused.
+     *
+     * <p>No restore is performed and none is owed: {@code releaseSystemPolicy}
+     * withdraws every control a moment later, which is a superset of whatever the
+     * window had relaxed. Leaving the record in place is what would be unsafe —
+     * the maintenance timers would later fire on a paused device and re-assert
+     * restrictions the console says are off.
+     */
+    private static void closeMaintenanceForPause(Context context) {
+        try {
+            boolean hadWindow = MaintenanceStore.readWindow(context) != null
+                    || MaintenanceStore.restorePending(context);
+            MaintenanceStore.clearWindow(context);
+            MaintenanceStore.clearRestorePending(context);
+            MaintenanceGuard.arm(context, null);
+            if (hadWindow) {
+                AuditLog.append(context, "maintenance:closed-by-pause");
+            }
+        } catch (RuntimeException exception) {
+            // Pausing must not fail because the maintenance record misbehaved;
+            // the release below is what actually frees the device.
+            Log.e(TAG, "Could not clear the maintenance record while pausing", exception);
+        }
     }
 
     /**
@@ -467,6 +500,66 @@ public final class LockdownPolicyController {
         }
     }
 
+    /**
+     * The opted-in system packages whose recorded risk acceptance still describes
+     * the binary that is installed.
+     *
+     * <p>A package whose signer or version has drifted is dropped from management
+     * rather than faulted: an OEM update is a normal event, and faulting
+     * protection on every firmware update would strand a fleet for something an
+     * administrator resolves in the console. The drop is audited so it is visible.
+     */
+    private static Set<String> revalidatedSystemSelection(Context context, PackageManager pm) {
+        Set<String> selected = AllowedAppsStore.getAdminSelectedSystemPackages(context);
+        if (selected.isEmpty()) {
+            return selected;
+        }
+        java.util.LinkedHashMap<String, SystemAppRiskAcceptance> acceptances =
+                new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, SystemAppSelection.InstalledIdentity> installed =
+                new java.util.LinkedHashMap<>();
+        for (String packageName : selected) {
+            SystemAppRiskAcceptance acceptance =
+                    AllowedAppsStore.getSystemRiskAcceptance(context, packageName);
+            if (acceptance != null) {
+                acceptances.put(packageName, acceptance);
+            }
+            installed.put(packageName, observedIdentity(context, pm, packageName));
+        }
+        SystemAppSelection.Revalidation revalidation =
+                SystemAppSelection.revalidate(selected, acceptances, installed);
+        if (revalidation.anyRevoked()) {
+            Log.e(TAG, "System selections no longer match their acceptance: "
+                    + revalidation.revokedSummary());
+            AuditLog.append(
+                    context,
+                    "system-selection-revoked:" + revalidation.revokedSummary());
+        }
+        return revalidation.managed();
+    }
+
+    /** The signer digest and version of an installed package, as observed now. */
+    private static SystemAppSelection.InstalledIdentity observedIdentity(
+            Context context,
+            PackageManager pm,
+            String packageName
+    ) {
+        try {
+            if (!isInstalled(pm, packageName)) {
+                return SystemAppSelection.InstalledIdentity.unreadable();
+            }
+            Set<String> digests = signingCertificateDigests(context, packageName);
+            // A package with several signers has no single identity to compare, so
+            // the acceptance cannot be reconfirmed and the selection lapses.
+            String digest = digests.size() == 1 ? digests.iterator().next() : "";
+            PackageInfo info = getPackageInfo(pm, packageName, 0);
+            String version = info.versionName == null ? "" : info.versionName;
+            return new SystemAppSelection.InstalledIdentity(digest, version);
+        } catch (RuntimeException | PackageManager.NameNotFoundException exception) {
+            return SystemAppSelection.InstalledIdentity.unreadable();
+        }
+    }
+
     private static int[] applyPackagePolicy(
             Context context,
             DevicePolicyManager dpm,
@@ -477,7 +570,11 @@ public final class LockdownPolicyController {
         PackageManager pm = context.getPackageManager();
         Set<String> allowed = AllowedAppsStore.getAllowedPackages(context);
         Set<String> managed = AllowedAppsStore.getManagedPackages(context);
-        Set<String> adminSelectedSystem = AllowedAppsStore.getAdminSelectedSystemPackages(context);
+        // Re-checked against what is installed right now, never taken on trust
+        // from storage: an OEM update can replace the binary behind an accepted
+        // package name, and acting on the old acceptance would hide a component
+        // nobody reviewed during an automatic reconciliation pass.
+        Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);

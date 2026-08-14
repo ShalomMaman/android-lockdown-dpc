@@ -42,12 +42,46 @@ public final class MaintenanceStateMachineTest {
 
         OpenDecision decision = MaintenanceStateMachine.open(
                 null,
-                new OpenRequest(EnumSet.of(MaintenanceCapability.USB_FILE_TRANSFER), HALF_HOUR, false),
+                new OpenRequest(EnumSet.of(MaintenanceCapability.USB_FILE_TRANSFER), HALF_HOUR, false, true),
                 clock);
 
         assertFalse(decision.allowed());
         assertNull(decision.window());
         assertEquals("admin-authentication-required", decision.reason());
+    }
+
+    @Test
+    public void aWindowNeverOpensWhileProtectionIsPaused() {
+        // Maintenance is an exception to an enforced policy. A window opened on a
+        // paused device would record relaxations of restrictions that are not in
+        // force, and its restore would later re-assert them on a device the
+        // console still shows as paused.
+        FakeClock clock = new FakeClock(OPEN_WALL, OPEN_ELAPSED);
+
+        OpenDecision decision = MaintenanceStateMachine.open(
+                null,
+                new OpenRequest(
+                        EnumSet.of(MaintenanceCapability.ADB_DEBUGGING), HALF_HOUR, true, false),
+                clock);
+
+        assertFalse(decision.allowed());
+        assertNull(decision.window());
+        assertEquals("protection-paused", decision.reason());
+    }
+
+    @Test
+    public void aPausedDeviceIsRefusedBeforeTheCapabilityAndDurationRulesRun() {
+        // Order matters for the message an operator reads: "protection is paused"
+        // explains what to do, "no capability selected" sends them to fix the
+        // wrong thing.
+        FakeClock clock = new FakeClock(OPEN_WALL, OPEN_ELAPSED);
+
+        assertEquals(
+                "protection-paused",
+                MaintenanceStateMachine.open(
+                        null,
+                        new OpenRequest(Set.of(), 0L, true, false),
+                        clock).reason());
     }
 
     @Test
@@ -88,7 +122,7 @@ public final class MaintenanceStateMachineTest {
                 "no-capability-selected",
                 MaintenanceStateMachine.open(
                         null,
-                        new OpenRequest(Set.of(), HALF_HOUR, true),
+                        new OpenRequest(Set.of(), HALF_HOUR, true, true),
                         clock).reason());
 
         // A HashSet, unlike an EnumSet, will carry a null through to here.
@@ -99,14 +133,14 @@ public final class MaintenanceStateMachineTest {
                 "unknown-capability",
                 MaintenanceStateMachine.open(
                         null,
-                        new OpenRequest(withNull, HALF_HOUR, true),
+                        new OpenRequest(withNull, HALF_HOUR, true, true),
                         clock).reason());
 
         assertEquals(
                 "no-capability-selected",
                 MaintenanceStateMachine.open(
                         null,
-                        new OpenRequest(null, HALF_HOUR, true),
+                        new OpenRequest(null, HALF_HOUR, true, true),
                         clock).reason());
     }
 
@@ -370,6 +404,7 @@ public final class MaintenanceStateMachineTest {
         return new OpenRequest(
                 EnumSet.of(MaintenanceCapability.ADB_DEBUGGING),
                 durationMillis,
+                true,
                 true);
     }
 

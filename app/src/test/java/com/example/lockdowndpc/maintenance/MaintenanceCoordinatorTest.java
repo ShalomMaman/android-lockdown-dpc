@@ -91,7 +91,7 @@ public final class MaintenanceCoordinatorTest {
 
         MaintenanceOutcome refused = coordinator.open(
                 null,
-                new OpenRequest(EnumSet.of(MaintenanceCapability.ADB_DEBUGGING), HALF_HOUR, false));
+                new OpenRequest(EnumSet.of(MaintenanceCapability.ADB_DEBUGGING), HALF_HOUR, false, true));
 
         assertEquals(MaintenanceStatus.REFUSED, refused.status());
         assertEquals("admin-authentication-required", refused.reason());
@@ -335,7 +335,7 @@ public final class MaintenanceCoordinatorTest {
     }
 
     private static OpenRequest request(MaintenanceCapability capability) {
-        return new OpenRequest(EnumSet.of(capability), HALF_HOUR, true);
+        return new OpenRequest(EnumSet.of(capability), HALF_HOUR, true, true);
     }
 
     /** Readings that never move. */

@@ -20,6 +20,8 @@ import java.util.concurrent.TimeUnit;
  *   <li>A window never opens without an administrator PIN session, without at
  *       least one known capability, or outside
  *       {@code 0 &lt; duration &le;} {@link #MAX_DURATION_MILLIS}.</li>
+ *   <li>A window never opens while protection is paused: a paused device has no
+ *       policy for a window to make an exception to.</li>
  *   <li>A second window never opens on top of an existing one. Widening or
  *       extending means closing the first — which restores and verifies the
  *       policy — and opening a new one that is audited on its own line.</li>
@@ -121,11 +123,15 @@ public final class MaintenanceStateMachine {
      * @param capabilities       what the administrator selected
      * @param durationMillis     how long the window should last
      * @param adminAuthenticated whether an administrator PIN session is valid now
+     * @param protectionEnabled  whether protection is currently applied rather than
+     *                           paused; a window relaxes a policy, and a paused
+     *                           device has no policy to relax
      */
     public record OpenRequest(
             Set<MaintenanceCapability> capabilities,
             long durationMillis,
-            boolean adminAuthenticated
+            boolean adminAuthenticated,
+            boolean protectionEnabled
     ) {}
 
     /**
@@ -187,6 +193,14 @@ public final class MaintenanceStateMachine {
         }
         if (!request.adminAuthenticated()) {
             return refused("admin-authentication-required");
+        }
+        if (!request.protectionEnabled()) {
+            // Maintenance is an exception to an enforced policy, not a second way
+            // to switch one off. A window opened on a paused device would record
+            // relaxations of restrictions that are not in force, and its eventual
+            // restore would then re-assert them on a device the console still
+            // shows as paused.
+            return refused("protection-paused");
         }
         if (current != null) {
             // Not an error the console should paper over by replacing the window:

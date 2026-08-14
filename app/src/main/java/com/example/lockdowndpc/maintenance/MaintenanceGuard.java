@@ -14,9 +14,13 @@ import com.example.lockdowndpc.kiosk.BidiText;
 import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOutcome;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
+import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway;
+import com.example.lockdowndpc.policy.SystemPolicyReport;
 import com.example.lockdowndpc.policy.SystemPolicyStore;
+
+import java.util.List;
 
 /**
  * What closes a maintenance window when nobody is looking.
@@ -67,6 +71,18 @@ public final class MaintenanceGuard {
 
     private static final long SWEEP_PERIOD_MILLIS = 15L * 60L * 1_000L;
 
+    /**
+     * Whether the last {@link #record} write reached storage, and whether the
+     * last {@link #arm} actually scheduled the close.
+     *
+     * <p>Guarded by the class monitor, which every public entry point holds.
+     * They exist so {@link #open} can refuse to call a window open when the
+     * device was relaxed but the record or the timer did not survive — the two
+     * ways a window becomes one nobody will ever close.
+     */
+    private static boolean lastRecordDurable;
+    private static boolean lastArmSucceeded;
+
     private MaintenanceGuard() {}
 
     /**
@@ -83,6 +99,15 @@ public final class MaintenanceGuard {
         MaintenanceCoordinator coordinator = coordinatorFor(appContext);
         if (coordinator == null) {
             return null;
+        }
+        if (!AllowedAppsStore.isProtectionEnabled(appContext)) {
+            // Protection is paused, so every restriction is already withdrawn and
+            // there is nothing for a window to be an exception to. Restoring the
+            // base policy here would re-assert restrictions on a device the
+            // console shows as paused, which is the one thing a paused device
+            // must not do. The record is dropped instead, and pause() is what
+            // guarantees the device is actually released.
+            return standDown(appContext, "protection-paused");
         }
         MaintenanceWindow stored = MaintenanceStore.readWindow(appContext);
         MaintenanceOutcome outcome;
@@ -110,7 +135,14 @@ public final class MaintenanceGuard {
             OpenRequest request
     ) {
         Context appContext = context.getApplicationContext();
-        MaintenanceStore.markRestorePending(appContext);
+        if (!MaintenanceStore.markRestorePending(appContext)) {
+            // The write-ahead record did not reach storage, so a crash after the
+            // first DevicePolicyManager call would leave a relaxed device with
+            // nothing on disk saying so. Nothing has been sent yet, so refusing
+            // here costs an administrator one retry and costs the device nothing.
+            Log.e(TAG, "Refusing to open: the maintenance record is not durable");
+            return refusedBeforeAnySend(current, "record-not-durable");
+        }
         MaintenanceOutcome outcome = coordinator.open(current, request);
         if (outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED
                 && !outcome.windowMustBeStored()) {
@@ -118,7 +150,70 @@ public final class MaintenanceGuard {
             // is nothing owed and the flag would only cause a pointless re-apply.
             MaintenanceStore.clearRestorePending(appContext);
         }
-        return record(appContext, outcome);
+        MaintenanceOutcome recorded = record(appContext, outcome);
+        if (!recorded.windowOpen()) {
+            return recorded;
+        }
+        // The window is open on the device. It may only be reported as open if
+        // the record is durable AND something is scheduled to close it: a window
+        // nobody will close is the failure this whole class exists to prevent.
+        if (lastRecordDurable && lastArmSucceeded) {
+            return recorded;
+        }
+        Log.e(TAG, "Closing the window immediately: durable=" + lastRecordDurable
+                + ", armed=" + lastArmSucceeded);
+        MaintenanceOutcome closed = record(
+                appContext,
+                coordinator.restore(recorded.window(), CloseReason.OPEN_FAILED));
+        return new MaintenanceOutcome(
+                MaintenanceCoordinator.Phase.OPEN,
+                MaintenanceCoordinator.MaintenanceStatus.FAILED,
+                closed.window(),
+                CloseReason.OPEN_FAILED,
+                closed.plan(),
+                closed.report(),
+                closed.failures(),
+                closed.restoreVerified()
+                        ? "open-unschedulable-policy-restored"
+                        : "open-unschedulable-restore-failed");
+    }
+
+    /** A refusal decided before anything was sent to the device. */
+    private static MaintenanceOutcome refusedBeforeAnySend(
+            MaintenanceWindow current,
+            String reason
+    ) {
+        return new MaintenanceOutcome(
+                MaintenanceCoordinator.Phase.OPEN,
+                MaintenanceCoordinator.MaintenanceStatus.REFUSED,
+                current,
+                null,
+                null,
+                SystemPolicyReport.empty(),
+                List.of(),
+                reason);
+    }
+
+    /**
+     * Drops the maintenance record without touching device policy, and stands the
+     * timers down.
+     *
+     * <p>Used when the device is paused: pause has already withdrawn every
+     * restriction, so there is nothing to restore and nothing to keep watching.
+     */
+    private static MaintenanceOutcome standDown(Context context, String reason) {
+        MaintenanceStore.clearWindow(context);
+        MaintenanceStore.clearRestorePending(context);
+        arm(context, null);
+        return new MaintenanceOutcome(
+                MaintenanceCoordinator.Phase.REFRESH,
+                MaintenanceCoordinator.MaintenanceStatus.UNCHANGED,
+                null,
+                null,
+                null,
+                SystemPolicyReport.empty(),
+                List.of(),
+                reason);
     }
 
     /** Ends the window by hand and reads the restore back. */
@@ -143,7 +238,7 @@ public final class MaintenanceGuard {
             MaintenanceOutcome outcome
     ) {
         Context appContext = context.getApplicationContext();
-        MaintenanceStore.apply(appContext, outcome);
+        lastRecordDurable = MaintenanceStore.apply(appContext, outcome);
         // The console's system policy rows read SystemPolicyStore. Without this,
         // a control that maintenance has just cleared on the device would keep
         // rendering yesterday's verified "applied", which is exactly the kind of
@@ -152,25 +247,35 @@ public final class MaintenanceGuard {
             SystemPolicyStore.saveReport(appContext, outcome.report());
         }
         auditFrom(appContext, outcome);
-        arm(appContext, outcome.windowOpen() ? outcome.window() : null);
+        lastArmSucceeded = arm(appContext, outcome.windowOpen() ? outcome.window() : null);
         return outcome;
     }
 
     /**
      * Arms the deadline for {@code window}, or stands the timers down when there
      * is nothing open and nothing owed.
+     *
+     * <p>{@code JobScheduler} guarantees a job runs no <em>earlier</em> than the
+     * minimum latency, not that it runs promptly: Doze and app standby can push
+     * it past the override deadline. That is why this is one of four paths — the
+     * exact job, the periodic sweep, the boot pass and the console — rather than
+     * the only one. What it does guarantee is that the failure to schedule at all
+     * is visible, which is what the return value is for.
+     *
+     * @return whether a close is genuinely scheduled for this window
      */
-    public static void arm(Context context, MaintenanceWindow window) {
+    public static boolean arm(Context context, MaintenanceWindow window) {
         Context appContext = context.getApplicationContext();
         JobScheduler scheduler = appContext.getSystemService(JobScheduler.class);
         if (scheduler == null) {
             Log.e(TAG, "No JobScheduler: a maintenance window cannot be closed automatically");
-            return;
+            return false;
         }
         ComponentName component = new ComponentName(appContext, MaintenanceGuardJobService.class);
         boolean somethingOwed = window != null || MaintenanceStore.restorePending(appContext);
 
         try {
+            boolean armed = true;
             scheduler.cancel(EXPIRY_JOB_ID);
             if (window != null) {
                 long remaining = Math.max(
@@ -181,26 +286,41 @@ public final class MaintenanceGuard {
                         // A short window rather than "as late as the platform
                         // likes": the deadline is the point of the feature.
                         .setOverrideDeadline(remaining + SWEEP_PERIOD_MILLIS);
-                scheduler.schedule(expiry.build());
+                // JobScheduler.schedule returns RESULT_FAILURE rather than
+                // throwing, so an unchecked call is how a window ends up with no
+                // deadline at all.
+                armed = scheduler.schedule(expiry.build()) == JobScheduler.RESULT_SUCCESS;
+                if (!armed) {
+                    Log.e(TAG, "JobScheduler refused the maintenance expiry job");
+                }
             }
 
             if (somethingOwed) {
-                if (scheduler.getPendingJob(SWEEP_JOB_ID) == null) {
+                if (scheduler.getPendingJob(SWEEP_JOB_ID) != null) {
+                    // Already armed from an earlier window.
+                    return armed;
+                }
+                {
                     JobInfo.Builder sweep = new JobInfo.Builder(SWEEP_JOB_ID, component)
                             .setPeriodic(SWEEP_PERIOD_MILLIS)
                             // Survives a reboot so a window opened before a
                             // restart is still swept afterwards, alongside the
                             // boot pass PolicyRefreshReceiver runs.
                             .setPersisted(true);
-                    scheduler.schedule(sweep.build());
+                    if (scheduler.schedule(sweep.build()) != JobScheduler.RESULT_SUCCESS) {
+                        Log.e(TAG, "JobScheduler refused the maintenance sweep job");
+                        armed = false;
+                    }
                 }
             } else {
                 scheduler.cancel(SWEEP_JOB_ID);
             }
+            return armed;
         } catch (RuntimeException exception) {
-            // Scheduling is the safety net, not the rule. Losing it must not take
-            // the console down with it, but it must be visible.
+            // A window with no timer is a window nobody will close, so this is
+            // reported to the caller rather than only logged.
             Log.e(TAG, "Could not arm the maintenance timers", exception);
+            return false;
         }
     }
 
