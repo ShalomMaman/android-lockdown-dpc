@@ -44,3 +44,47 @@ Safety defaults:
 - output is written atomically and can never target the APK or private key.
 
 The payload is canonical compact JSON with sorted keys. `payload` and its DER ECDSA `signature` are URL-safe Base64 without padding, matching `UpdateEnvelopeVerifier`.
+
+## Locale parity
+
+`check_locale_parity.py` compares `values/strings.xml` against `values-iw/strings.xml`
+and fails on a missing key, a mismatched format placeholder, a missing plural
+category, an English value left in the Hebrew file, or a Hebrew value in the
+English default. It reads `strings.xml` and nothing else, so a feature that
+ships its own resource file carries its own parity test on the JVM instead —
+see `SystemPolicyLocaleParityTest`, `MaintenanceStringsParityTest`,
+`SystemAppInventoryStringsParityTest`, `ManagementIdentityStringsParityTest` and
+`DeviceHealthStringsParityTest`.
+
+## Self-update drill
+
+`update_drill.py` rehearses and records the offline half of a real signed
+self-update. It proves that the installed and candidate APKs form a legal
+in-place update pair — identical application ID, identical signing certificate,
+strictly higher `versionCode` — and that the published envelope satisfies the
+same rules the device applies in `UpdateEnvelopeVerifier` and
+`SecureUpdateManager`: ECDSA P-256 over the canonical payload, the approved
+metadata public-key fingerprint, APK hash and size, package identity, exact
+version binding, an HTTPS-only URL, and the replay floor.
+
+It refuses a downgrade, a replayed older envelope, a signer change, and an
+envelope whose metadata does not match the APK it points at. The result is a
+machine-readable drill record plus a PASS/FAIL summary that lists which checks
+ran and which could not be performed here — a check that was skipped is never
+reported as passed, and a run with skipped checks is `INCOMPLETE` rather than
+`PASS`.
+
+The on-device half of the drill cannot be automated from this repository and is
+documented in [`../docs/update-drill.md`](../docs/update-drill.md). ADB must
+remain the working recovery path until that half has been completed on hardware.
+
+## Device Owner provisioning payload
+
+`provisioning_payload.py` builds and validates the QR/NFC provisioning payload
+for a Device Owner enrolment: the administrator component, the download
+location, the package checksum, and the optional network and locale extras. It
+refuses a non-HTTPS download location, a malformed component name and an invalid
+checksum, and it never takes a Wi-Fi password on the command line — only the
+name of an environment variable to read, exactly as `publish_update.py` does for
+the key passphrase. The operator runbook is
+[`../docs/provisioning.md`](../docs/provisioning.md).

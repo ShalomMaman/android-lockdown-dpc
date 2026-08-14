@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Timed maintenance mode. English is the default locale; every key here must
+    also exist in res/values-iw/maintenance_strings.xml.
+
+    The shared guards in LocaleParityTest.kt and tools/check_locale_parity.py only
+    read strings.xml, so this file needs its own focused guard; see the note in
+    the integration hand-off for MaintenanceStringsParityTest.
+
+    Two rules govern the wording:
+
+    * Nothing here claims a window is in force. The console states what was
+      requested, and states separately what this device read back, because that is
+      the only thing the policy engine treats as evidence.
+    * The break-glass capability is described as a privileged transport in every
+      place it appears, and is never grouped with the ordinary capabilities.
+-->
+<resources>
+
+    <!-- Screen chrome -->
+    <string name="maint_title">Timed maintenance</string>
+    <string name="maint_subtitle">Maintenance opens capabilities you name, for a bounded time, and then puts the previous policy back. Nothing is opened by default, and nothing is reported as open until this device has confirmed it.</string>
+    <string name="maint_admin_row">Timed maintenance</string>
+    <string name="maint_admin_supporting">Open selected capabilities for a bounded service visit</string>
+    <string name="maint_loading">Checking whether a maintenance window is open…</string>
+
+    <!-- Window state -->
+    <string name="maint_status_open">Open</string>
+    <string name="maint_status_closed">Closed</string>
+    <string name="maint_card_open_headline">A maintenance window is open</string>
+    <string name="maint_card_closed_headline">No maintenance window is open</string>
+    <string name="maint_card_closed_detail">The system policy controls configured on this device are the whole policy right now.</string>
+
+    <!-- Choosing capabilities -->
+    <string name="maint_section_capabilities">Capabilities to open</string>
+    <string name="maint_capabilities_note">Choose only what the task needs. Each capability relaxes the controls named under it and nothing else, and a capability the base policy was not enforcing changes nothing.</string>
+    <string name="maint_section_break_glass">Break-glass</string>
+    <string name="maint_break_glass_badge">Break-glass</string>
+    <string name="maint_break_glass_note">Opens a privileged transport rather than a feature. It is never selected for you, it is never implied by another capability, and it needs its own confirmation.</string>
+
+    <!-- Choosing a duration -->
+    <string name="maint_section_duration">How long</string>
+    <string name="maint_expected_close">Expected to close at about %1$s</string>
+    <string name="maint_expiry_estimate_note">The closing time is an estimate read from the clock of this device. The window itself is timed from the boot clock, so moving the date or time cannot extend it, and a restart closes it.</string>
+
+    <!-- Durations -->
+    <string name="maint_duration_15_minutes">15 minutes</string>
+    <string name="maint_duration_30_minutes">30 minutes</string>
+    <string name="maint_duration_1_hour">1 hour</string>
+    <string name="maint_duration_2_hours">2 hours</string>
+    <string name="maint_duration_4_hours">4 hours</string>
+    <string name="maint_duration_custom_minutes">%1$d minutes</string>
+
+    <!-- Actions -->
+    <string name="maint_action_review">Review this window</string>
+    <string name="maint_action_open">Open the maintenance window</string>
+    <string name="maint_action_working">Working…</string>
+    <string name="maint_action_continue">Continue</string>
+    <string name="maint_action_close_now">Close now and restore policy</string>
+    <string name="maint_action_closing">Closing and verifying…</string>
+
+    <!-- Confirmation -->
+    <string name="maint_confirm_title">Confirm this maintenance window</string>
+    <string name="maint_confirm_subtitle">This is what leaves protection, and for how long.</string>
+    <string name="maint_confirm_capabilities">Opening: %1$s</string>
+    <string name="maint_confirm_duration">Length: %1$s</string>
+    <string name="maint_confirm_note">The window closes when it expires, when the device restarts, and when you close it by hand. In every one of those cases the previous policy is applied again and read back before the window is reported as closed.</string>
+
+    <!-- The separate break-glass confirmation -->
+    <string name="maint_break_glass_title">Open a privileged debugging transport?</string>
+    <string name="maint_break_glass_subtitle">This confirmation is separate because this decision is separate.</string>
+    <string name="maint_break_glass_warning">With developer options and USB debugging open, a cable and an authorised host can drive this device outside everything this console enforces, including the application allowlist and the kiosk.</string>
+    <string name="maint_break_glass_not_left_open">Do not leave it open. Close the window as soon as the task is finished rather than waiting for it to expire, and check afterwards that the status card reads closed.</string>
+    <string name="maint_break_glass_confirm">Open the debugging transport</string>
+
+    <!-- The open window -->
+    <string name="maint_open_remaining_hours">%1$d h %2$d min left</string>
+    <string name="maint_open_remaining_minutes">%1$d min left</string>
+    <string name="maint_open_remaining_under_minute">Less than a minute left</string>
+    <string name="maint_open_remaining_expired">The window has run out. It is being closed and the previous policy restored.</string>
+    <string name="maint_open_length_hours">Window length: %1$d h %2$d min</string>
+    <string name="maint_open_length_minutes">Window length: %1$d min</string>
+    <string name="maint_open_capabilities_label">Open right now</string>
+    <string name="maint_open_remaining_label">Time left</string>
+    <string name="maint_open_relaxed">Controls turned off: %1$s</string>
+    <string name="maint_open_relaxed_none">No control had to be turned off, because the base policy was not enforcing any of them.</string>
+    <string name="maint_open_residual">Still blocked by: %1$s</string>
+
+    <!-- Results -->
+    <string name="maint_result_opened">The maintenance window was applied and read back on this device.</string>
+    <string name="maint_result_open_refused">The window was not opened: %1$s</string>
+    <string name="maint_result_open_failed_restored">This device did not confirm the window, so it was undone. The previous policy was applied again and read back. Device response: %1$s</string>
+    <string name="maint_result_open_failed_restore_failed">This device confirmed neither the window nor the restore that followed it, so some restrictions may still be relaxed. Device response: %1$s</string>
+    <string name="maint_result_closed_verified">The window is closed and the previous policy was read back in force on this device.</string>
+    <string name="maint_result_close_failed">The window is over, but this device did not confirm the previous policy. Device response: %1$s</string>
+    <string name="maint_result_still_open">The window is still open.</string>
+    <string name="maint_result_not_open">No maintenance window was open.</string>
+
+    <!-- A restore that could not be proved -->
+    <string name="maint_restore_failed_headline">The previous policy was not confirmed</string>
+    <string name="maint_restore_failed_recovery">Treat this device as relaxed until it reports otherwise. Close the window again from here; if it keeps failing, apply and verify the system policy controls from the policy console, then restart the device before it goes back into service.</string>
+
+    <!-- Why the action is unavailable -->
+    <string name="maint_blocked_session">The administrator session expired, so no maintenance window can be requested.</string>
+    <string name="maint_blocked_not_device_owner">System administration is not configured on this device, so no restriction can be relaxed.</string>
+    <string name="maint_blocked_already_open">A window is already open. Close it first: widening a window means closing the current one, verifying the restore, and opening a new one that is recorded on its own.</string>
+    <string name="maint_blocked_no_capability">Select at least one capability. Maintenance opens nothing by default.</string>
+    <string name="maint_blocked_invalid_duration">Choose one of the offered durations.</string>
+    <string name="maint_failure_line">Device response: %1$s</string>
+
+    <!-- Refusals reported by the state machine -->
+    <string name="maint_refused_generic">The request was refused.</string>
+    <string name="maint_refused_admin_authentication_required">An administrator session is required.</string>
+    <string name="maint_refused_already_open">A maintenance window is already open.</string>
+    <string name="maint_refused_no_capability_selected">No capability was selected.</string>
+    <string name="maint_refused_unknown_capability">The request named a capability this build does not know.</string>
+    <string name="maint_refused_non_positive_duration">The requested length is not a positive duration.</string>
+    <string name="maint_refused_duration_above_maximum">The requested length is longer than this build grants.</string>
+
+    <!-- Capability: application stores and installers -->
+    <string name="maint_capability_app_store_access_title">Application stores and installers</string>
+    <string name="maint_capability_app_store_access_consequence">Every installer on the device can run again for the length of the window, including an application store. Device Guard can also install its own signed updates while this is open.</string>
+
+    <!-- Capability: local package install -->
+    <string name="maint_capability_local_apk_install_title">Installing a local package file</string>
+    <string name="maint_capability_local_apk_install_consequence">A package file already on the device can be installed. If the base policy also blocks all package installation, that control keeps blocking this until you open the stores and installers capability as well; the window says so rather than opening it for you.</string>
+
+    <!-- Capability: application controls in Settings -->
+    <string name="maint_capability_selected_settings_title">Application controls in Settings</string>
+    <string name="maint_capability_selected_settings_consequence">Force stop, clear data and clear cache become available in Settings. Date and time, users and profiles, factory reset and Safe Boot are not part of this capability and stay closed.</string>
+
+    <!-- Capability: USB file transfer -->
+    <string name="maint_capability_usb_file_transfer_title">USB file transfer</string>
+    <string name="maint_capability_usb_file_transfer_consequence">The device can be mounted as storage over a cable, so files can be copied on and off it during the visit.</string>
+
+    <!-- Capability: developer options and ADB -->
+    <string name="maint_capability_adb_debugging_title">Developer options and USB debugging</string>
+    <string name="maint_capability_adb_debugging_consequence">Developer options and ADB become available. A cable and an authorised host can then drive this device outside everything this console enforces. This is a privileged transport rather than a feature: open it only for the task that needs it, and close the window as soon as that task is finished.</string>
+
+    <!-- Audit: how a window closed -->
+    <string name="maint_audit_close_expired">The maintenance window reached its end time.</string>
+    <string name="maint_audit_close_reboot">The maintenance window ended because the device restarted.</string>
+    <string name="maint_audit_close_administrator_cancelled">An administrator closed the maintenance window.</string>
+    <string name="maint_audit_close_clock_anomaly">The maintenance window was closed because the clock readings could not be trusted.</string>
+    <string name="maint_audit_close_unreadable_record">A stored maintenance record could not be read, so the previous policy was restored.</string>
+    <string name="maint_audit_close_open_failed">The maintenance window was undone because opening it could not be verified.</string>
+
+    <!-- Audit: administrator actions -->
+    <string name="maint_audit_opened">Maintenance window opened: %1$s</string>
+    <string name="maint_audit_open_failed">Maintenance window refused or not verified: %1$s</string>
+    <string name="maint_audit_closed">Maintenance window closed and policy restored: %1$s</string>
+    <string name="maint_audit_restore_failed">Maintenance restore not verified: %1$s</string>
+</resources>

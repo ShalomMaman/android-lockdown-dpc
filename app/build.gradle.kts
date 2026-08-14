@@ -18,8 +18,8 @@ android {
         // Pilot compatibility: the applicationId and the release signing config
         // below are deliberately unchanged, so this build updates the already
         // provisioned pilot device in place. Only the version identity moves.
-        versionCode = 10
-        versionName = "0.5.1"
+        versionCode = 11
+        versionName = "0.5.2"
         // Update channels are an explicit build choice. Ordinary builds never
         // consume ambient properties or environment variables.
         buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())

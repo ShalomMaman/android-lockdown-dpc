@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Management identity console (Issue #27). English is the default locale; every
+    key here must also exist in res/values-iw/management_identity_strings.xml.
+
+    The shared guards in LocaleParityTest.kt and tools/check_locale_parity.py only
+    read strings.xml, so this file carries its own focused guard:
+    app/src/test/java/com/example/lockdowndpc/ui/ManagementIdentityStringsParityTest.kt
+
+    Every key carries the mgmtid_ prefix. Android merges all values/*.xml into one
+    resource table, so the prefix is what keeps a key here from silently
+    overriding a console one.
+
+    The wording states only what the device reported and what the policy engine
+    would do with it. "Proven" is used exclusively for a signer that was read back
+    and matched; an unpinned record is described as trusted but not proven,
+    because that is what it is.
+-->
+<resources>
+
+    <!-- Screen chrome -->
+    <string name="mgmtid_title">Management identity</string>
+    <string name="mgmtid_subtitle">Device Guard exempts the management transport from blocking. This screen shows whether that exemption rests on a signing certificate that was checked, or only on a package name.</string>
+    <string name="mgmtid_admin_row">Management identity</string>
+    <string name="mgmtid_admin_supporting">Prove the management transport by its signing certificate</string>
+    <string name="mgmtid_loading">Reading the installed signing certificates…</string>
+    <string name="mgmtid_apply_note">A change here takes effect the next time policy is applied and verified.</string>
+
+    <!-- Summary of the worst row -->
+    <string name="mgmtid_summary_proven">Management identity is proven on this device</string>
+    <string name="mgmtid_summary_not_proven">Management is trusted by package name only</string>
+    <string name="mgmtid_summary_refused">Management privilege is being withheld</string>
+    <string name="mgmtid_summary_absent">No management package is installed on this device</string>
+
+    <!-- The caution that has to be read before pinning, not after -->
+    <string name="mgmtid_section_caution">Before you pin</string>
+    <string name="mgmtid_caution_body">Pinning records whatever is installed on this device right now as approved. Do it only on a device you have confirmed is clean — freshly provisioned, or checked against a digest the vendor published. If the installed application is already an impostor, pinning it approves the impostor permanently.</string>
+
+    <!-- One package -->
+    <string name="mgmtid_row_installed">Installed on this device</string>
+    <string name="mgmtid_row_not_installed">Not installed on this device</string>
+    <string name="mgmtid_identity_line">Identity: %1$s</string>
+    <string name="mgmtid_observed_title">Signing certificates this device reported</string>
+    <string name="mgmtid_observed_none">This device reported no readable signing certificate.</string>
+    <string name="mgmtid_pinned_title">Approved certificates</string>
+    <string name="mgmtid_pinned_none">No certificate is approved for this package.</string>
+
+    <!-- Identity state -->
+    <string name="mgmtid_state_proven">Proven — an installed signing certificate matches an approved one</string>
+    <string name="mgmtid_state_name_only">Not proven — trusted by package name alone</string>
+    <string name="mgmtid_state_mismatch">Refused — no installed signing certificate matches an approved one</string>
+    <string name="mgmtid_state_unreadable">Refused — a certificate is approved and this device reported no signer</string>
+    <string name="mgmtid_state_not_installed">Not installed — nothing is trusted here yet</string>
+
+    <!-- What the state means for the device -->
+    <string name="mgmtid_detail_proven">The management exemption is granted while an installed signing certificate keeps matching. A signer change withdraws it at the next apply.</string>
+    <string name="mgmtid_detail_name_only">Any application installed under this package name inherits the management exemption. Approve the release signing certificate to close that gap.</string>
+    <string name="mgmtid_detail_refused">Management privilege is withheld. The package is hidden rather than exempted, and applying policy is reported as unverified until the installed signer matches an approved certificate or the approved list is corrected.</string>
+    <string name="mgmtid_detail_not_installed">A certificate approved now takes effect the moment this package is installed.</string>
+
+    <!-- Actions -->
+    <string name="mgmtid_action_pin_installed">Approve the certificate installed now</string>
+    <string name="mgmtid_action_add_manual">Add a digest supplied out of band</string>
+    <string name="mgmtid_action_remove">Remove</string>
+    <string name="mgmtid_pin_unavailable_absent">There is no installed signing certificate to approve, because the package is not on this device.</string>
+    <string name="mgmtid_pin_unavailable_no_signer">There is no readable signing certificate on this device to approve.</string>
+    <string name="mgmtid_pin_unavailable_already">Every signing certificate this device reported is already approved.</string>
+
+    <!-- Confirmation -->
+    <string name="mgmtid_confirm_pin_title">Approve the installed certificate?</string>
+    <string name="mgmtid_confirm_pin_body">%1$s will be approved by the signing certificate installed on this device right now. Confirm only if you know this device is clean: a certificate taken from a compromised device approves the compromise.</string>
+    <string name="mgmtid_confirm_remove_title">Remove this approved certificate?</string>
+    <string name="mgmtid_confirm_remove_body">If no approved certificate is left, this package goes back to being trusted by its name alone. If another certificate stays approved and the installed signer does not match it, management privilege is withheld at the next apply.</string>
+    <string name="mgmtid_confirm_action">Confirm</string>
+
+    <!-- Manual entry -->
+    <string name="mgmtid_manual_title">Add an approved certificate</string>
+    <string name="mgmtid_manual_body">Paste the SHA-256 digest of the release signing certificate as the vendor published it. Colons and spaces are accepted, and upper case is accepted.</string>
+    <string name="mgmtid_manual_field">SHA-256 digest</string>
+    <string name="mgmtid_manual_normalized">This is what will be stored:</string>
+    <string name="mgmtid_manual_save">Add</string>
+    <string name="mgmtid_error_empty">Enter a digest.</string>
+    <string name="mgmtid_error_not_hex">A SHA-256 digest contains only the digits 0-9 and the letters a-f.</string>
+    <string name="mgmtid_error_length">A SHA-256 digest is exactly 64 hexadecimal characters. This one has %1$d.</string>
+    <string name="mgmtid_error_already_pinned">This certificate is already approved for this package.</string>
+
+    <!-- Results -->
+    <string name="mgmtid_result_pinned">The certificate was approved. Identity: %1$s</string>
+    <string name="mgmtid_result_removed">The certificate was removed. Identity: %1$s</string>
+    <string name="mgmtid_result_write_failed">This device did not save the change: %1$s</string>
+    <string name="mgmtid_error_auth">The administrator session expired. Enter the PIN again to change management identity.</string>
+
+    <!-- Audit. Package name and verdict only: no digest, no PIN, no recovery code. -->
+    <string name="mgmtid_audit_pin_added">Management certificate approved: %1$s — identity now %2$s</string>
+    <string name="mgmtid_audit_pin_removed">Management certificate removed: %1$s — identity now %2$s</string>
+    <string name="mgmtid_audit_refused">Management package refused: %1$s — %2$s</string>
+</resources>

@@ -43,7 +43,7 @@ jobs:
           python3 tools/verify_pilot_apk.py \
             --apk app/build/outputs/apk/release/app-release.apk \
             --expected-package com.example.lockdowndpc \
-            --expected-version-code 10 --expected-version-name 0.5.1 \
+            --expected-version-code 11 --expected-version-name 0.5.2 \
             --require-single-signer \
             --expect-channel-disabled
 

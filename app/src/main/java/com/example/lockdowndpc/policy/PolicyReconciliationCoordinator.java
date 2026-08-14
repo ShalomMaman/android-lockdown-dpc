@@ -25,6 +25,20 @@ public final class PolicyReconciliationCoordinator {
     private PolicyReconciliationCoordinator() {}
 
     /**
+     * Runs policy work on the one thread that is allowed to drive
+     * {@code DevicePolicyManager}.
+     *
+     * <p>Exposed so maintenance-mode passes queue behind reconciliation instead
+     * of racing it. Two threads writing the same user restrictions is how a
+     * device ends up in a state neither of them believes it is in: a restore that
+     * interleaves with a reconciliation pass could read back the other's write
+     * and report a verified result for a policy it did not apply.
+     */
+    public static void runOnPolicyThread(Runnable work) {
+        EXECUTOR.execute(work);
+    }
+
+    /**
      * Re-applies the complete policy when protection has been requested.
      *
      * <p>A complete inventory pass is intentional: package broadcasts can be
@@ -61,6 +75,16 @@ public final class PolicyReconciliationCoordinator {
                 () -> {
                     LockdownPolicyController.PolicyResult result =
                             LockdownPolicyController.apply(appContext);
+                    // Recorded, not just logged: an unattended pass is the only
+                    // evidence a device has that it is still enforcing what it
+                    // was told to, and the health report reads it back.
+                    ReconciliationRecord.record(
+                            appContext,
+                            result.applied()
+                                    ? ReconciliationRecord.Outcome.VERIFIED
+                                    : ReconciliationRecord.Outcome.FAILED,
+                            reason,
+                            result.applied() ? "" : summarize(result));
                     if (result.applied()) {
                         Log.i(TAG, "Reconciliation verified: " + reason);
                     } else {
@@ -71,12 +95,22 @@ public final class PolicyReconciliationCoordinator {
                 exception -> {
                     String message = "Reconciliation crashed (" + reason + "): "
                             + exception.getClass().getSimpleName();
+                    ReconciliationRecord.record(
+                            appContext,
+                            ReconciliationRecord.Outcome.CRASHED,
+                            reason,
+                            exception.getClass().getSimpleName());
                     AllowedAppsStore.markApplyFailed(appContext, message);
                     AuditLog.append(appContext, message);
                     Log.e(TAG, message, exception);
                 },
                 completion
         ));
+    }
+
+    /** The failure summary, as machine tokens rather than prose. */
+    private static String summarize(LockdownPolicyController.PolicyResult result) {
+        return String.join(",", result.errors());
     }
 
     /**

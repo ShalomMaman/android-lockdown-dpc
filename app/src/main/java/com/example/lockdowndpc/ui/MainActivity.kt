@@ -25,7 +25,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.MonitorHeart
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
@@ -33,9 +35,11 @@ import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Rule
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.SystemUpdateAlt
+import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
@@ -127,6 +131,21 @@ class MainActivity : AppCompatActivity() {
                     onSecureScreen = ::setSecureScreen,
                     onOpenAppList = {
                         startActivity(Intent(this, AllowedAppsActivity::class.java))
+                    },
+                    // Every one of these screens refuses to draw without a live
+                    // administrator session of its own, so the session check here
+                    // is the first of two rather than the only one.
+                    onOpenSystemPolicy = {
+                        startActivity(Intent(this, SystemPolicyActivity::class.java))
+                    },
+                    onOpenMaintenance = {
+                        startActivity(Intent(this, MaintenanceActivity::class.java))
+                    },
+                    onOpenManagementIdentity = {
+                        startActivity(Intent(this, ManagementIdentityActivity::class.java))
+                    },
+                    onOpenHealth = {
+                        startActivity(Intent(this, DeviceHealthActivity::class.java))
                     },
                 )
             }
@@ -236,6 +255,10 @@ private fun lockoutText(context: Context, remainingMillis: Long): String {
 private fun AdminConsole(
     onSecureScreen: (Boolean) -> Unit,
     onOpenAppList: () -> Unit,
+    onOpenSystemPolicy: () -> Unit,
+    onOpenMaintenance: () -> Unit,
+    onOpenManagementIdentity: () -> Unit,
+    onOpenHealth: () -> Unit,
 ) {
     val context = LocalContext.current
     var screen by remember { mutableStateOf(initialScreen(context)) }
@@ -592,6 +615,30 @@ private fun AdminConsole(
                     onOpenAppList()
                 }
             },
+            onOpenSystemPolicy = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    onOpenSystemPolicy()
+                }
+            },
+            onOpenMaintenance = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    onOpenMaintenance()
+                }
+            },
+            onOpenManagementIdentity = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    onOpenManagementIdentity()
+                }
+            },
+            onOpenHealth = {
+                if (requireSession()) {
+                    AdminSession.extend()
+                    onOpenHealth()
+                }
+            },
             onChangePin = {
                 if (requireSession()) {
                     replacingPin = true
@@ -916,6 +963,10 @@ private fun AdminScreen(
     onOpenManagement: () -> Unit,
     onPickMode: () -> Unit,
     onChooseApps: () -> Unit,
+    onOpenSystemPolicy: () -> Unit,
+    onOpenMaintenance: () -> Unit,
+    onOpenManagementIdentity: () -> Unit,
+    onOpenHealth: () -> Unit,
     onChangePin: () -> Unit,
     onNewRecoveryCode: () -> Unit,
     onOpenAuditLog: () -> Unit,
@@ -973,6 +1024,20 @@ private fun AdminScreen(
                 ),
                 supporting = stringResource(R.string.admin_choose_supporting),
                 onClick = onChooseApps,
+                showDivider = true,
+            )
+            ActionRow(
+                icon = Icons.Rounded.Rule,
+                title = stringResource(R.string.admin_system_policy_row),
+                supporting = stringResource(R.string.admin_system_policy_supporting),
+                onClick = onOpenSystemPolicy,
+                showDivider = true,
+            )
+            ActionRow(
+                icon = Icons.Rounded.Build,
+                title = stringResource(R.string.maint_admin_row),
+                supporting = stringResource(R.string.maint_admin_supporting),
+                onClick = onOpenMaintenance,
                 showDivider = true,
             )
             if (status.protectionEnabled) {
@@ -1070,14 +1135,28 @@ private fun AdminScreen(
                 onClick = onOpenManagement,
                 showDivider = true,
             )
+            ActionRow(
+                icon = Icons.Rounded.VerifiedUser,
+                title = stringResource(R.string.mgmtid_admin_row),
+                supporting = stringResource(R.string.mgmtid_admin_supporting),
+                onClick = onOpenManagementIdentity,
+                showDivider = true,
+            )
         }
 
         Spacer(Modifier.height(20.dp))
         SectionCard(title = stringResource(R.string.admin_section_records)) {
             ActionRow(
+                icon = Icons.Rounded.MonitorHeart,
+                title = stringResource(R.string.health_row_title),
+                supporting = stringResource(R.string.health_row_supporting),
+                onClick = onOpenHealth,
+            )
+            ActionRow(
                 icon = Icons.Rounded.History,
                 title = stringResource(R.string.admin_audit),
                 onClick = onOpenAuditLog,
+                showDivider = true,
             )
             ActionRow(
                 icon = Icons.Rounded.Lock,

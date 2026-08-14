@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew translation of the device health report (Issue #24).
+
+    The folder qualifier is "iw" for the same reason as strings.xml: Android
+    resolves resource folders against java.util.Locale#getLanguage(), which
+    still reports the legacy Hebrew code.
+
+    Latin runs inside a Hebrew sentence (Android, Device Owner) are wrapped in
+    U+2066 LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE so the bidi
+    algorithm cannot drag the surrounding punctuation to the wrong side.
+    Runtime values — timestamps, versions, origins, package names — are
+    isolated in code instead; see ui/UiLogic.kt.
+
+    Keys and format placeholders are kept in parity with
+    res/values/device_health_strings.xml by DeviceHealthStringsParityTest.java.
+-->
+<resources>
+
+    <!-- Screen frame -->
+    <string name="health_title">בריאות המכשיר</string>
+    <string name="health_generated_at">הופק במכשיר הזה ב־%1$s</string>
+    <string name="health_local_only">הדוח הזה מורכב במכשיר עצמו. מגן המכשיר אינו אוסף נתוני שימוש, אין לו שרת ניתוח נתונים, והוא אינו שולח דבר לשום מקום מיוזמתו. ייצוא נכתב רק כאשר מנהל מבקש זאת.</string>
+    <string name="health_status_headline">%1$s — %2$s</string>
+    <string name="health_line">%1$s: %2$s</string>
+    <string name="health_finding_line">%1$s — %2$s</string>
+
+    <!-- Sections -->
+    <string name="health_section_findings">מה המכשיר הזה מדווח</string>
+    <string name="health_section_policy">מדיניות</string>
+    <string name="health_section_kiosk">קיוסק</string>
+    <string name="health_section_updates">עדכונים</string>
+    <string name="health_section_management">זהות הניהול</string>
+    <string name="health_section_reconciliation">ההתאמה האחרונה</string>
+    <string name="health_section_platform">פלטפורמה</string>
+
+    <!-- Overall status -->
+    <string name="health_status_healthy">תקין</string>
+    <string name="health_status_healthy_body">כל עובדה בדוח הזה נקראה בחזרה מהפלטפורמה, ואף אחת מהן אינה בעיה.</string>
+    <string name="health_status_degraded">פגום חלקית</string>
+    <string name="health_status_degraded_body">המכשיר פועל, אבל יש בו משהו שדורש טיפול.</string>
+    <string name="health_status_unverified">לא מאומת</string>
+    <string name="health_status_unverified_body">משהו במכשיר הזה לא הוכח. מכשיר לא מוכח לעולם אינו מדווח כתקין, בין אם באמת יש בו תקלה ובין אם לא.</string>
+    <string name="health_status_failed">בתקלה</string>
+    <string name="health_status_failed_body">משהו שמנהל ביקש אינו נאכף במכשיר הזה.</string>
+
+    <!-- Finding severity -->
+    <string name="health_severity_info">נרשם</string>
+    <string name="health_severity_advisory">דורש טיפול</string>
+    <string name="health_severity_unverified">לא הוכח</string>
+    <string name="health_severity_critical">תקלה</string>
+
+    <!-- Field labels -->
+    <string name="health_field_device_owner">בעלות על המכשיר (⁦Device Owner⁩)</string>
+    <string name="health_field_verification">אימות המדיניות</string>
+    <string name="health_field_last_verified">אומת לאחרונה</string>
+    <string name="health_field_blocked">אפליקציות חסומות</string>
+    <string name="health_field_allowed">אפליקציות מותרות</string>
+    <string name="health_field_system_controls">בקרות מערכת</string>
+    <string name="health_field_kiosk_state">מצב הקיוסק</string>
+    <string name="health_field_kiosk_profile">פרופיל הקיוסק</string>
+    <string name="health_field_kiosk_target">אפליקציית הקיוסק</string>
+    <string name="health_field_kiosk_origin">מקור הקיוסק</string>
+    <string name="health_field_update_channel">ערוץ העדכונים</string>
+    <string name="health_field_update_state">מצב העדכון</string>
+    <string name="health_field_last_check">בדיקת העדכון האחרונה</string>
+    <string name="health_field_installed_version">הגרסה המותקנת</string>
+    <string name="health_field_reconciliation">תוצאה</string>
+    <string name="health_field_reconciliation_at">מתי</string>
+    <string name="health_field_android_release">גרסת ⁦Android⁩</string>
+    <string name="health_field_build_fingerprint">גרסת הקושחה</string>
+    <string name="health_field_app_version">גרסת מגן המכשיר</string>
+
+    <!-- Shared values -->
+    <string name="health_value_never">מעולם לא</string>
+    <string name="health_value_unknown">לא ניתן לקריאה</string>
+    <string name="health_value_none">לא הוגדרה אפליקציית ניהול</string>
+    <string name="health_value_enabled">מוגדר</string>
+    <string name="health_value_disabled">לא מוגדר</string>
+    <string name="health_value_system_controls">%1$d התבקשו, %2$d הוחלו, %3$d בתקלה, %4$d בהתראה, %5$d אינם זמינים בגרסת ⁦Android⁩ הזאת</string>
+
+    <!-- Ownership -->
+    <string name="health_ownership_device_owner">מגן המכשיר הוא ⁦Device Owner⁩</string>
+    <string name="health_ownership_not_device_owner">מגן המכשיר אינו ⁦Device Owner⁩</string>
+    <string name="health_ownership_unknown">לא ניתן היה לקרוא את הבעלות</string>
+
+    <!-- Policy verification -->
+    <string name="health_policy_verification_not_requested">ההגנה כבויה</string>
+    <string name="health_policy_verification_requested_not_verified">התבקשה, עדיין לא אומתה</string>
+    <string name="health_policy_verification_verified">אומתה מול הפלטפורמה</string>
+    <string name="health_policy_verification_failed">הפלטפורמה לא הסכימה</string>
+    <string name="health_policy_verification_unknown">לא ניתן לקריאה</string>
+
+    <!-- Kiosk state -->
+    <string name="health_kiosk_state_off">כבוי</string>
+    <string name="health_kiosk_state_armed">מוגדר, לא נעול</string>
+    <string name="health_kiosk_state_active">נעול</string>
+    <string name="health_kiosk_state_fault">בתקלה</string>
+    <string name="health_kiosk_state_unknown">לא ניתן לקריאה</string>
+
+    <!-- Kiosk profile -->
+    <string name="health_kiosk_profile_none">אין</string>
+    <string name="health_kiosk_profile_single_app">אפליקציה יחידה</string>
+    <string name="health_kiosk_profile_single_site">אתר יחיד</string>
+
+    <!-- Update state -->
+    <string name="health_update_state_not_configured">אין ערוץ עדכונים</string>
+    <string name="health_update_state_never_checked">מעולם לא נבדק</string>
+    <string name="health_update_state_up_to_date">מעודכן</string>
+    <string name="health_update_state_update_pending">ממתין עדכון</string>
+    <string name="health_update_state_in_progress">עדכון פועל כעת</string>
+    <string name="health_update_state_failed">הניסיון האחרון נכשל</string>
+    <string name="health_update_state_unknown">לא ניתן לקריאה</string>
+
+    <!-- Management identity -->
+    <string name="health_identity_pinned_match">החתימה נעוצה ותואמת</string>
+    <string name="health_identity_pinned_mismatch">החתימה אינה תואמת לטביעת האצבע הנעוצה</string>
+    <string name="health_identity_unpinned">אמון על סמך מזהה החבילה בלבד</string>
+    <string name="health_identity_unknown_signer">לא ניתן היה לקרוא חתימה</string>
+    <string name="health_identity_not_installed">לא מותקנת</string>
+
+    <!-- Reconciliation outcome -->
+    <string name="health_reconciliation_never_run">מעולם לא רצה</string>
+    <string name="health_reconciliation_verified">אומתה</string>
+    <string name="health_reconciliation_failed">נכשלה</string>
+    <string name="health_reconciliation_crashed">קרסה</string>
+    <string name="health_reconciliation_unknown">לא ניתן לקריאה</string>
+
+    <!-- Findings -->
+    <string name="health_finding_snapshot_unavailable">לא ניתן היה לקרוא את מצב המכשיר הזה, ולכן אי אפשר לדווח על שום דבר בו כתקין.</string>
+    <string name="health_finding_device_owner_missing">מגן המכשיר אינו ⁦Device Owner⁩ של המכשיר הזה, ולכן אי אפשר לאכוף שום מדיניות.</string>
+    <string name="health_finding_device_owner_unknown">מגן המכשיר לא הצליח לקרוא אם הוא עדיין ⁦Device Owner⁩ של המכשיר הזה.</string>
+    <string name="health_finding_policy_verification_failed">מעבר המדיניות האחרון קרא בחזרה את הפלטפורמה ולא הסכים איתה.</string>
+    <string name="health_finding_policy_verification_unknown">לא ניתן היה לקרוא את מצב המדיניות השמור.</string>
+    <string name="health_finding_policy_never_verified">ההגנה דלוקה, אבל אף מעבר לא קרא בחזרה את הפלטפורמה כדי לאשר זאת.</string>
+    <string name="health_finding_policy_not_requested">ההגנה כבויה. שום דבר אינו נאכף במכשיר הזה.</string>
+    <string name="health_finding_policy_verification_stale">מעבר המדיניות המאומת האחרון ישן דיו כדי שלא יתאר עוד את המכשיר הזה.</string>
+    <string name="health_finding_policy_verified">המדיניות הוחלה ונקראה בחזרה מהפלטפורמה.</string>
+    <string name="health_finding_system_control_faulted">בקרת מערכת קריטית שמנהל ביקש אינה נאכפת.</string>
+    <string name="health_finding_system_control_advisory_failed">בקרת מערכת נדחתה. היא ברמת התראה, ולכן אינה מכשילה את ההגנה.</string>
+    <string name="health_finding_system_control_unsupported">גרסת ⁦Android⁩ הזאת אינה מממשת את כל הבקרות שהתבקשו. מכשיר ישן אינו מכשיר תקול.</string>
+    <string name="health_finding_management_identity_rejected">אפליקציית ניהול מוגדרת נכשלה באימות החתימה ולא קיבלה שום הרשאת ניהול.</string>
+    <string name="health_finding_management_identity_unproven">אפליקציית ניהול זוכה לאמון על סמך מזהה החבילה שלה בלבד, בלי חתימה נעוצה. האמון הזה אינו מוכח.</string>
+    <string name="health_finding_management_identity_missing">אפליקציית ניהול מוגדרת אינה מותקנת, ולכן ייתכן שאין גישה מרחוק למכשיר הזה.</string>
+    <string name="health_finding_management_identity_verified">כל אפליקציות הניהול המוגדרות תואמות לחתימה הנעוצה שלהן.</string>
+    <string name="health_finding_management_not_configured">לא הוגדרה אפליקציית ניהול במכשיר הזה.</string>
+    <string name="health_finding_reconciliation_crashed">מעבר ההתאמה האחרון קרס.</string>
+    <string name="health_finding_reconciliation_failed">מעבר ההתאמה האחרון לא אומת.</string>
+    <string name="health_finding_reconciliation_unknown">לא ניתן היה לקרוא את תוצאת מעבר ההתאמה האחרון.</string>
+    <string name="health_finding_reconciliation_never_run">אף מעבר התאמה לא רץ במכשיר הזה.</string>
+    <string name="health_finding_reconciliation_verified">מעבר ההתאמה האחרון אימת את המדיניות המלאה.</string>
+    <string name="health_finding_kiosk_faulted">הקיוסק היה פעיל אבל אי אפשר לקיים אותו במכשיר הזה.</string>
+    <string name="health_finding_kiosk_target_unresolved">יעד הקיוסק המוגדר אינו נפתר במכשיר הזה.</string>
+    <string name="health_finding_kiosk_state_unknown">לא ניתן היה לקרוא את מצב הקיוסק.</string>
+    <string name="health_finding_kiosk_armed_not_active">פרופיל קיוסק מוגדר, אבל המכשיר אינו נעול אליו.</string>
+    <string name="health_finding_kiosk_active">המכשיר נעול לפרופיל הקיוסק שלו.</string>
+    <string name="health_finding_kiosk_off">לא הוגדר פרופיל קיוסק.</string>
+    <string name="health_finding_update_channel_disabled">לא הוגדר ערוץ עדכונים, ולכן אי אפשר לשלוח למכשיר הזה תיקון.</string>
+    <string name="health_finding_update_state_unknown">לא ניתן היה לקרוא את מצב העדכון.</string>
+    <string name="health_finding_update_never_checked">ערוץ העדכונים מעולם לא נבדק.</string>
+    <string name="health_finding_update_failed">ניסיון העדכון האחרון נכשל.</string>
+    <string name="health_finding_update_check_stale">בדיקת העדכון האחרונה ישנה.</string>
+    <string name="health_finding_update_pending">קיים עדכון זמין שלא הותקן.</string>
+    <string name="health_finding_update_in_progress">עדכון פועל כעת.</string>
+    <string name="health_finding_update_current">הגרסה המותקנת היא הגרסה הנוכחית.</string>
+    <string name="health_finding_platform_not_readable">לא ניתן היה לקרוא את גרסת ⁦Android⁩ או את גרסת הקושחה של המכשיר הזה.</string>
+
+    <!-- Console entry and export -->
+    <string name="health_finding_maintenance_break_glass_open">חלון תחזוקה חרום פתוח: אפשרויות מפתח ו-⁦ADB⁩ זמינים במכשיר הזה כרגע, במכוון.</string>
+    <string name="health_finding_maintenance_open">חלון תחזוקה פתוח, ולכן הגבלות נבחרות מוסרות במכוון עד לסגירתו.</string>
+    <string name="health_finding_maintenance_restore_owed">חלון תחזוקה נסגר בלי שחזור מאומת. ייתכן שהמכשיר עדיין נשאר עם הגבלות שהוסרו.</string>
+    <string name="health_finding_maintenance_unknown">לא ניתן לקרוא את רשומת התחזוקה, ולכן לא ידוע אם הגבלות מוסרות כרגע.</string>
+    <string name="health_row_title">בריאות המכשיר</string>
+    <string name="health_row_supporting">מדיניות, קיוסק, עדכונים וזהות ניהול בתשובה אחת</string>
+    <string name="health_export_action">העתקת ייצוא מצונזר</string>
+    <string name="health_export_title">להעתיק את הדוח הזה?</string>
+    <string name="health_export_body">הייצוא משמיט את קוד המנהל, את קוד השחזור, את כתובת הקיוסק מעבר למקור שלה, את רשימת האפליקציות המותקנות וכל טקסט חופשי. הוא מונח בלוח ההעתקה של המכשיר הזה ולא בשום מקום אחר. מגן המכשיר אינו שולח אותו לשום מקום.</string>
+    <string name="health_export_confirm">העתקה</string>
+    <string name="health_export_cancel">ביטול</string>
+    <string name="health_export_copied">הדוח המצונזר הועתק ללוח ההעתקה</string>
+    <string name="health_close">סגירה</string>
+    <string name="health_audit_exported">דוח בריאות מכשיר יוצא</string>
+
+</resources>

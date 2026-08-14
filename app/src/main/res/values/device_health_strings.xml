@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Privacy-preserving device health (Issue #24).
+
+    Kept in its own file rather than appended to strings.xml so the health report
+    owns its vocabulary. Android merges every values/*.xml into one resource
+    table, so keys must still be globally unique; they all carry the `health_`
+    prefix for that reason.
+
+    Every key here must also exist in res/values-iw/device_health_strings.xml.
+    DeviceHealthStringsParityTest.java enforces that, including format
+    placeholders, and it also ties this file to the enums in
+    DeviceHealthAssessor and DeviceHealthSnapshot: a finding, a status, a
+    severity or a state added in code without a sentence here fails the build.
+-->
+<resources>
+
+    <!-- Screen frame -->
+    <string name="health_title">Device health</string>
+    <string name="health_generated_at">Built on this device at %1$s</string>
+    <string name="health_local_only">This report is assembled on the device. Device Guard collects no telemetry, has no analytics endpoint, and sends nothing anywhere on its own. An export is written only when an administrator asks for one.</string>
+    <string name="health_status_headline">%1$s — %2$s</string>
+    <string name="health_line">%1$s: %2$s</string>
+    <string name="health_finding_line">%1$s — %2$s</string>
+
+    <!-- Sections -->
+    <string name="health_section_findings">What this device reports</string>
+    <string name="health_section_policy">Policy</string>
+    <string name="health_section_kiosk">Kiosk</string>
+    <string name="health_section_updates">Updates</string>
+    <string name="health_section_management">Management identity</string>
+    <string name="health_section_reconciliation">Last reconciliation</string>
+    <string name="health_section_platform">Platform</string>
+
+    <!-- Overall status -->
+    <string name="health_status_healthy">Healthy</string>
+    <string name="health_status_healthy_body">Every fact in this report was read back from the platform, and none of them is a problem.</string>
+    <string name="health_status_degraded">Degraded</string>
+    <string name="health_status_degraded_body">This device is working, but something on it needs attention.</string>
+    <string name="health_status_unverified">Unverified</string>
+    <string name="health_status_unverified_body">Something about this device has not been proven. An unproven device is never reported as healthy, whether or not anything is actually wrong with it.</string>
+    <string name="health_status_failed">Faulted</string>
+    <string name="health_status_failed_body">Something an administrator asked for is not in force on this device.</string>
+
+    <!-- Finding severity -->
+    <string name="health_severity_info">Recorded</string>
+    <string name="health_severity_advisory">Needs attention</string>
+    <string name="health_severity_unverified">Not proven</string>
+    <string name="health_severity_critical">Fault</string>
+
+    <!-- Field labels -->
+    <string name="health_field_device_owner">Device Owner</string>
+    <string name="health_field_verification">Policy verification</string>
+    <string name="health_field_last_verified">Last verified</string>
+    <string name="health_field_blocked">Blocked applications</string>
+    <string name="health_field_allowed">Allowed applications</string>
+    <string name="health_field_system_controls">System controls</string>
+    <string name="health_field_kiosk_state">Kiosk state</string>
+    <string name="health_field_kiosk_profile">Kiosk profile</string>
+    <string name="health_field_kiosk_target">Kiosk application</string>
+    <string name="health_field_kiosk_origin">Kiosk origin</string>
+    <string name="health_field_update_channel">Update channel</string>
+    <string name="health_field_update_state">Update state</string>
+    <string name="health_field_last_check">Last update check</string>
+    <string name="health_field_installed_version">Installed version</string>
+    <string name="health_field_reconciliation">Result</string>
+    <string name="health_field_reconciliation_at">When</string>
+    <string name="health_field_android_release">Android release</string>
+    <string name="health_field_build_fingerprint">Firmware build</string>
+    <string name="health_field_app_version">Device Guard version</string>
+
+    <!-- Shared values -->
+    <string name="health_value_never">Never</string>
+    <string name="health_value_unknown">Not readable</string>
+    <string name="health_value_none">No management application is configured</string>
+    <string name="health_value_enabled">Configured</string>
+    <string name="health_value_disabled">Not configured</string>
+    <string name="health_value_system_controls">%1$d requested, %2$d applied, %3$d faulted, %4$d advisory, %5$d not available on this Android release</string>
+
+    <!-- Ownership -->
+    <string name="health_ownership_device_owner">Device Guard is the Device Owner</string>
+    <string name="health_ownership_not_device_owner">Device Guard is not the Device Owner</string>
+    <string name="health_ownership_unknown">Ownership could not be read</string>
+
+    <!-- Policy verification -->
+    <string name="health_policy_verification_not_requested">Protection is off</string>
+    <string name="health_policy_verification_requested_not_verified">Requested, not verified yet</string>
+    <string name="health_policy_verification_verified">Verified against the platform</string>
+    <string name="health_policy_verification_failed">The platform disagreed</string>
+    <string name="health_policy_verification_unknown">Not readable</string>
+
+    <!-- Kiosk state -->
+    <string name="health_kiosk_state_off">Off</string>
+    <string name="health_kiosk_state_armed">Configured, not locked</string>
+    <string name="health_kiosk_state_active">Locked</string>
+    <string name="health_kiosk_state_fault">Faulted</string>
+    <string name="health_kiosk_state_unknown">Not readable</string>
+
+    <!-- Kiosk profile -->
+    <string name="health_kiosk_profile_none">None</string>
+    <string name="health_kiosk_profile_single_app">Single application</string>
+    <string name="health_kiosk_profile_single_site">Single site</string>
+
+    <!-- Update state -->
+    <string name="health_update_state_not_configured">No update channel</string>
+    <string name="health_update_state_never_checked">Never checked</string>
+    <string name="health_update_state_up_to_date">Up to date</string>
+    <string name="health_update_state_update_pending">An update is waiting</string>
+    <string name="health_update_state_in_progress">An update is running</string>
+    <string name="health_update_state_failed">The last attempt failed</string>
+    <string name="health_update_state_unknown">Not readable</string>
+
+    <!-- Management identity -->
+    <string name="health_identity_pinned_match">Signer pinned and matched</string>
+    <string name="health_identity_pinned_mismatch">Signer does not match the pinned digest</string>
+    <string name="health_identity_unpinned">Trusted by package name only</string>
+    <string name="health_identity_unknown_signer">No signer could be read</string>
+    <string name="health_identity_not_installed">Not installed</string>
+
+    <!-- Reconciliation outcome -->
+    <string name="health_reconciliation_never_run">Never run</string>
+    <string name="health_reconciliation_verified">Verified</string>
+    <string name="health_reconciliation_failed">Failed</string>
+    <string name="health_reconciliation_crashed">Crashed</string>
+    <string name="health_reconciliation_unknown">Not readable</string>
+
+    <!-- Findings -->
+    <string name="health_finding_snapshot_unavailable">The state of this device could not be read, so nothing about it can be reported as healthy.</string>
+    <string name="health_finding_device_owner_missing">Device Guard is not the Device Owner of this device, so no policy can be enforced.</string>
+    <string name="health_finding_device_owner_unknown">Device Guard could not read whether it is still the Device Owner of this device.</string>
+    <string name="health_finding_policy_verification_failed">The last policy pass read the platform back and disagreed with it.</string>
+    <string name="health_finding_policy_verification_unknown">The stored policy state could not be read.</string>
+    <string name="health_finding_policy_never_verified">Protection is on, but no pass has read the platform back to confirm it.</string>
+    <string name="health_finding_policy_not_requested">Protection is off. Nothing is being enforced on this device.</string>
+    <string name="health_finding_policy_verification_stale">The last verified policy pass is old enough that it no longer describes this device.</string>
+    <string name="health_finding_policy_verified">The policy was applied and read back from the platform.</string>
+    <string name="health_finding_system_control_faulted">A critical system control the administrator asked for is not in force.</string>
+    <string name="health_finding_system_control_advisory_failed">A system control was refused. It is advisory, so it does not fault protection.</string>
+    <string name="health_finding_system_control_unsupported">This Android release does not implement every requested control. An older device is not a broken device.</string>
+    <string name="health_finding_management_identity_rejected">A configured management application failed signer verification and was given no management privilege.</string>
+    <string name="health_finding_management_identity_unproven">A management application is trusted by its package name alone, with no pinned signer. That trust is not proven.</string>
+    <string name="health_finding_management_identity_missing">A configured management application is not installed, so remote access to this device may not exist.</string>
+    <string name="health_finding_management_identity_verified">Every configured management application matched its pinned signer.</string>
+    <string name="health_finding_management_not_configured">No management application is configured on this device.</string>
+    <string name="health_finding_reconciliation_crashed">The last reconciliation pass crashed.</string>
+    <string name="health_finding_reconciliation_failed">The last reconciliation pass did not verify.</string>
+    <string name="health_finding_reconciliation_unknown">The result of the last reconciliation pass could not be read.</string>
+    <string name="health_finding_reconciliation_never_run">No reconciliation pass has run on this device.</string>
+    <string name="health_finding_reconciliation_verified">The last reconciliation pass verified the complete policy.</string>
+    <string name="health_finding_kiosk_faulted">Kiosk was active but cannot be honoured on this device.</string>
+    <string name="health_finding_kiosk_target_unresolved">The configured kiosk target does not resolve on this device.</string>
+    <string name="health_finding_kiosk_state_unknown">The kiosk state could not be read.</string>
+    <string name="health_finding_kiosk_armed_not_active">A kiosk profile is configured, but the device is not locked into it.</string>
+    <string name="health_finding_kiosk_active">The device is locked into its kiosk profile.</string>
+    <string name="health_finding_kiosk_off">No kiosk profile is configured.</string>
+    <string name="health_finding_update_channel_disabled">No update channel is configured, so this device cannot be sent a fix.</string>
+    <string name="health_finding_update_state_unknown">The update state could not be read.</string>
+    <string name="health_finding_update_never_checked">The update channel has never been checked.</string>
+    <string name="health_finding_update_failed">The last update attempt failed.</string>
+    <string name="health_finding_update_check_stale">The last update check is old.</string>
+    <string name="health_finding_update_pending">An update is available and has not been installed.</string>
+    <string name="health_finding_update_in_progress">An update is running.</string>
+    <string name="health_finding_update_current">The installed version is the current one.</string>
+    <string name="health_finding_platform_not_readable">The Android release or the firmware build of this device could not be read.</string>
+
+    <!-- Console entry and export -->
+    <string name="health_finding_maintenance_break_glass_open">A break-glass maintenance window is open: developer options and ADB are deliberately available on this device right now.</string>
+    <string name="health_finding_maintenance_open">A maintenance window is open, so selected restrictions are deliberately withdrawn until it closes.</string>
+    <string name="health_finding_maintenance_restore_owed">A maintenance window closed without a verified restore. This device may still be carrying withdrawn restrictions.</string>
+    <string name="health_finding_maintenance_unknown">The maintenance record could not be read, so it is not known whether restrictions are currently withdrawn.</string>
+    <string name="health_row_title">Device health</string>
+    <string name="health_row_supporting">Policy, kiosk, updates and management identity in one answer</string>
+    <string name="health_export_action">Copy a redacted export</string>
+    <string name="health_export_title">Copy this report?</string>
+    <string name="health_export_body">The export drops the administrator PIN, the recovery code, the kiosk address beyond its origin, the list of installed applications, and every free-text entry. It is placed on the clipboard of this device and nowhere else. Device Guard does not send it anywhere.</string>
+    <string name="health_export_confirm">Copy</string>
+    <string name="health_export_cancel">Cancel</string>
+    <string name="health_export_copied">The redacted report was copied to the clipboard</string>
+    <string name="health_close">Close</string>
+    <string name="health_audit_exported">A device health report was exported</string>
+
+</resources>

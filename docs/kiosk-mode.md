@@ -444,43 +444,50 @@ enabled kiosk on exactly the 0.4 code path, while guaranteeing one reconciliatio
 pass that restores those packages after kiosk is switched off. The flag is only
 cleared after a pass that completed without errors.
 
-### Deferred: an administrator UI for `ADMIN_SELECTED_SYSTEM`
+### An administrator UI for `ADMIN_SELECTED_SYSTEM`
 
-The planned product behavior and production acceptance criteria are now tracked
-in [`production-roadmap.md`](production-roadmap.md). The important current-state
-summary is unchanged: Pilot 0.5.1 does not display arbitrary system packages in
-the administrator application picker.
+The planned product behavior and production acceptance criteria are tracked in
+[`production-roadmap.md`](production-roadmap.md). As of 0.5.2 the administrator
+application picker **does** present system packages, behind explicit safety
+tiers, and `AllowedAppsStore.setAdminSelectedSystemPackages` is written by that
+screen rather than by nothing.
 
-`AllowedAppsStore.setAdminSelectedSystemPackages` exists, filters
-`ESSENTIAL_SYSTEM` on write, and is exercised by the policy engine. A console
-screen that writes it is nonetheless **deferred to a later release**, and 0.5
-ships no such screen.
-
-The backend guard is necessary but not sufficient. `ESSENTIAL_SYSTEM` is a
+The backend guard was always necessary but never sufficient, and the reasoning
+that deferred the screen is the reasoning that shaped it. `ESSENTIAL_SYSTEM` is a
 curated catalogue of packages we know must survive; it is not, and cannot be, an
-exhaustive list of every package a given OEM build needs. Handing an
-administrator a list of *all* system packages with checkboxes invites hiding a
-vendor launcher, a vendor telephony shim, or an OEM-specific settings provider
-that is absent from the catalogue — and the resulting device is not repairable
-from the console, which is the exact failure mode the conservative model exists
-to prevent. Until there is a way to establish which system packages are safe on a
-given build, the honest answer is to keep the model conservative rather than to
-ship a screen whose worst case is a bricked classroom device.
+exhaustive list of every package a given OEM build needs. So the inventory does
+not hand an administrator a flat list of all system packages with checkboxes.
+Protected core components are shown but are not selectable at all; reviewed
+system applications are selectable; an unclassified OEM component is visible for
+diagnosis and requires an explicit, recorded risk acceptance before it can be
+managed. The worst case the conservative model existed to prevent — hiding a
+vendor launcher, telephony shim or settings provider absent from the catalogue —
+is now a decision an administrator has to take deliberately and on the record,
+rather than one a checkbox makes easy.
 
-Operators who need a specific system app under allow/block control today can have
-the record written by a build that calls `setAdminSelectedSystemPackages`
-directly, with the risk accepted deliberately.
+What is still unproven is whether the tiers are correct on real OEM firmware.
+That is a hardware gate, not a code gate; see
+[`hardware-validation.md`](hardware-validation.md).
 
-### Management connectivity is presented, not configured
+### Management identity is configured in the console
 
-The console has one read-only **Management connectivity** view. It lists each
-`ManagementPackage` record and states its pin status in as many words:
-*signing certificate pinned*, *no certificate pinned — trusted by name only*, or
-*not installed on this device*. The shipped Tailscale default is unpinned, and
-the view says so rather than implying the package was authenticated. Writing
-pins remains `AllowedAppsStore.setManagementCertificatePins`; the console does
-not expose it, because a mistyped digest fails closed and hides the management
-transport. `AllowedAppsActivity` now reads the excluded management packages from
+As of 0.5.2 the console exposes `AllowedAppsStore.setManagementCertificatePins`
+through **Management identity**, behind an administrator session and a
+confirmation. The screen lists each `ManagementPackage` record with the signer
+the platform reports, the digests the administrator approved, and the resulting
+verdict in plain language: *identity proven*, *trusted by package name only —
+not proven*, or *refused*. An administrator can pin the installed signer, enter a
+digest supplied out of band, or remove a pin; anything that is not exactly 64
+hexadecimal characters after normalisation is rejected with a reason.
+
+The shipped Tailscale default is still unpinned, and both the screen and the
+older read-only **Management connectivity** view say so rather than implying the
+package was authenticated. Pinning what is currently installed only proves the
+device was clean when the pin was taken, and the screen states that before the
+action rather than after it. A mistyped digest still fails closed and withholds
+management privilege at the next apply, which is why the confirmation exists.
+
+`AllowedAppsActivity` reads the excluded management packages from
 `LockdownPackages.managementPackageNames()` instead of a package-name literal, so
 the app list, the policy engine and the kiosk target rules exclude the same set.
 

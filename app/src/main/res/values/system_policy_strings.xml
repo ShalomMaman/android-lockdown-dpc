@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    System policy controls (Issue #20). English is the default locale; every key
+    here must also exist in res/values-iw/system_policy_strings.xml.
+
+    The shared guards in LocaleParityTest.kt and tools/check_locale_parity.py only
+    read strings.xml, so this file is covered by its own focused guard:
+    app/src/test/java/com/example/lockdowndpc/policy/SystemPolicyLocaleParityTest.java
+
+    Consequence texts describe only what Android documents for the underlying
+    UserManager restriction. Where OEM behaviour varies the text says so rather
+    than promising an outcome Device Guard cannot verify.
+-->
+<resources>
+
+    <!-- Screen chrome -->
+    <string name="system_policy_title">System policy controls</string>
+    <string name="system_policy_subtitle">Each control is sent to Android and then read back. A switch records what you asked for; the line under it is what this device actually confirmed.</string>
+    <string name="admin_system_policy_row">System policy controls</string>
+    <string name="admin_system_policy_supporting">Debugging, installation, network and device restrictions</string>
+
+    <!-- Deployment profile -->
+    <string name="system_policy_profile_row">Deployment profile</string>
+    <string name="system_policy_profile_pilot">Pilot — debugging stays available unless you turn it off</string>
+    <string name="system_policy_profile_production">Production — debugging is off unless you turn it on</string>
+
+    <!-- Sections -->
+    <string name="system_policy_section_access">Debugging and device access</string>
+    <string name="system_policy_section_installs">Installation and applications</string>
+    <string name="system_policy_section_network">Network and connectivity</string>
+    <string name="system_policy_section_device">Device and users</string>
+
+    <!-- Verified status of one control -->
+    <string name="system_policy_status_applied">Verified in force</string>
+    <string name="system_policy_status_failed">Requested, but this device did not confirm it</string>
+    <string name="system_policy_status_unsupported">Not available on this Android version</string>
+    <string name="system_policy_status_requested">Saved — not verified yet</string>
+    <string name="system_policy_status_not_requested">Off</string>
+    <string name="system_policy_status_line">Status: %1$s</string>
+    <string name="system_policy_detail">Device response: %1$s</string>
+    <string name="system_policy_never_verified">No verification has run on this device yet.</string>
+
+    <!-- Applying -->
+    <string name="system_policy_apply">Apply and verify now</string>
+    <string name="system_policy_applying">Applying and verifying…</string>
+    <string name="system_policy_pending_note">Saved. Nothing changes on the device until you apply and verify.</string>
+    <string name="system_policy_paused_note">Protection is paused, so these choices are recorded but not enforced. They are applied when protection is activated again.</string>
+    <string name="system_policy_applied_ok">System policy was applied and verified on this device.</string>
+    <string name="system_policy_applied_failed">This device did not confirm every requested control: %1$s</string>
+    <string name="system_policy_error_auth">The administrator session expired. Enter the PIN again to change system policy.</string>
+
+    <!-- Confirmation -->
+    <string name="system_policy_confirm_enable_title">Turn this control on?</string>
+    <string name="system_policy_confirm_disable_title">Turn this control off?</string>
+    <string name="system_policy_confirm_disable_body">The restriction is withdrawn the next time policy is applied, and the capability becomes available to whoever is holding this device.</string>
+    <string name="system_policy_confirm_apply">Confirm</string>
+
+    <!-- Controls: developer options and ADB -->
+    <string name="system_policy_control_developer_options_and_adb_title">Developer options and USB debugging</string>
+    <string name="system_policy_control_developer_options_and_adb_consequence">Turns off developer options and ADB. USB debugging is the documented way to recover a device whose management app cannot be reached, so switching this on removes the current recovery path. Do not enable it before a signed update has been installed successfully on this hardware.</string>
+
+    <!-- Controls: USB file transfer -->
+    <string name="system_policy_control_usb_file_transfer_title">USB file transfer</string>
+    <string name="system_policy_control_usb_file_transfer_consequence">The device still charges over USB, but it cannot be mounted as storage, so files cannot be copied on or off with a cable.</string>
+
+    <!-- Controls: unknown sources -->
+    <string name="system_policy_control_unknown_source_installs_title">Installation from unknown sources</string>
+    <string name="system_policy_control_unknown_source_installs_consequence">Applications can no longer be installed from a file or from any source outside an approved installer. On Android 10 and later the block also covers other profiles on the device.</string>
+
+    <!-- Controls: stores and installers -->
+    <string name="system_policy_control_app_stores_and_installers_title">All package installation, including stores</string>
+    <string name="system_policy_control_app_stores_and_installers_consequence">Blocks every installer on the device. Android applies this to the management app as well, so Device Guard cannot install its own signed updates while this is on. Leave it off until updates are delivered another way.</string>
+
+    <!-- Controls: accounts -->
+    <string name="system_policy_control_account_modification_title">Adding and changing accounts</string>
+    <string name="system_policy_control_account_modification_consequence">No account can be added, removed or reconfigured in Settings, including an account an installed application needs in order to sign in.</string>
+
+    <!-- Controls: VPN -->
+    <string name="system_policy_control_vpn_configuration_title">VPN configuration</string>
+    <string name="system_policy_control_vpn_configuration_consequence">Whoever is using the device cannot create or edit a VPN. A VPN already configured by management keeps working.</string>
+
+    <!-- Controls: network reset -->
+    <string name="system_policy_control_network_reset_title">Network settings reset</string>
+    <string name="system_policy_control_network_reset_consequence">The Settings action that clears Wi-Fi, mobile data and Bluetooth settings at once becomes unavailable, so management connectivity cannot be dropped by accident.</string>
+
+    <!-- Controls: tethering -->
+    <string name="system_policy_control_tethering_title">Tethering and portable hotspot</string>
+    <string name="system_policy_control_tethering_consequence">The device cannot share its connection with other devices over Wi-Fi, USB or Bluetooth.</string>
+
+    <!-- Controls: Wi-Fi -->
+    <string name="system_policy_control_wifi_configuration_title">Wi-Fi network configuration</string>
+    <string name="system_policy_control_wifi_configuration_consequence">Whoever is using the device cannot add or change Wi-Fi networks. What a given manufacturer actually refuses varies, so this control is reported on its own and never marks protection as faulty by itself. If the device also loses the network it is managed over, only on-site access can restore it.</string>
+
+    <!-- Controls: private DNS -->
+    <string name="system_policy_control_private_dns_title">Private DNS</string>
+    <string name="system_policy_control_private_dns_consequence">The private DNS mode cannot be changed, so name resolution cannot be pointed at an unfiltered resolver. Requires Android 10 or later.</string>
+
+    <!-- Controls: date and time -->
+    <string name="system_policy_control_date_and_time_title">Date, time and time zone</string>
+    <string name="system_policy_control_date_and_time_consequence">The clock cannot be set by hand. Certificate checks and scheduled tasks depend on it. Requires Android 9 or later.</string>
+
+    <!-- Controls: safe boot -->
+    <string name="system_policy_control_safe_boot_title">Safe Boot</string>
+    <string name="system_policy_control_safe_boot_consequence">The device cannot be restarted into Safe Boot, which would otherwise start it with the management policy inactive.</string>
+
+    <!-- Controls: factory reset -->
+    <string name="system_policy_control_factory_reset_title">Factory reset from Settings</string>
+    <string name="system_policy_control_factory_reset_consequence">The reset action in Settings becomes unavailable. A reset started from the hardware recovery menu is outside what any management application can block.</string>
+
+    <!-- Controls: users and profiles -->
+    <string name="system_policy_control_user_and_profile_creation_title">Additional users and profiles</string>
+    <string name="system_policy_control_user_and_profile_creation_consequence">No new user or work profile can be created, and on Android 9 and later switching users is blocked as well. This prevents a second, unmanaged session on the same device.</string>
+
+    <!-- Controls: uninstall -->
+    <string name="system_policy_control_app_uninstall_title">Uninstalling applications</string>
+    <string name="system_policy_control_app_uninstall_consequence">Applications cannot be removed from the device by the person using it.</string>
+
+    <!-- Controls: application controls -->
+    <string name="system_policy_control_app_control_settings_title">Application controls in Settings</string>
+    <string name="system_policy_control_app_control_settings_consequence">Force stop, clear data and clear cache become unavailable in Settings, so a managed application cannot be neutralised by clearing its state.</string>
+
+    <!-- Audit -->
+    <string name="audit_system_policy_unverified">System policy not verified: %1$s</string>
+    <string name="audit_system_policy_changed">System policy control changed: %1$s</string>
+    <string name="audit_system_policy_applied">System policy controls were applied and verified</string>
+</resources>

@@ -13,7 +13,6 @@ import android.content.pm.SigningInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.SystemClock;
-import android.os.UserManager;
 import android.util.Log;
 import android.webkit.WebView;
 
@@ -23,6 +22,11 @@ import com.example.lockdowndpc.kiosk.KioskConfigStore;
 import com.example.lockdowndpc.kiosk.KioskAppCatalog;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
+import com.example.lockdowndpc.maintenance.MaintenanceGuard;
+import com.example.lockdowndpc.maintenance.MaintenancePlan;
+import com.example.lockdowndpc.maintenance.MaintenanceStateMachine;
+import com.example.lockdowndpc.maintenance.MaintenanceStore;
+import com.example.lockdowndpc.maintenance.MaintenanceWindow;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
 
 import java.security.MessageDigest;
@@ -31,6 +35,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public final class LockdownPolicyController {
@@ -49,7 +54,7 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
-        applyRestrictions(dpm, admin, errors);
+        applySystemPolicy(context, dpm, admin, errors);
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
@@ -85,7 +90,13 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
-        clearRestrictions(dpm, admin, errors);
+        // Maintenance is an exception to an enforced policy, so pausing ends it.
+        // The record is dropped before the restrictions are released rather than
+        // after: if this pass dies midway, the next maintenance refresh must not
+        // find a window and "restore" the base policy onto a device an
+        // administrator has just paused.
+        closeMaintenanceForPause(context);
+        releaseSystemPolicy(context, dpm, admin, errors);
         try {
             dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
         } catch (RuntimeException exception) {
@@ -158,84 +169,156 @@ public final class LockdownPolicyController {
         return new PolicyResult(true, verified, 0, visibleCount, errors);
     }
 
-    private static void applyRestrictions(
+    /**
+     * Applies the administrator's system policy controls and verifies each one.
+     *
+     * <p>This replaces the fixed restriction list 0.5.1 sent unconditionally.
+     * The set is not narrower: {@link SystemPolicyControl} defaults reproduce that
+     * list exactly for a device with no stored choices, so an upgraded pilot
+     * enforces what it enforced before — including keeping developer options and
+     * ADB available, which the pilot still uses as its recovery path.
+     *
+     * <p>Only a <em>critical</em> control the administrator actually asked for can
+     * add an error here, and an error is what makes {@code apply} report the
+     * policy as unverified and drives the console's fault state. An advisory
+     * refusal and a restriction this Android release does not implement are
+     * recorded and shown, but neither is allowed to brick a working device.
+     */
+    private static void applySystemPolicy(
+            Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
             List<String> errors
     ) {
-        safeRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES, errors);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            safeRestriction(dpm, admin, UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY, errors);
-            safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_PRIVATE_DNS, errors);
-        }
-        safeRestriction(dpm, admin, UserManager.DISALLOW_UNINSTALL_APPS, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_APPS_CONTROL, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_MODIFY_ACCOUNTS, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_ADD_USER, errors);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            safeRestriction(dpm, admin, UserManager.DISALLOW_USER_SWITCH, errors);
-            safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_DATE_TIME, errors);
-        }
-        safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_VPN, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_CONFIG_TETHERING, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_NETWORK_RESET, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_USB_FILE_TRANSFER, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_FACTORY_RESET, errors);
-        safeRestriction(dpm, admin, UserManager.DISALLOW_SAFE_BOOT, errors);
-    }
-
-    private static void clearRestrictions(
-            DevicePolicyManager dpm,
-            ComponentName admin,
-            List<String> errors
-    ) {
-        ArrayList<String> restrictions = new ArrayList<>(List.of(
-                UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES,
-                UserManager.DISALLOW_UNINSTALL_APPS,
-                UserManager.DISALLOW_APPS_CONTROL,
-                UserManager.DISALLOW_MODIFY_ACCOUNTS,
-                UserManager.DISALLOW_ADD_USER,
-                UserManager.DISALLOW_CONFIG_VPN,
-                UserManager.DISALLOW_CONFIG_TETHERING,
-                UserManager.DISALLOW_NETWORK_RESET,
-                UserManager.DISALLOW_USB_FILE_TRANSFER,
-                UserManager.DISALLOW_FACTORY_RESET,
-                UserManager.DISALLOW_SAFE_BOOT
-        ));
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            restrictions.add(UserManager.DISALLOW_USER_SWITCH);
-            restrictions.add(UserManager.DISALLOW_CONFIG_DATE_TIME);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            restrictions.add(UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES_GLOBALLY);
-            restrictions.add(UserManager.DISALLOW_CONFIG_PRIVATE_DNS);
-        }
-        for (String restriction : restrictions) {
-            try {
-                dpm.clearUserRestriction(admin, restriction);
-                if (dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                    errors.add("restriction-release-unverified:" + restriction);
-                }
-            } catch (RuntimeException exception) {
-                errors.add("restriction-release:" + restriction + ":" + exception.getClass().getSimpleName());
-            }
+        SystemPolicyProfile profile = SystemPolicyStore.effectiveProfile(context);
+        Map<SystemPolicyControl, Boolean> choices = effectiveChoicesFor(context, profile);
+        SystemPolicyReport report = SystemPolicyEnforcer.enforce(
+                Build.VERSION.SDK_INT,
+                profile,
+                choices,
+                new SystemPolicyDeviceGateway(dpm, admin)
+        );
+        recordSystemPolicy(context, report);
+        for (SystemPolicyControlStatus fault : report.faults()) {
+            errors.add("system-policy:" + fault.summary());
         }
     }
 
-    private static void safeRestriction(
-            DevicePolicyManager dpm,
-            ComponentName admin,
-            String restriction,
-            List<String> errors
+    /**
+     * The choices this pass should actually apply, maintenance included.
+     *
+     * <p>An apply is not the only thing that reaches this code: a reboot, a
+     * package install and a periodic sweep all reconcile the policy. Without this,
+     * any of them landing during an open maintenance window would silently
+     * re-assert the restrictions the window had cleared — the technician would be
+     * looking at a console that says a capability is open while the device had
+     * already taken it away again. So the window, when one is live, is part of
+     * what the base policy means.
+     *
+     * <p>A window that has lapsed is deliberately ignored here rather than
+     * closed: closing is {@code MaintenanceGuard}'s job, it has to be read back,
+     * and this pass re-applies the base policy anyway, which is the same device
+     * state a restore would produce.
+     */
+    private static Map<SystemPolicyControl, Boolean> effectiveChoicesFor(
+            Context context,
+            SystemPolicyProfile profile
     ) {
+        Map<SystemPolicyControl, Boolean> stored = SystemPolicyStore.explicitChoices(context);
+        MaintenanceWindow window = MaintenanceStore.readWindow(context);
+        if (window == null) {
+            return stored;
+        }
+        // The full liveness evaluation, not a bare expiry check. An expiry-only
+        // test reads a pre-reboot window as live — after a restart the monotonic
+        // clock is near zero, comfortably below the old deadline — so a boot-time
+        // reconcile would re-apply the window's relaxations and record the pass
+        // as verified. The state machine's reboot and clock checks are the same
+        // ones MaintenanceGuard closes the window with; this pass merely ignores
+        // a window the guard would not honour, and leaves the closing (which
+        // must be read back and audited) to the guard.
+        MaintenanceStateMachine.Evaluation evaluation =
+                MaintenanceStateMachine.evaluate(window, MaintenanceStore.deviceClock());
+        if (!evaluation.open()) {
+            return stored;
+        }
+        return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
+    }
+
+    /**
+     * Ends any maintenance window because protection is being paused.
+     *
+     * <p>No restore is performed and none is owed: {@code releaseSystemPolicy}
+     * withdraws every control a moment later, which is a superset of whatever the
+     * window had relaxed. Leaving the record in place is what would be unsafe —
+     * the maintenance timers would later fire on a paused device and re-assert
+     * restrictions the console says are off.
+     */
+    private static void closeMaintenanceForPause(Context context) {
         try {
-            dpm.addUserRestriction(admin, restriction);
-            if (!dpm.getUserRestrictions(admin).getBoolean(restriction)) {
-                errors.add("restriction-not-applied:" + restriction);
+            boolean hadWindow = MaintenanceStore.readWindow(context) != null
+                    || MaintenanceStore.restorePending(context);
+            MaintenanceStore.clearWindow(context);
+            MaintenanceStore.clearRestorePending(context);
+            MaintenanceGuard.arm(context, null);
+            if (hadWindow) {
+                AuditLog.append(context, "maintenance:closed-by-pause");
             }
         } catch (RuntimeException exception) {
-            errors.add(restriction + ": " + exception.getClass().getSimpleName());
+            // Pausing must not fail because the maintenance record misbehaved;
+            // the release below is what actually frees the device.
+            Log.e(TAG, "Could not clear the maintenance record while pausing", exception);
         }
+    }
+
+    /**
+     * Withdraws every system policy control for {@code pause}.
+     *
+     * <p>Pause keeps the stricter rule 0.5.1 used: any restriction that will not
+     * come off is a pause failure, advisory or not. A paused device that is still
+     * enforcing something is exactly the state an administrator is trying to
+     * leave, so it may not be reported as a clean pause.
+     */
+    private static void releaseSystemPolicy(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            List<String> errors
+    ) {
+        SystemPolicyReport report = SystemPolicyEnforcer.release(
+                Build.VERSION.SDK_INT,
+                new SystemPolicyDeviceGateway(dpm, admin)
+        );
+        recordSystemPolicy(context, report);
+        for (SystemPolicyControlStatus failure : report.failures()) {
+            errors.add("system-policy-release:" + failure.summary());
+        }
+    }
+
+    /**
+     * Audits what changed, then stores the pass as the console's evidence.
+     *
+     * <p>Only problems are audited, and only when the outcome differs from the
+     * one already on file. Reconciliation runs on every boot and every package
+     * change; appending a line per control per pass would evict the
+     * administrator actions the 50-entry log exists to keep.
+     */
+    private static void recordSystemPolicy(Context context, SystemPolicyReport report) {
+        for (SystemPolicyControlStatus status : report.statuses()) {
+            boolean problem = status.failed()
+                    || (status.requested()
+                        && status.outcome() == SystemPolicyOutcome.UNSUPPORTED);
+            if (!problem
+                    || SystemPolicyStore.lastOutcome(context, status.control())
+                        == status.outcome()) {
+                continue;
+            }
+            AuditLog.append(
+                    context,
+                    context.getString(R.string.audit_system_policy_unverified, status.summary())
+            );
+        }
+        SystemPolicyStore.saveReport(context, report);
     }
 
     private static void configureBlockedBrowser(
@@ -428,6 +511,66 @@ public final class LockdownPolicyController {
         }
     }
 
+    /**
+     * The opted-in system packages whose recorded risk acceptance still describes
+     * the binary that is installed.
+     *
+     * <p>A package whose signer or version has drifted is dropped from management
+     * rather than faulted: an OEM update is a normal event, and faulting
+     * protection on every firmware update would strand a fleet for something an
+     * administrator resolves in the console. The drop is audited so it is visible.
+     */
+    private static Set<String> revalidatedSystemSelection(Context context, PackageManager pm) {
+        Set<String> selected = AllowedAppsStore.getAdminSelectedSystemPackages(context);
+        if (selected.isEmpty()) {
+            return selected;
+        }
+        java.util.LinkedHashMap<String, SystemAppRiskAcceptance> acceptances =
+                new java.util.LinkedHashMap<>();
+        java.util.LinkedHashMap<String, SystemAppSelection.InstalledIdentity> installed =
+                new java.util.LinkedHashMap<>();
+        for (String packageName : selected) {
+            SystemAppRiskAcceptance acceptance =
+                    AllowedAppsStore.getSystemRiskAcceptance(context, packageName);
+            if (acceptance != null) {
+                acceptances.put(packageName, acceptance);
+            }
+            installed.put(packageName, observedIdentity(context, pm, packageName));
+        }
+        SystemAppSelection.Revalidation revalidation =
+                SystemAppSelection.revalidate(selected, acceptances, installed);
+        if (revalidation.anyRevoked()) {
+            Log.e(TAG, "System selections no longer match their acceptance: "
+                    + revalidation.revokedSummary());
+            AuditLog.append(
+                    context,
+                    "system-selection-revoked:" + revalidation.revokedSummary());
+        }
+        return revalidation.managed();
+    }
+
+    /** The signer digest and version of an installed package, as observed now. */
+    private static SystemAppSelection.InstalledIdentity observedIdentity(
+            Context context,
+            PackageManager pm,
+            String packageName
+    ) {
+        try {
+            if (!isInstalled(pm, packageName)) {
+                return SystemAppSelection.InstalledIdentity.unreadable();
+            }
+            // Both readings come from PackageIdentity, the same definition the
+            // console records the acceptance with. Computing either here in a
+            // second format is how every acceptance once became unsatisfiable
+            // and every opted-in package was silently revoked on each pass.
+            return new SystemAppSelection.InstalledIdentity(
+                    PackageIdentity.currentSignerSha256(pm, packageName),
+                    PackageIdentity.versionText(getPackageInfo(pm, packageName, 0)));
+        } catch (RuntimeException | PackageManager.NameNotFoundException exception) {
+            return SystemAppSelection.InstalledIdentity.unreadable();
+        }
+    }
+
     private static int[] applyPackagePolicy(
             Context context,
             DevicePolicyManager dpm,
@@ -438,7 +581,11 @@ public final class LockdownPolicyController {
         PackageManager pm = context.getPackageManager();
         Set<String> allowed = AllowedAppsStore.getAllowedPackages(context);
         Set<String> managed = AllowedAppsStore.getManagedPackages(context);
-        Set<String> adminSelectedSystem = AllowedAppsStore.getAdminSelectedSystemPackages(context);
+        // Re-checked against what is installed right now, never taken on trust
+        // from storage: an OEM update can replace the binary behind an accepted
+        // package name, and acting on the old acceptance would hide a component
+        // nobody reviewed during an automatic reconciliation pass.
+        Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);

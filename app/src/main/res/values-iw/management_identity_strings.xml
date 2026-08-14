@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Hebrew translation of the management identity console (Issue #27).
+
+    The folder qualifier is "iw" for the same reason as strings.xml: Android
+    resolves resource folders against java.util.Locale#getLanguage(), which still
+    reports the legacy Hebrew code.
+
+    Latin runs inside a Hebrew sentence (SHA-256, PIN) are wrapped in U+2066
+    LEFT-TO-RIGHT ISOLATE / U+2069 POP DIRECTIONAL ISOLATE so the bidi algorithm
+    cannot drag the surrounding punctuation to the wrong side. Runtime values —
+    package names, certificate digests, verdict names — are isolated in code
+    instead; see ui/UiLogic.kt.
+
+    Keys and format placeholders are kept in parity with
+    res/values/management_identity_strings.xml by
+    ManagementIdentityStringsParityTest.kt.
+-->
+<resources>
+
+    <!-- מסך -->
+    <string name="mgmtid_title">זהות אמצעי הניהול</string>
+    <string name="mgmtid_subtitle">מגן המכשיר פוטר את אמצעי הניהול מחסימה. המסך הזה מראה אם הפטור הזה נשען על אישור חתימה שנבדק, או רק על שם החבילה.</string>
+    <string name="mgmtid_admin_row">זהות אמצעי הניהול</string>
+    <string name="mgmtid_admin_supporting">הוכחת אמצעי הניהול באמצעות אישור החתימה שלו</string>
+    <string name="mgmtid_loading">קוראים את אישורי החתימה המותקנים…</string>
+    <string name="mgmtid_apply_note">שינוי כאן ייכנס לתוקף בפעם הבאה שהמדיניות תוחל ותאומת.</string>
+
+    <!-- סיכום השורה החמורה ביותר -->
+    <string name="mgmtid_summary_proven">זהות אמצעי הניהול מוכחת במכשיר הזה</string>
+    <string name="mgmtid_summary_not_proven">אמצעי הניהול זוכה לאמון לפי שם החבילה בלבד</string>
+    <string name="mgmtid_summary_refused">הרשאת הניהול נמנעת</string>
+    <string name="mgmtid_summary_absent">אף חבילת ניהול אינה מותקנת במכשיר הזה</string>
+
+    <!-- אזהרה שיש לקרוא לפני האישור, לא אחריו -->
+    <string name="mgmtid_section_caution">לפני שמאשרים</string>
+    <string name="mgmtid_caution_body">האישור מתעד כמאושר את מה שמותקן במכשיר הזה ברגע זה. בצעו זאת רק במכשיר שווידאתם שהוא נקי — כזה שהוקצה מחדש זה עתה, או שנבדק מול טביעת אצבע שהיצרן פרסם. אם היישום המותקן כבר מתחזה, האישור מאשר את המתחזה לצמיתות.</string>
+
+    <!-- חבילה אחת -->
+    <string name="mgmtid_row_installed">מותקן במכשיר הזה</string>
+    <string name="mgmtid_row_not_installed">לא מותקן במכשיר הזה</string>
+    <string name="mgmtid_identity_line">זהות: %1$s</string>
+    <string name="mgmtid_observed_title">אישורי חתימה שהמכשיר הזה דיווח עליהם</string>
+    <string name="mgmtid_observed_none">המכשיר הזה לא דיווח על אישור חתימה קריא.</string>
+    <string name="mgmtid_pinned_title">אישורים מאושרים</string>
+    <string name="mgmtid_pinned_none">לא אושר אף אישור לחבילה הזו.</string>
+
+    <!-- מצב הזהות -->
+    <string name="mgmtid_state_proven">מוכחת — אישור חתימה מותקן תואם לאישור מאושר</string>
+    <string name="mgmtid_state_name_only">לא מוכחת — אמון לפי שם החבילה בלבד</string>
+    <string name="mgmtid_state_mismatch">נדחתה — אף אישור חתימה מותקן אינו תואם לאישור מאושר</string>
+    <string name="mgmtid_state_unreadable">נדחתה — קיים אישור מאושר והמכשיר הזה לא דיווח על חותם</string>
+    <string name="mgmtid_state_not_installed">לא מותקן — עדיין אין כאן דבר שזוכה לאמון</string>
+
+    <!-- המשמעות עבור המכשיר -->
+    <string name="mgmtid_detail_proven">הפטור לאמצעי הניהול ניתן כל עוד אישור חתימה מותקן ממשיך להתאים. שינוי בחותם מבטל אותו בהחלה הבאה.</string>
+    <string name="mgmtid_detail_name_only">כל יישום שיותקן תחת שם החבילה הזה יורש את הפטור לאמצעי הניהול. אשרו את אישור החתימה של גרסת השחרור כדי לסגור את הפער.</string>
+    <string name="mgmtid_detail_refused">הרשאת הניהול נמנעת. החבילה מוסתרת במקום לקבל פטור, והחלת המדיניות מדווחת כלא מאומתת עד שהחותם המותקן יתאים לאישור מאושר או שרשימת האישורים תתוקן.</string>
+    <string name="mgmtid_detail_not_installed">אישור שיאושר עכשיו ייכנס לתוקף ברגע שהחבילה הזו תותקן.</string>
+
+    <!-- פעולות -->
+    <string name="mgmtid_action_pin_installed">אישור אישור החתימה המותקן עכשיו</string>
+    <string name="mgmtid_action_add_manual">הוספת טביעת אצבע שהתקבלה בערוץ חיצוני</string>
+    <string name="mgmtid_action_remove">הסרה</string>
+    <string name="mgmtid_pin_unavailable_absent">אין אישור חתימה מותקן לאישור, מפני שהחבילה אינה במכשיר הזה.</string>
+    <string name="mgmtid_pin_unavailable_no_signer">אין במכשיר הזה אישור חתימה קריא לאישור.</string>
+    <string name="mgmtid_pin_unavailable_already">כל אישור חתימה שהמכשיר הזה דיווח עליו כבר מאושר.</string>
+
+    <!-- אישור פעולה -->
+    <string name="mgmtid_confirm_pin_title">לאשר את אישור החתימה המותקן?</string>
+    <string name="mgmtid_confirm_pin_body">%1$s יאושר לפי אישור החתימה שמותקן במכשיר הזה ברגע זה. אשרו רק אם ידוע לכם שהמכשיר נקי: אישור שנלקח ממכשיר שנפרץ מאשר את הפריצה.</string>
+    <string name="mgmtid_confirm_remove_title">להסיר את האישור המאושר הזה?</string>
+    <string name="mgmtid_confirm_remove_body">אם לא יישאר אף אישור מאושר, החבילה הזו תחזור לזכות לאמון לפי שמה בלבד. אם יישאר אישור מאושר אחר והחותם המותקן לא יתאים לו, הרשאת הניהול תימנע בהחלה הבאה.</string>
+    <string name="mgmtid_confirm_action">אישור</string>
+
+    <!-- הזנה ידנית -->
+    <string name="mgmtid_manual_title">הוספת אישור מאושר</string>
+    <string name="mgmtid_manual_body">הדביקו את טביעת האצבע ⁦SHA-256⁩ של אישור החתימה של גרסת השחרור, כפי שהיצרן פרסם אותה. נקודתיים, רווחים ואותיות גדולות מתקבלים.</string>
+    <string name="mgmtid_manual_field">טביעת אצבע ⁦SHA-256⁩</string>
+    <string name="mgmtid_manual_normalized">זה מה שיישמר:</string>
+    <string name="mgmtid_manual_save">הוספה</string>
+    <string name="mgmtid_error_empty">הזינו טביעת אצבע.</string>
+    <string name="mgmtid_error_not_hex">טביעת אצבע ⁦SHA-256⁩ מכילה רק את הספרות ⁦0-9⁩ ואת האותיות ⁦a-f⁩.</string>
+    <string name="mgmtid_error_length">טביעת אצבע ⁦SHA-256⁩ היא בדיוק 64 תווים הקסדצימליים. בזו יש %1$d.</string>
+    <string name="mgmtid_error_already_pinned">האישור הזה כבר מאושר לחבילה הזו.</string>
+
+    <!-- תוצאות -->
+    <string name="mgmtid_result_pinned">אישור החתימה אושר. זהות: %1$s</string>
+    <string name="mgmtid_result_removed">אישור החתימה הוסר. זהות: %1$s</string>
+    <string name="mgmtid_result_write_failed">המכשיר הזה לא שמר את השינוי: %1$s</string>
+    <string name="mgmtid_error_auth">פג תוקף הפעלת מנהל המערכת. הזינו שוב את קוד ה-⁦PIN⁩ כדי לשנות את זהות אמצעי הניהול.</string>
+
+    <!-- יומן ביקורת. שם החבילה והפסיקה בלבד: בלי טביעת אצבע, בלי קוד גישה ובלי קוד שחזור. -->
+    <string name="mgmtid_audit_pin_added">אישור ניהול אושר: %1$s — הזהות כעת %2$s</string>
+    <string name="mgmtid_audit_pin_removed">אישור ניהול הוסר: %1$s — הזהות כעת %2$s</string>
+    <string name="mgmtid_audit_refused">חבילת ניהול נדחתה: %1$s — %2$s</string>
+</resources>
