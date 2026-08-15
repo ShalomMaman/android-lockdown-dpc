@@ -93,7 +93,9 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Status
 
-Pilot release candidate: `0.5.2` (`versionCode 11`).
+Pilot release candidate: `0.5.2` (`versionCode 12`). Build 11 was the first
+hardware pilot and is intentionally superseded so that enrolled test devices
+can receive the final 0.5.2 artifact through the signed update channel.
 
 `0.5.2` keeps the pilot `applicationId` and signer, so it can update the already provisioned pilot device in place. It is not production-ready and remains a prerelease until the hardware gates pass.
 

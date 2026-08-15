@@ -18,7 +18,10 @@ android {
         // Pilot compatibility: the applicationId and the release signing config
         // below are deliberately unchanged, so this build updates the already
         // provisioned pilot device in place. Only the version identity moves.
-        versionCode = 11
+        // Build 11 was installed on the first 0.5.2 hardware pilot before the
+        // compact-inventory fix. The published 0.5.2 candidate must be newer so
+        // that those devices can receive it through the signed update channel.
+        versionCode = 12
         versionName = "0.5.2"
         // Update channels are an explicit build choice. Ordinary builds never
         // consume ambient properties or environment variables.

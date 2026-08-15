@@ -15,7 +15,7 @@ def pilotManifestUrl = 'https://raw.githubusercontent.com/ShalomMaman/android-lo
 def approvedMetadataFingerprint = 'c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc'
 def approvedPilotSigner = '25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b'
 def expectedApplicationId = 'com.example.lockdowndpc'
-def expectedVersionCode = 11
+def expectedVersionCode = 12
 def expectedVersionName = '0.5.2'
 
 def asBuildConfigString = { String value ->
