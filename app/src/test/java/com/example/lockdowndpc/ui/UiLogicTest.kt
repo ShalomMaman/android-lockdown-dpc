@@ -66,6 +66,18 @@ class UiLogicTest {
     }
 
     @Test
+    fun reconciledApplyFailure_isDismissedOnlyAfterVerifiedActiveReadBack() {
+        assertTrue(shouldDismissReconciledApplyFailure(true, true, true))
+        assertFalse(shouldDismissReconciledApplyFailure(true, false, true))
+        assertFalse(shouldDismissReconciledApplyFailure(true, true, false))
+    }
+
+    @Test
+    fun reconciledPolicy_neverDismissesAnUnrelatedBanner() {
+        assertFalse(shouldDismissReconciledApplyFailure(false, true, true))
+    }
+
+    @Test
     fun ltrIsolated_wrapsInIsolateMarks() {
         val isolated = "com.example.app".ltrIsolated()
         assertEquals(LTR_ISOLATE, isolated.first())

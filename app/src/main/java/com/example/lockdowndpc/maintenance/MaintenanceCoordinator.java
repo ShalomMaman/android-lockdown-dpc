@@ -189,6 +189,7 @@ public final class MaintenanceCoordinator {
     private final SystemPolicyProfile profile;
     private final Map<SystemPolicyControl, Boolean> baseChoices;
     private final SystemPolicyGateway gateway;
+    private final MaintenanceCapabilityGateway capabilityGateway;
     private final MaintenanceClock clock;
 
     /**
@@ -196,6 +197,8 @@ public final class MaintenanceCoordinator {
      * @param profile     the profile the stored choices are resolved against
      * @param baseChoices the administrator's stored choices, without maintenance
      * @param gateway     the device policy seam
+     * @param capabilityGateway non-restriction capability effects, including
+     *                          verified application-store visibility
      * @param clock       the two clock readings a window is judged by
      */
     public MaintenanceCoordinator(
@@ -203,6 +206,7 @@ public final class MaintenanceCoordinator {
             SystemPolicyProfile profile,
             Map<SystemPolicyControl, Boolean> baseChoices,
             SystemPolicyGateway gateway,
+            MaintenanceCapabilityGateway capabilityGateway,
             MaintenanceClock clock
     ) {
         if (profile == null) {
@@ -211,6 +215,9 @@ public final class MaintenanceCoordinator {
         if (gateway == null) {
             throw new IllegalArgumentException("A maintenance coordinator needs a policy gateway");
         }
+        if (capabilityGateway == null) {
+            throw new IllegalArgumentException("A maintenance coordinator needs a capability gateway");
+        }
         if (clock == null) {
             throw new IllegalArgumentException("A maintenance coordinator needs a clock");
         }
@@ -218,6 +225,7 @@ public final class MaintenanceCoordinator {
         this.profile = profile;
         this.baseChoices = baseChoices == null ? Map.of() : Map.copyOf(baseChoices);
         this.gateway = gateway;
+        this.capabilityGateway = capabilityGateway;
         this.clock = clock;
     }
 
@@ -247,7 +255,8 @@ public final class MaintenanceCoordinator {
         MaintenancePlan plan = MaintenancePlan.forWindow(profile, baseChoices, window);
         SystemPolicyReport report =
                 SystemPolicyEnforcer.enforce(sdkInt, profile, plan.effectiveChoices(), gateway);
-        List<String> failures = openFailures(report, plan);
+        List<String> failures = new ArrayList<>(openFailures(report, plan));
+        failures.addAll(capabilityGateway.open(window));
 
         if (failures.isEmpty()) {
             return new MaintenanceOutcome(
@@ -343,9 +352,10 @@ public final class MaintenanceCoordinator {
      */
     public MaintenanceOutcome restore(MaintenanceWindow window, CloseReason closeReason) {
         MaintenancePlan plan = MaintenancePlan.restore(profile, baseChoices);
+        List<String> failures = new ArrayList<>(capabilityGateway.restore());
         SystemPolicyReport report =
                 SystemPolicyEnforcer.enforce(sdkInt, profile, plan.effectiveChoices(), gateway);
-        List<String> failures = summaries(report.failures());
+        failures.addAll(summaries(report.failures()));
         boolean verified = failures.isEmpty();
         return new MaintenanceOutcome(
                 Phase.RESTORE,

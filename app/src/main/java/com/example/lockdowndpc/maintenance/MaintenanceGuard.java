@@ -345,6 +345,10 @@ public final class MaintenanceGuard {
                 SystemPolicyStore.effectiveProfile(context),
                 SystemPolicyStore.explicitChoices(context),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
+                new AndroidMaintenanceCapabilityGateway(
+                        dpm,
+                        LockdownAdminReceiver.componentName(context),
+                        context.getPackageManager()),
                 MaintenanceStore.deviceClock());
     }
 

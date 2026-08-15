@@ -22,6 +22,7 @@ import com.example.lockdowndpc.kiosk.KioskConfigStore;
 import com.example.lockdowndpc.kiosk.KioskAppCatalog;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskMode;
+import com.example.lockdowndpc.maintenance.MaintenanceAppPolicy;
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.maintenance.MaintenancePlan;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine;
@@ -225,7 +226,7 @@ public final class LockdownPolicyController {
             SystemPolicyProfile profile
     ) {
         Map<SystemPolicyControl, Boolean> stored = SystemPolicyStore.explicitChoices(context);
-        MaintenanceWindow window = MaintenanceStore.readWindow(context);
+        MaintenanceWindow window = liveMaintenanceWindow(context);
         if (window == null) {
             return stored;
         }
@@ -237,12 +238,18 @@ public final class LockdownPolicyController {
         // ones MaintenanceGuard closes the window with; this pass merely ignores
         // a window the guard would not honour, and leaves the closing (which
         // must be read back and audited) to the guard.
+        return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
+    }
+
+    /** The stored window only when the state machine would still honour it. */
+    private static MaintenanceWindow liveMaintenanceWindow(Context context) {
+        MaintenanceWindow window = MaintenanceStore.readWindow(context);
+        if (window == null) {
+            return null;
+        }
         MaintenanceStateMachine.Evaluation evaluation =
                 MaintenanceStateMachine.evaluate(window, MaintenanceStore.deviceClock());
-        if (!evaluation.open()) {
-            return stored;
-        }
-        return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
+        return evaluation.open() ? evaluation.window() : null;
     }
 
     /**
@@ -586,6 +593,8 @@ public final class LockdownPolicyController {
         // package name, and acting on the old acceptance would hide a component
         // nobody reviewed during an automatic reconciliation pass.
         Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
+        boolean appStoreMaintenanceOpen = MaintenanceAppPolicy.opensApplicationStores(
+                liveMaintenanceWindow(context));
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);
@@ -619,6 +628,12 @@ public final class LockdownPolicyController {
         // PackageManager omits packages hidden by this DPC from bulk queries.
         // Reconcile every package that may already be hidden explicitly.
         packageNames.addAll(LockdownPackages.ALWAYS_BLOCKED);
+        if (appStoreMaintenanceOpen) {
+            // Hidden applications are omitted from bulk PackageManager queries.
+            // Name every reversible store explicitly so a live maintenance
+            // window can restore it even when no earlier inventory saw it.
+            packageNames.addAll(MaintenanceAppPolicy.managedStorePackages());
+        }
         packageNames.addAll(LockdownPackages.KNOWN_BROWSER_AND_SOCIAL);
         packageNames.addAll(managed);
         packageNames.addAll(allowed);
@@ -656,6 +671,14 @@ public final class LockdownPolicyController {
                 shouldBlock = mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
                         ? !allowed.contains(packageName)
                         : allowed.contains(packageName);
+            }
+
+            // Store access is an explicit, timed exception to the built-in store
+            // catalogue. It does not open browsers or social applications, and
+            // the kiosk escape-surface rule below still wins while containment
+            // is active.
+            if (MaintenanceAppPolicy.keepsVisible(packageName, appStoreMaintenanceOpen)) {
+                shouldBlock = false;
             }
 
             // Kiosk hides the known escape surfaces even though Lock Task already
@@ -700,6 +723,8 @@ public final class LockdownPolicyController {
                         && packageClass == LockdownPackages.PackageClass.KIOSK_ESCAPE_SURFACE)
                     || LockdownPackages.isManagementPackage(packageName)
                     || packageName.equals(webViewProvider);
+            criticalPackage = criticalPackage
+                    || MaintenanceAppPolicy.keepsVisible(packageName, appStoreMaintenanceOpen);
             if (!criticalPackage || !isInstalled(pm, packageName)) {
                 continue;
             }
