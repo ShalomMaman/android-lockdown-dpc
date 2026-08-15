@@ -386,7 +386,7 @@ internal fun maintenanceResultKindOf(outcome: MaintenanceOutcome): MaintenanceRe
             outcome.status() == MaintenanceStatus.APPLIED && outcome.windowOpen() ->
                 MaintenanceResultKind.OPENED
 
-            outcome.windowMustBeStored() -> MaintenanceResultKind.OPEN_FAILED_RESTORE_FAILED
+            outcome.restoreOwed() -> MaintenanceResultKind.OPEN_FAILED_RESTORE_FAILED
             else -> MaintenanceResultKind.OPEN_FAILED_RESTORED
         }
 

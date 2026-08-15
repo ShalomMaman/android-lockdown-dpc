@@ -8,6 +8,7 @@ import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOut
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * The one Android-aware class in this package: it persists the open window and
@@ -46,9 +47,11 @@ public final class MaintenanceStore {
     private static final String KEY_LAST_WALL = "last_seen_wall_clock";
     private static final String KEY_LAST_ELAPSED = "last_seen_elapsed";
     private static final String KEY_RESTORE_PENDING = "restore_pending";
+    private static final String KEY_PROCESS_SESSION = "process_session";
 
-    /** Bumped only for a change that needs migration code, so 1 means "as designed". */
-    private static final int SCHEMA_VERSION = 1;
+    /** Version 2 makes every maintenance authorization process-bound. */
+    private static final int SCHEMA_VERSION = 2;
+    private static final String PROCESS_SESSION = UUID.randomUUID().toString();
 
     private MaintenanceStore() {}
 
@@ -83,6 +86,15 @@ public final class MaintenanceStore {
         String capabilityKeys = preferences.getString(KEY_CAPABILITIES, null);
         if (capabilityKeys == null || capabilityKeys.isEmpty()) {
             return null;
+        }
+        if (!belongsToCurrentProcess(
+                preferences.getInt(KEY_SCHEMA_VERSION, 0),
+                preferences.getString(KEY_PROCESS_SESSION, null),
+                PROCESS_SESSION)) {
+            // A process death is a fail-closed maintenance boundary. It also
+            // defeats resurrection of a stale on-disk authorization if clearing
+            // the old window previously reported an I/O failure.
+            return discard(context);
         }
         try {
             Set<MaintenanceCapability> capabilities = new LinkedHashSet<>();
@@ -146,10 +158,12 @@ public final class MaintenanceStore {
     /**
      * Persists exactly what an outcome hands back.
      *
-     * <p>The storage rule in one place so no caller can get it wrong: a window is
-     * stored whenever the outcome carries one — an open window, or a window whose
-     * restore could not be verified — and the pending flag survives until a
-     * restore has actually been read back.
+     * <p>The storage rule in one place so no caller can get it wrong: only a
+     * verified-open authorization is stored as a window. A failed close may
+     * still carry the old window as audit evidence, but storing it would let the
+     * next refresh mistake failed cancellation for a live authorization. In that
+     * case the window is removed while the pending flag survives, so the next
+     * pass can only retry the base-policy restore.
      *
      * @return whether every write reached storage. A caller that has just relaxed
      *         a device and gets {@code false} is holding a device whose state no
@@ -158,8 +172,9 @@ public final class MaintenanceStore {
      */
     public static synchronized boolean apply(Context context, MaintenanceOutcome outcome) {
         boolean durable;
-        if (outcome.windowMustBeStored()) {
-            durable = saveWindow(context, outcome.window());
+        MaintenanceWindow authorizedWindow = outcome.windowForPersistence();
+        if (authorizedWindow != null) {
+            durable = saveWindow(context, authorizedWindow);
         } else {
             durable = clearWindow(context);
         }
@@ -183,6 +198,7 @@ public final class MaintenanceStore {
                 .putLong(KEY_OPENED_ELAPSED, window.openedAtElapsed())
                 .putLong(KEY_LAST_WALL, window.lastSeenWallClock())
                 .putLong(KEY_LAST_ELAPSED, window.lastSeenElapsed())
+                .putString(KEY_PROCESS_SESSION, PROCESS_SESSION)
                 .putBoolean(KEY_RESTORE_PENDING, true)
                 .commit();
     }
@@ -200,7 +216,18 @@ public final class MaintenanceStore {
                 .remove(KEY_OPENED_ELAPSED)
                 .remove(KEY_LAST_WALL)
                 .remove(KEY_LAST_ELAPSED)
+                .remove(KEY_PROCESS_SESSION)
                 .commit();
+    }
+
+    static boolean belongsToCurrentProcess(
+            int schemaVersion,
+            String storedSession,
+            String currentSession
+    ) {
+        return schemaVersion == SCHEMA_VERSION
+                && storedSession != null
+                && storedSession.equals(currentSession);
     }
 
     private static MaintenanceWindow discard(Context context) {

@@ -1012,7 +1012,7 @@ private fun openMaintenance(
     val coordinator =
         maintenanceCoordinatorOf(context) ?: return MaintenanceSnapshot.notDeviceOwner()
     val refreshed = refreshOnce(context) ?: return MaintenanceSnapshot.notDeviceOwner()
-    if (refreshed.windowMustBeStored() && !refreshed.windowOpen()) {
+    if (refreshed.restoreOwed()) {
         // A restore is still owed. Opening now would stack a new window on a
         // device whose previous relaxations were never proved to be gone.
         return snapshotOf(context, refreshed, reportUnchanged = true)

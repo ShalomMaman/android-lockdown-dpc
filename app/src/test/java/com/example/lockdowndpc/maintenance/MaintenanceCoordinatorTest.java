@@ -123,6 +123,8 @@ public final class MaintenanceCoordinatorTest {
         assertEquals(MaintenanceStatus.FAILED, outcome.status());
         assertFalse(outcome.restoreVerified());
         assertNotNull("an unverified store restore must remain retryable", outcome.window());
+        assertNull("a failed close must not persist a live authorization",
+                outcome.windowForPersistence());
         assertTrue(capabilities.storesVisible);
     }
 
@@ -210,7 +212,10 @@ public final class MaintenanceCoordinatorTest {
         assertEquals("open-failed-restore-failed", outcome.reason());
         assertNotNull("a device that may still be relaxed keeps its window", outcome.window());
         assertFalse("an unproven restore is never a proven one", outcome.restoreProven());
-        assertTrue(outcome.windowMustBeStored());
+        assertTrue("a failed-open window remains available as failure evidence",
+                outcome.windowMustBeStored());
+        assertNull(outcome.windowForPersistence());
+        assertTrue(outcome.restoreOwed());
         assertFalse("a window with a close reason is not an open window", outcome.windowOpen());
         assertFalse(outcome.restoreVerified());
     }
@@ -287,7 +292,10 @@ public final class MaintenanceCoordinatorTest {
         assertFalse(outcome.restoreVerified());
         assertEquals("restore-failed", outcome.reason());
         assertEquals(CloseReason.EXPIRED, outcome.closeReason());
-        assertNotNull("the window stays stored so the next pass retries", outcome.window());
+        assertNotNull("the old window remains available as failure evidence", outcome.window());
+        assertNull("expiry failure must leave debt without a reopenable window",
+                outcome.windowForPersistence());
+        assertTrue(outcome.restoreOwed());
         assertFalse(outcome.failures().isEmpty());
     }
 
@@ -340,6 +348,27 @@ public final class MaintenanceCoordinatorTest {
         assertTrue(outcome.restoreVerified());
         assertTrue(gateway.inForce.contains(DEBUGGING));
         assertEquals(CloseReason.UNREADABLE_RECORD, outcome.closeReason());
+    }
+
+    @Test
+    public void aFailedDebtOnlyRestoreIsNeverMistakenForProof() {
+        FakeGateway gateway = new FakeGateway();
+        FakeCapabilityGateway capabilities = new FakeCapabilityGateway();
+        capabilities.failRestore = true;
+        MaintenanceCoordinator coordinator = production(
+                gateway,
+                capabilities,
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.restore(null, CloseReason.UNREADABLE_RECORD);
+
+        assertEquals(Phase.RESTORE, outcome.phase());
+        assertEquals(MaintenanceStatus.FAILED, outcome.status());
+        assertNull(outcome.window());
+        assertFalse(outcome.restoreProven());
+        assertTrue(outcome.restoreOwed());
+        assertNull(outcome.windowForPersistence());
     }
 
     @Test
@@ -398,6 +427,40 @@ public final class MaintenanceCoordinatorTest {
         }) {
             org.junit.Assert.assertThrows(IllegalArgumentException.class, construction::run);
         }
+    }
+
+    @Test
+    public void restoreProofCannotBeAttachedToAnOpenOrUnverifiedOutcome() {
+        MaintenanceWindow open = new MaintenanceWindow(
+                EnumSet.of(MaintenanceCapability.ADB_DEBUGGING),
+                HALF_HOUR,
+                OPEN_WALL,
+                OPEN_ELAPSED,
+                OPEN_WALL,
+                OPEN_ELAPSED);
+
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () ->
+                new MaintenanceOutcome(
+                        Phase.OPEN,
+                        MaintenanceStatus.APPLIED,
+                        open,
+                        null,
+                        true,
+                        null,
+                        null,
+                        List.of(),
+                        "invalid-proof"));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () ->
+                new MaintenanceOutcome(
+                        Phase.RESTORE,
+                        MaintenanceStatus.FAILED,
+                        null,
+                        CloseReason.UNREADABLE_RECORD,
+                        true,
+                        null,
+                        null,
+                        List.of("restore-failed"),
+                        "invalid-proof"));
     }
 
     private static MaintenanceCoordinator production(

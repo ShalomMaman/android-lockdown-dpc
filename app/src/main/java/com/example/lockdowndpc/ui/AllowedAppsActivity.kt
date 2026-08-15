@@ -81,6 +81,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemAppClassifier.Category
 import com.example.lockdowndpc.policy.SystemAppClassifier.Origin
 import com.example.lockdowndpc.policy.SystemAppClassifier.ProtectedContext
@@ -180,7 +181,9 @@ class AllowedAppsActivity : AppCompatActivity() {
         // The controller owns the requested → applied/failed contract and marks
         // the policy state itself. Nothing here may pre-announce success.
         if (AllowedAppsStore.isProtectionEnabled(this)) {
-            LockdownPolicyController.apply(this)
+            PolicyReconciliationCoordinator.callOnPolicyThread {
+                LockdownPolicyController.apply(this)
+            }
         }
         AdminSession.extend()
         setResult(RESULT_OK)

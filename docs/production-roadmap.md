@@ -240,6 +240,9 @@ One item remains:
 Production deployments disable debugging and routine escape surfaces by default.
 Authorized maintenance is a narrow, audited exception rather than a general
 pause of protection. This is implemented in `maintenance/` as of 0.5.2.
+Every authorization is bound to the current DPC process: process death or
+restart invalidates the window and forces a verified base-policy restore. This
+deliberately favors early closure over keeping a maintenance session alive.
 
 An administrator chooses which capability to open:
 

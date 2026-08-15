@@ -55,6 +55,48 @@ public final class PolicyReconciliationCoordinatorTest {
     }
 
     @Test
+    public void synchronousConsoleWorkQueuesBehindAnInFlightRestore() throws Exception {
+        CountDownLatch restoreStarted = new CountDownLatch(1);
+        CountDownLatch releaseRestore = new CountDownLatch(1);
+        CountDownLatch consoleFinished = new CountDownLatch(1);
+        AtomicBoolean consoleRan = new AtomicBoolean();
+        AtomicReference<String> workerName = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.runOnPolicyThread(() -> {
+            restoreStarted.countDown();
+            try {
+                if (!releaseRestore.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                    throw new AssertionError("test restore was never released");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(exception);
+            }
+        });
+        assertTrue(restoreStarted.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+
+        Thread console = new Thread(() -> {
+            String result = PolicyReconciliationCoordinator.callOnPolicyThread(() -> {
+                consoleRan.set(true);
+                workerName.set(Thread.currentThread().getName());
+                return "verified";
+            });
+            assertEquals("verified", result);
+            consoleFinished.countDown();
+        });
+        console.start();
+
+        assertFalse("console work must not interleave with restore",
+                consoleFinished.await(100L, TimeUnit.MILLISECONDS));
+        assertFalse(consoleRan.get());
+        releaseRestore.countDown();
+
+        assertTrue(consoleFinished.await(TIMEOUT_SECONDS, TimeUnit.SECONDS));
+        assertTrue(consoleRan.get());
+        assertEquals("lockdown-policy-reconciliation", workerName.get());
+    }
+
+    @Test
     public void completionRunsAfterSuccessfulWork() {
         AtomicBoolean worked = new AtomicBoolean();
         AtomicBoolean finished = new AtomicBoolean();
