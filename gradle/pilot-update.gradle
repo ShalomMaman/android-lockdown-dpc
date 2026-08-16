@@ -87,30 +87,6 @@ plugins.withId('com.android.application') {
     def configuredVersionCode = android.defaultConfig.versionCode
     def configuredVersionName = android.defaultConfig.versionName
 
-    def pilotSigningEnvironment = [
-        storeFile: System.getenv('DEVICE_GUARD_PILOT_STORE_FILE'),
-        storePassword: System.getenv('DEVICE_GUARD_PILOT_STORE_PASSWORD'),
-        keyAlias: System.getenv('DEVICE_GUARD_PILOT_KEY_ALIAS'),
-        keyPassword: System.getenv('DEVICE_GUARD_PILOT_KEY_PASSWORD')
-    ]
-    def suppliedSigningValues = pilotSigningEnvironment.findAll { key, value ->
-        value != null && !value.trim().isEmpty()
-    }
-    if (!suppliedSigningValues.isEmpty() && suppliedSigningValues.size() != pilotSigningEnvironment.size()) {
-        throw new GradleException('Pilot signing configuration must supply all four external values')
-    }
-    if (suppliedSigningValues.size() == pilotSigningEnvironment.size()) {
-        def externalStoreFile = rootProject.file(pilotSigningEnvironment.storeFile)
-        if (!externalStoreFile.isFile()) {
-            throw new GradleException('External pilot signing keystore does not exist')
-        }
-        def debugSigning = android.signingConfigs.getByName('debug')
-        debugSigning.storeFile = externalStoreFile
-        debugSigning.storePassword = pilotSigningEnvironment.storePassword
-        debugSigning.keyAlias = pilotSigningEnvironment.keyAlias
-        debugSigning.keyPassword = pilotSigningEnvironment.keyPassword
-    }
-
     def releaseSigningName = android.buildTypes.release.signingConfig?.name
     if (configuredApplicationId != expectedApplicationId
             || configuredVersionCode == null || configuredVersionCode <= 0

@@ -6,6 +6,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "publish-pilot-release.yml"
 ANDROID_CI = ROOT / ".github" / "workflows" / "android-ci.yml"
+PILOT_INIT = ROOT / "gradle" / "pilot-update.init.gradle.kts"
+PILOT_SIGNING = ROOT / "gradle" / "pilot-signing.gradle"
+PILOT_CHANNEL = ROOT / "gradle" / "pilot-update.gradle"
 
 
 class PilotReleaseWorkflowTest(unittest.TestCase):
@@ -64,6 +67,20 @@ class PilotReleaseWorkflowTest(unittest.TestCase):
                     r"^[0-9a-f]{40}$",
                     f"{workflow_path} contains a mutable action reference: {ref}",
                 )
+
+    def test_external_pilot_signing_is_configured_before_app_evaluation(self):
+        init_script = PILOT_INIT.read_text(encoding="utf-8")
+        early_signing = 'apply(from = rootProject.file("gradle/pilot-signing.gradle"))'
+        late_channel = 'apply(from = rootProject.file("gradle/pilot-update.gradle"))'
+        self.assertIn(early_signing, init_script)
+        self.assertIn(late_channel, init_script)
+        self.assertLess(init_script.index(early_signing), init_script.index("afterEvaluate"))
+        self.assertGreater(init_script.index(late_channel), init_script.index("afterEvaluate"))
+
+        signing_script = PILOT_SIGNING.read_text(encoding="utf-8")
+        self.assertIn("plugins.withId('com.android.application')", signing_script)
+        self.assertIn("debugSigning.storeFile = externalStoreFile", signing_script)
+        self.assertNotIn("DEVICE_GUARD_PILOT_STORE_FILE", PILOT_CHANNEL.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
