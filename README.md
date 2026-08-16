@@ -16,6 +16,38 @@ Device Guard turns a dedicated Android phone or tablet into a locally managed de
 
 The project is local-first and open source. It has no analytics service, no advertising SDK, and no required management cloud. English is the default interface, with a complete Hebrew translation and right-to-left layout.
 
+## Product tour
+
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/administrator-dashboard-en.png" width="320" alt="Device Guard administrator dashboard showing inactive protection, Device Owner status, and management actions">
+      <br><sub>Verified administrator dashboard and protection state</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/application-inventory-en.png" width="320" alt="Device Guard application inventory showing search, filters, user apps, and reviewed Android system components">
+      <br><sub>Searchable user and system application inventory</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/system-policy-controls-en.png" width="320" alt="Device Guard system policy controls showing requested and confirmed Android restriction states">
+      <br><sub>System controls with requested-versus-confirmed status</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="docs/assets/screenshots/kiosk-profile-en.png" width="320" alt="Device Guard operating profile screen offering managed filtering, single-app kiosk, and single-site kiosk">
+      <br><sub>Managed filtering, single-app kiosk, and single-site kiosk</sub>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/assets/screenshots/management-lock-he.png" width="320" alt="Device Guard administrator lock screen in Hebrew with a right-to-left layout">
+  <br><sub>Complete Hebrew localization and right-to-left management flow</sub>
+</p>
+
+These are unedited screen captures from the current `main` development build running as Device Owner on an Android API 37.1 emulator. The debuggable build was used because release builds intentionally block screenshots with `FLAG_SECURE`. They demonstrate the real interface, not physical-device certification; firmware-specific evidence remains in the [device matrix](docs/device-matrix.md).
+
 ## What can it manage?
 
 | Profile | Intended use | Enforcement |
