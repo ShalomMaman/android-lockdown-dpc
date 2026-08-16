@@ -328,7 +328,34 @@ jobs:
           PR_URL: ${{ steps.metadata.outputs.pr_url }}
         run: |
           set -euo pipefail
-          gh pr merge "$PR_URL" --repo "$GITHUB_REPOSITORY" --squash --delete-branch
+          pr_number="${PR_URL##*/}"
+          if [[ ! "$pr_number" =~ ^[0-9]+$ ]]; then
+            echo "The generated metadata pull request URL is invalid." >&2
+            exit 1
+          fi
+
+          gh pr merge "$PR_URL" \
+            --repo "$GITHUB_REPOSITORY" \
+            --auto \
+            --squash \
+            --delete-branch
+
+          for _ in {1..60}; do
+            read -r merged state < <(gh api \
+              "repos/$GITHUB_REPOSITORY/pulls/$pr_number" \
+              --jq '[.merged, .state] | @tsv')
+            if [[ "$merged" == "true" ]]; then
+              exit 0
+            fi
+            if [[ "$state" == "closed" ]]; then
+              echo "The generated metadata pull request closed without merging." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "Timed out waiting for the generated metadata pull request to merge." >&2
+          exit 1
 
       - name: Verify the active public metadata
         shell: bash
