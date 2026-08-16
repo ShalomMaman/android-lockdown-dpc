@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title description">
+  <title id="title">Device Guard for Android</title>
+  <desc id="description">Open-source Android Device Owner for app allowlisting, system controls, secure kiosk mode, and signed self-updates.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#071733"/>
+      <stop offset="0.58" stop-color="#123F84"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#DCE9FF"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#020817" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <circle cx="1160" cy="88" r="220" fill="#FFFFFF" opacity="0.045"/>
+  <circle cx="1110" cy="610" r="300" fill="#60A5FA" opacity="0.10"/>
+  <path d="M0 520 C245 430 430 655 690 535 C940 420 1080 470 1280 392 V640 H0Z" fill="#020817" opacity="0.14"/>
+
+  <g transform="translate(82 150)" filter="url(#shadow)">
+    <rect width="196" height="196" rx="48" fill="#FFFFFF" opacity="0.12"/>
+    <path fill="url(#shield)" d="M98 32 43 53v37c0 54 25 87 55 101 30-14 55-47 55-101V53L98 32Z"/>
+    <path fill="#174EA6" d="m87 128-25-25 12-12 13 13 35-35 12 12-47 47Z"/>
+  </g>
+
+  <g font-family="Inter, SF Pro Display, Segoe UI, Arial, sans-serif" fill="#FFFFFF">
+    <text x="324" y="192" font-size="24" font-weight="700" letter-spacing="4" opacity="0.78">OPEN-SOURCE ANDROID DPC</text>
+    <text x="324" y="266" font-size="58" font-weight="760" letter-spacing="-1.5">Device Guard for Android</text>
+    <text x="324" y="322" font-size="31" font-weight="500" opacity="0.90">Android Device Owner for dedicated phones, tablets, and displays</text>
+
+    <g font-size="22" font-weight="650">
+      <rect x="324" y="370" width="202" height="54" rx="27" fill="#FFFFFF" opacity="0.13"/>
+      <text x="350" y="405">App allowlisting</text>
+      <rect x="542" y="370" width="206" height="54" rx="27" fill="#FFFFFF" opacity="0.13"/>
+      <text x="568" y="405">System controls</text>
+      <rect x="764" y="370" width="186" height="54" rx="27" fill="#FFFFFF" opacity="0.13"/>
+      <text x="790" y="405">Secure kiosk</text>
+    </g>
+
+    <text x="324" y="488" font-size="23" font-weight="500" opacity="0.78">Local-first  •  Signed self-updates  •  English + Hebrew RTL</text>
+    <text x="82" y="574" font-size="21" font-weight="560" opacity="0.70">github.com/ShalomMaman/android-lockdown-dpc</text>
+
+    <g transform="translate(1041 62)">
+      <rect width="157" height="48" rx="24" fill="#FFFFFF" opacity="0.16"/>
+      <circle cx="27" cy="24" r="7" fill="#93C5FD"/>
+      <text x="44" y="31" font-size="18" font-weight="750" letter-spacing="1">PUBLIC PILOT</text>
+    </g>
+  </g>
+</svg>

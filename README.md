@@ -7,7 +7,7 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/about/versions/oreo)
 
-[Download the current pilot APK](https://github.com/ShalomMaman/android-lockdown-dpc/releases) · [Provision a test device](docs/provisioning.md) · [See the production roadmap](docs/production-roadmap.md) · [Report a vulnerability](SECURITY.md)
+[Download the current pilot APK](https://github.com/ShalomMaman/android-lockdown-dpc/releases) · [Provision a test device](docs/provisioning.md) · [Ask the community](https://github.com/ShalomMaman/android-lockdown-dpc/discussions) · [Report a vulnerability](SECURITY.md)
 
 > [!IMPORTANT]
 > The currently published Device Guard build is a public pilot, not a production-certified mobile device management product. Device Owner enrolment can require a factory reset, and kiosk or system-policy changes can make a test device difficult to recover. Use a dedicated test device and read the [deployment boundary](#project-status) before provisioning.
@@ -151,6 +151,6 @@ Follow the [production roadmap](docs/production-roadmap.md), [hardware validatio
 
 ## Contributing
 
-Contributions, device-test evidence, documentation improvements, OEM compatibility reports, and security-focused review are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Large policy or architecture changes should start with an Issue so recovery and migration effects can be reviewed first.
+Contributions, device-test evidence, documentation improvements, OEM compatibility reports, and security-focused review are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the [support guide](SUPPORT.md), and the [Code of Conduct](CODE_OF_CONDUCT.md) before participating. Large policy or architecture changes should start with an Issue so recovery and migration effects can be reviewed first.
 
 Device Guard is licensed under the [Apache License 2.0](LICENSE).

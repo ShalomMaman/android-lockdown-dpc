@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Questions and community support
+    url: https://github.com/ShalomMaman/android-lockdown-dpc/discussions
+    about: Ask setup, usage, architecture, or deployment questions in Discussions.
   - name: Security vulnerability
     url: https://github.com/ShalomMaman/android-lockdown-dpc/security/advisories/new
     about: Report suspected vulnerabilities privately.
