@@ -8,6 +8,8 @@
         tools:ignore="QueryAllPackagesPermission" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required when JobScheduler enforces network constraints for update checks. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
         android:allowBackup="false"
