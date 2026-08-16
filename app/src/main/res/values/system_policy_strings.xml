@@ -119,7 +119,28 @@
     <string name="system_policy_control_app_control_settings_title">Application controls in Settings</string>
     <string name="system_policy_control_app_control_settings_consequence">Force stop, clear data and clear cache become unavailable in Settings, so a managed application cannot be neutralised by clearing its state.</string>
 
+    <!--
+        Google Play compatibility (Issue #64). The wording here is a security
+        statement, not marketing: Android can hide a whole package but not one
+        launcher entry, so the console says the Store may stay openable and
+        names installation as the thing that is blocked and verified.
+    -->
+    <string name="system_policy_section_play_compatibility">Google Play compatibility</string>
+    <string name="system_policy_play_compat_row">Allow applications that need the Google Play Store</string>
+    <string name="system_policy_play_compat_body">Some applications distributed through Google Play refuse to start unless the Play Store package is available, even when Google Play services are working. Turning this on keeps that one package available. Android cannot hide only the Store\'s icon, so on an ordinary launcher the Store may stay visible and can be opened. What is blocked instead is installation: all package installation and installation from unknown sources are enforced and verified for as long as this is on. On a kiosk device the Store is not part of the surface a user can reach. Google Play services and the WebView provider are protected separately and are not changed by this choice. Other application stores stay hidden.</string>
+    <string name="system_policy_play_compat_state_strict">Off — application stores stay hidden</string>
+    <string name="system_policy_play_compat_state_active">On — the Store package is available and this device confirmed that installation is blocked</string>
+    <string name="system_policy_play_compat_state_maintenance">On — a maintenance window has opened application-store installation, and it closes with the window</string>
+    <string name="system_policy_play_compat_state_withheld">On, but a maintenance window has opened installation from unknown sources, so the Store stays hidden until that window closes</string>
+    <string name="system_policy_play_compat_state_unverified">On, but this device has not confirmed the installation lock, so the Store stays hidden</string>
+    <string name="system_policy_play_compat_locked_control">Kept on by Google Play compatibility</string>
+    <string name="system_policy_play_compat_confirm_enable_title">Keep the Google Play Store available?</string>
+    <string name="system_policy_play_compat_confirm_enable_body">The Google Play Store package stays available to the applications that need it. In exchange, all package installation and installation from unknown sources are switched on, kept on, and read back from the device. Device Guard cannot install its own signed updates while installation is blocked, so plan updates another way before you continue. On an ordinary launcher the Store may remain visible and can be opened; installation is what is blocked. If this device does not confirm the installation lock, the Store is hidden again and protection is reported as not verified.</string>
+    <string name="system_policy_play_compat_confirm_disable_title">Hide application stores again?</string>
+    <string name="system_policy_play_compat_confirm_disable_body">The Google Play Store package is hidden again the next time policy is applied, and applications that need it may stop starting. The installation controls this mode kept on go back to your own saved choices.</string>
+
     <!-- Audit -->
+    <string name="audit_play_compatibility_changed">Google Play compatibility changed: %1$s</string>
     <string name="audit_system_policy_unverified">System policy not verified: %1$s</string>
     <string name="audit_system_policy_changed">System policy control changed: %1$s</string>
     <string name="audit_system_policy_applied">System policy controls were applied and verified</string>

@@ -66,8 +66,9 @@ Kiosk mode is opt-in. Installing an update or rebooting a device never enables k
 - **Signed self-updates.** The pilot channel verifies ECDSA metadata, HTTPS redirects, package identity, version, file size, SHA-256 digest, APK signer, and signing lineage before installation.
 - **Lifecycle reconciliation.** Policy is re-checked after reboot, application update, package installation, and Device Admin service reconnection.
 - **Bilingual and bidirectional.** English and Hebrew resources, placeholders, plural rules, and RTL/LTR behavior are checked for parity in CI.
+- **An honest Google Play exception.** Application stores are hidden by default. An administrator can explicitly keep the Play Store package available for applications that require it; installation stays enforced and verified, and the console states plainly that an available Store may remain openable on an ordinary launcher.
 
-See [package reconciliation](docs/package-reconciliation.md), [secure updates](docs/secure-updates.md), [kiosk mode](docs/kiosk-mode.md), and the [production roadmap](docs/production-roadmap.md) for the full security model and its limits.
+See [package reconciliation](docs/package-reconciliation.md), [secure updates](docs/secure-updates.md), [kiosk mode](docs/kiosk-mode.md), [Play Store compatibility](docs/play-store-compatibility.md), and the [production roadmap](docs/production-roadmap.md) for the full security model and its limits.
 
 ## Pilot quick start
 
@@ -143,6 +144,7 @@ Follow the [production roadmap](docs/production-roadmap.md), [hardware validatio
 | Device Owner setup and QR/ADB paths | [Provisioning](docs/provisioning.md) |
 | Application policy and fail-closed reconciliation | [Package reconciliation](docs/package-reconciliation.md) |
 | Single-app and single-site containment | [Kiosk mode](docs/kiosk-mode.md) |
+| Applications that require the Google Play Store | [Play Store compatibility](docs/play-store-compatibility.md) |
 | Signed remote update design | [Secure updates](docs/secure-updates.md) |
 | One-approval pilot publication | [Protected pilot release automation](docs/pilot-release-automation.md) |
 | Physical-device acceptance procedure | [Hardware validation](docs/hardware-validation.md) |

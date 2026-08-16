@@ -16,6 +16,8 @@ import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore;
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway;
 import com.example.lockdowndpc.policy.SystemPolicyReport;
 import com.example.lockdowndpc.policy.SystemPolicyStore;
@@ -70,6 +72,9 @@ public final class MaintenanceGuard {
     private static final int SWEEP_JOB_ID = 0x4D41494f;
 
     private static final long SWEEP_PERIOD_MILLIS = 15L * 60L * 1_000L;
+
+    /** The coordinator's reason token for a window refused by its precondition. */
+    private static final String PRECONDITION_REFUSAL = "precondition-unverified";
 
     /**
      * Whether the last {@link #record} write reached storage, and whether the
@@ -268,7 +273,70 @@ public final class MaintenanceGuard {
         }
         auditFrom(appContext, outcome);
         lastArmSucceeded = arm(appContext, outcome.windowOpen() ? outcome.window() : null);
+        reconcileAfterMaintenanceChange(appContext, outcome);
         return outcome;
+    }
+
+    /**
+     * Re-applies the base package policy when a window opens or closes, because
+     * on a Google Play compatibility device the base policy has something to say
+     * about store visibility that neither half of maintenance can know on its own.
+     *
+     * <p><b>On close.</b> The capability gateway's restore hides every managed
+     * store, which is the right fail-closed default and is exactly what a strict
+     * device wants. The base policy wants one of those stores to stay available —
+     * but only once the installation lock has been read back, which the restore
+     * has not done at the moment it hides them. So the ordering is deliberate:
+     * hide first, then let the ordinary policy pass re-assert the exception on the
+     * strength of its own verification.
+     *
+     * <p><b>On a refused precondition.</b> The gateway may have hidden the Store
+     * and failed only to prove it. That is the stricter direction and no window
+     * opened, so the repair is an ordinary pass rather than a restore.
+     *
+     * <p>This is <em>not</em> what enforces the withheld state. The precondition
+     * in {@link MaintenanceCoordinator#open} hides the Store synchronously, and
+     * read-back failure refuses the window, so no interval exists in which a
+     * relaxed window runs beside a visible Store. This hook only brings package
+     * visibility back into line with the base policy afterwards.
+     *
+     * <p>The pass is skipped while protection is paused, and the whole hook is
+     * gated on the opt-in so a device that never touches the feature keeps the
+     * maintenance behaviour it has today, unchanged. Reading the preference is
+     * safe <em>here</em>, and only here, because this hook restores availability
+     * rather than withdrawing it: the worst a stale or saved-off preference can
+     * do is leave the Store hidden. The precondition, which is the half that must
+     * withdraw, reads no preference at all.
+     */
+    private static void reconcileAfterMaintenanceChange(
+            Context context,
+            MaintenanceOutcome outcome
+    ) {
+        boolean opened = outcome.phase() == MaintenanceCoordinator.Phase.OPEN
+                && outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED;
+        boolean closed = outcome.closeReason() != null;
+        boolean preconditionRefused =
+                outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED
+                        && PRECONDITION_REFUSAL.equals(outcome.reason());
+        // A liveness pass that changed nothing is deliberately excluded: the
+        // fifteen-minute sweep must not queue a full policy pass every time it
+        // finds a window still open.
+        if ((!opened && !closed && !preconditionRefused)
+                || !PlayStoreCompatibilityStore.isEnabled(context)) {
+            return;
+        }
+        // Asynchronous on the shared policy executor: this method is itself
+        // reached from that thread on the job, boot and console paths, and a
+        // blocking call there would deadlock the very pass it is queueing.
+        String reason;
+        if (closed) {
+            reason = "maintenance-closed-play-compatibility";
+        } else if (opened) {
+            reason = "maintenance-opened-play-compatibility";
+        } else {
+            reason = "maintenance-precondition-play-compatibility";
+        }
+        PolicyReconciliationCoordinator.reconcileAsync(context, reason, null);
     }
 
     /**
@@ -356,8 +424,18 @@ public final class MaintenanceGuard {
         return new MaintenanceCoordinator(
                 Build.VERSION.SDK_INT,
                 SystemPolicyStore.effectiveProfile(context),
-                SystemPolicyStore.explicitChoices(context),
+                // baseChoices, not the raw switches: a restore has to put back the
+                // policy this device is configured for, including the installation
+                // lock a Google Play compatibility opt-in pins on. Restoring the
+                // raw switches would end a window by leaving the Store available
+                // with installs unlocked.
+                SystemPolicyStore.baseChoices(context),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
+                // No compatibility preference is handed in on purpose. The
+                // precondition inside the gateway must fire on the shape of the
+                // window, not on a switch an administrator may have saved without
+                // applying — the Store can still be visible from an earlier
+                // applied state long after the switch says otherwise.
                 new AndroidMaintenanceCapabilityGateway(
                         dpm,
                         LockdownAdminReceiver.componentName(context),

@@ -6,6 +6,8 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
+import com.example.lockdowndpc.policy.PlayStoreCompatibility;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -35,6 +37,38 @@ final class AndroidMaintenanceCapabilityGateway implements MaintenanceCapability
         this.device = device;
     }
 
+    /**
+     * Hides the Google Play Store before a window that must not run beside it is
+     * allowed to relax anything, and proves it is hidden.
+     *
+     * <p>The decision is taken from the window alone. This class deliberately
+     * holds no compatibility preference: whether the Store is visible is device
+     * state, the preference is intent, and a preference saved without an apply
+     * leaves the two disagreeing — which is exactly how a window could once be
+     * opened beside a Store that was still visible from an earlier applied
+     * compatibility state. On an already-strict device the package is already
+     * hidden, so this costs one verified no-op write.
+     *
+     * <p>Only the one package the compatibility exception can make available. The
+     * other managed stores are hidden by the base policy, and a window that opens
+     * application-store access is handled by {@link #open} instead — which runs
+     * after the restrictions are relaxed, preserving that ordering.
+     */
+    @Override
+    public List<String> prepare(MaintenanceWindow window) {
+        if (window == null
+                || !PlayStoreCompatibility.requiresPlayStoreWithheld(window.relaxableControls())) {
+            return List.of();
+        }
+        ArrayList<String> failures = new ArrayList<>();
+        for (String failure : setHidden(List.of(PlayStoreCompatibility.PLAY_STORE_PACKAGE), true)) {
+            // Named as a precondition so an audit line cannot be mistaken for a
+            // restore that failed after the device had already been relaxed.
+            failures.add("maintenance-precondition:" + failure);
+        }
+        return Collections.unmodifiableList(failures);
+    }
+
     @Override
     public List<String> open(MaintenanceWindow window) {
         if (!MaintenanceAppPolicy.opensApplicationStores(window)) {
@@ -49,8 +83,12 @@ final class AndroidMaintenanceCapabilityGateway implements MaintenanceCapability
     }
 
     private List<String> setStoresHidden(boolean hidden) {
+        return setHidden(MaintenanceAppPolicy.managedStorePackages(), hidden);
+    }
+
+    private List<String> setHidden(Iterable<String> packages, boolean hidden) {
         ArrayList<String> failures = new ArrayList<>();
-        for (String packageName : MaintenanceAppPolicy.managedStorePackages()) {
+        for (String packageName : packages) {
             if (!device.isInstalled(packageName)) {
                 continue;
             }

@@ -1079,7 +1079,10 @@ private fun snapshotOf(
     val plan = window?.let {
         MaintenancePlan.forWindow(
             SystemPolicyStore.effectiveProfile(context),
-            SystemPolicyStore.explicitChoices(context),
+            // The same base the coordinator and the policy engine use, so the
+            // relaxed and residual lists on screen describe the policy the device
+            // is actually configured for rather than the raw switches.
+            SystemPolicyStore.baseChoices(context),
             it,
         )
     }

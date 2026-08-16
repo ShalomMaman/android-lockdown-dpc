@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.ui
 
+import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
 import android.os.Build
@@ -37,9 +38,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.maintenance.MaintenancePlan
+import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PlayStoreCompatibility
+import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyLabels
@@ -111,6 +116,50 @@ private data class PendingChange(
     val requested: Boolean,
 )
 
+/**
+ * The controls a live maintenance window has legitimately relaxed.
+ *
+ * Read here for the same reason the policy engine reads it: a control an
+ * authenticated, bounded window deliberately opened is not a control the device
+ * refused to enforce, and the Google Play compatibility row must not report the
+ * first as if it were the second.
+ */
+private fun relaxedByMaintenance(context: Context): Set<SystemPolicyControl> {
+    val window = MaintenanceStore.liveWindow(context) ?: return emptySet()
+    return MaintenancePlan.forWindow(
+        SystemPolicyStore.effectiveProfile(context),
+        SystemPolicyStore.baseChoices(context),
+        window,
+    ).relaxed()
+}
+
+/**
+ * What the compatibility exception resolves to from the evidence on file.
+ *
+ * Verified outcomes, never the saved switch: an opt-in whose installation lock
+ * this device has not confirmed is reported as exactly that, and the policy
+ * engine keeps the Store hidden until it is.
+ */
+private fun playCompatibilityStateOf(context: Context): PlayStoreCompatibility.State =
+    PlayStoreCompatibility.evaluateOutcomes(
+        PlayStoreCompatibilityStore.isEnabled(context),
+        relaxedByMaintenance(context),
+        PlayStoreCompatibility.REQUIRED_INSTALL_CONTROLS.associateWith { control ->
+            SystemPolicyStore.lastOutcome(context, control)
+        },
+    )
+
+private fun playCompatibilityStatusRes(state: PlayStoreCompatibility.State): Int = when (state) {
+    PlayStoreCompatibility.State.STRICT -> R.string.system_policy_play_compat_state_strict
+    PlayStoreCompatibility.State.ACTIVE -> R.string.system_policy_play_compat_state_active
+    PlayStoreCompatibility.State.RELAXED_BY_MAINTENANCE ->
+        R.string.system_policy_play_compat_state_maintenance
+    PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE ->
+        R.string.system_policy_play_compat_state_withheld
+    PlayStoreCompatibility.State.INSTALL_LOCK_UNVERIFIED ->
+        R.string.system_policy_play_compat_state_unverified
+}
+
 @Composable
 private fun SystemPolicyScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -120,11 +169,15 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     // a copy that could drift from what the device was actually told.
     var revision by remember { mutableIntStateOf(0) }
     var pending by remember { mutableStateOf<PendingChange?>(null) }
+    var pendingPlayCompatibility by remember { mutableStateOf<Boolean?>(null) }
     var working by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<UiMessage?>(null) }
 
     val profile = remember(revision) { SystemPolicyStore.effectiveProfile(context) }
     val protectionEnabled = remember(revision) { AllowedAppsStore.isProtectionEnabled(context) }
+    val playCompatibilityRequested =
+        remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
+    val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
 
     fun requireSession(): Boolean {
         if (AdminSession.isUnlocked()) {
@@ -148,6 +201,38 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             context.getString(
                 R.string.audit_system_policy_changed,
                 "${change.control.storageKey()}=${change.requested}".bidiIsolated(),
+            ),
+        )
+        revision++
+        message = UiMessage(
+            context.getString(
+                if (protectionEnabled) {
+                    R.string.system_policy_pending_note
+                } else {
+                    R.string.system_policy_paused_note
+                }
+            ),
+            isError = false,
+        )
+    }
+
+    /**
+     * Records the Google Play compatibility decision.
+     *
+     * The store also drops the stale verification of the controls the mode pins
+     * on, so nothing here can leave the rows asserting an enforcement that no
+     * longer describes the policy being asked for.
+     */
+    fun commitPlayCompatibility(requested: Boolean) {
+        if (!requireSession()) {
+            return
+        }
+        PlayStoreCompatibilityStore.setEnabled(context, requested)
+        AuditLog.append(
+            context,
+            context.getString(
+                R.string.audit_play_compatibility_changed,
+                "play_store_compatibility=$requested".bidiIsolated(),
             ),
         )
         revision++
@@ -248,6 +333,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                             detail = SystemPolicyStore.lastDetail(context, control),
                             supported = control.supportedOn(Build.VERSION.SDK_INT),
                             enabled = !working,
+                            lockedByPlayCompatibility = PlayStoreCompatibility.locksControl(
+                                control,
+                                playCompatibilityRequested,
+                            ),
                             showDivider = index > 0,
                             onToggle = { requested ->
                                 pending = PendingChange(control, requested)
@@ -255,6 +344,18 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                         )
                     }
                 }
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.system_policy_section_play_compatibility)) {
+            key(revision) {
+                PlayCompatibilityRow(
+                    requested = playCompatibilityRequested,
+                    state = playCompatibilityState,
+                    enabled = !working,
+                    onToggle = { requested -> pendingPlayCompatibility = requested },
+                )
             }
         }
 
@@ -280,6 +381,118 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             onDismiss = { pending = null },
         )
     }
+
+    pendingPlayCompatibility?.let { requested ->
+        PlayCompatibilityConfirmDialog(
+            requested = requested,
+            onConfirm = {
+                pendingPlayCompatibility = null
+                commitPlayCompatibility(requested)
+            },
+            onDismiss = { pendingPlayCompatibility = null },
+        )
+    }
+}
+
+/**
+ * The Google Play compatibility exception: what it does, what this device
+ * confirmed, and a switch.
+ *
+ * The boundary paragraph is always on screen rather than only inside the
+ * confirmation dialog. An operator who inherits a configured device has to be
+ * able to read why an application store is visible on a protected phone without
+ * touching the switch to find out.
+ */
+@Composable
+private fun PlayCompatibilityRow(
+    requested: Boolean,
+    state: PlayStoreCompatibility.State,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.system_policy_play_compat_row),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(
+                    R.string.system_policy_status_line,
+                    stringResource(playCompatibilityStatusRes(state)),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (state == PlayStoreCompatibility.State.INSTALL_LOCK_UNVERIFIED) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Spacer(Modifier.size(16.dp))
+        Switch(
+            checked = requested,
+            onCheckedChange = { onToggle(it) },
+            enabled = enabled,
+        )
+    }
+    Text(
+        text = stringResource(R.string.system_policy_play_compat_body),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+}
+
+/** The price of the exception, stated before anything is written. */
+@Composable
+private fun PlayCompatibilityConfirmDialog(
+    requested: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (requested) {
+                        R.string.system_policy_play_compat_confirm_enable_title
+                    } else {
+                        R.string.system_policy_play_compat_confirm_disable_title
+                    }
+                )
+            )
+        },
+        text = {
+            Text(
+                stringResource(
+                    if (requested) {
+                        R.string.system_policy_play_compat_confirm_enable_body
+                    } else {
+                        R.string.system_policy_play_compat_confirm_disable_body
+                    }
+                )
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.system_policy_confirm_apply))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
 }
 
 /**
@@ -296,6 +509,7 @@ private fun SystemPolicyControlRow(
     detail: String,
     supported: Boolean,
     enabled: Boolean,
+    lockedByPlayCompatibility: Boolean,
     showDivider: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
@@ -339,6 +553,13 @@ private fun SystemPolicyControlRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            if (lockedByPlayCompatibility) {
+                Text(
+                    text = stringResource(R.string.system_policy_play_compat_locked_control),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
         Spacer(Modifier.size(16.dp))
         Switch(
@@ -346,8 +567,11 @@ private fun SystemPolicyControlRow(
             onCheckedChange = { onToggle(it) },
             // An unsupported control can still be requested — the request is kept
             // so the device enforces it after an OS upgrade — but the row says
-            // plainly that nothing was sent to this release.
-            enabled = enabled,
+            // plainly that nothing was sent to this release. A control the Google
+            // Play compatibility opt-in pins on is different: the next pass would
+            // put it straight back, so the switch is disabled and says why rather
+            // than accepting a change that cannot survive.
+            enabled = enabled && !lockedByPlayCompatibility,
         )
     }
     if (!supported) {
