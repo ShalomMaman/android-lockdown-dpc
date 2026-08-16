@@ -23,6 +23,6 @@ Thank you for helping improve Device Guard.
 
 5. Explain security assumptions, Android-version constraints, and physical-device testing in the pull request.
 
-The Android UI is currently Hebrew-first. New user-facing strings must use Android resources and should be written so future English localization remains straightforward.
+English is the source locale and Hebrew is a complete RTL translation. New user-facing strings must use Android resources, update both locales, preserve placeholder and plural parity, and render correctly in both LTR and RTL layouts.
 
 By submitting a contribution, you agree that it is licensed under Apache License 2.0.
