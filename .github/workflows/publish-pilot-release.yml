@@ -74,6 +74,19 @@ jobs:
           chmod 600 "$signing_store" "$metadata_key"
           printf 'signing_store=%s\nmetadata_key=%s\n' "$signing_store" "$metadata_key" >> "$GITHUB_OUTPUT"
 
+      - name: Verify the restored pilot signing identity
+        shell: bash
+        env:
+          DEVICE_GUARD_PILOT_STORE_PASSWORD: ${{ secrets.PILOT_SIGNING_STORE_PASSWORD }}
+          DEVICE_GUARD_PILOT_KEY_ALIAS: ${{ secrets.PILOT_SIGNING_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          python3 tools/verify_pilot_keystore.py \
+            --keystore "${{ steps.keys.outputs.signing_store }}" \
+            --channel updates/pilot/channel.json \
+            --store-password-env DEVICE_GUARD_PILOT_STORE_PASSWORD \
+            --key-alias-env DEVICE_GUARD_PILOT_KEY_ALIAS
+
       - name: Build and verify the enrolled pilot APK
         shell: bash
         env:

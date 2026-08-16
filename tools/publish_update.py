@@ -171,7 +171,11 @@ def verify_apk_signer(apk: Path, apksigner: Path, expected_sha256: str) -> None:
         if (match := CERT_SHA256_LINE.match(line.strip()))
     ]
     if signer_digests != [expected_sha256]:
-        raise PublishError("APK signing certificate does not exactly match the expected SHA-256")
+        observed = ",".join(signer_digests) if signer_digests else "none"
+        raise PublishError(
+            "APK signing certificate does not exactly match the expected SHA-256: "
+            f"expected {expected_sha256}, observed {observed}"
+        )
 
 
 def sha256_and_size(path: Path) -> tuple[str, int]:
