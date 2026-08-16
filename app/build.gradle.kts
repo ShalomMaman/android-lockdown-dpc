@@ -21,8 +21,8 @@ android {
         // Build 11 was installed on the first 0.5.2 hardware pilot before the
         // compact-inventory fix. The published 0.5.2 candidate must be newer so
         // that those devices can receive it through the signed update channel.
-        versionCode = 12
-        versionName = "0.5.2"
+        versionCode = 13
+        versionName = "0.5.3"
         // Update channels are an explicit build choice. Ordinary builds never
         // consume ambient properties or environment variables.
         buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())
