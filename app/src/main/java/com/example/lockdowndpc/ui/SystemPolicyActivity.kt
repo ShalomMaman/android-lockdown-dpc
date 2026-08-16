@@ -40,6 +40,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyLabels
 import com.example.lockdowndpc.policy.SystemPolicyOutcome
@@ -170,7 +171,9 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         message = null
         coroutineScope.launch {
             val result = withContext(Dispatchers.IO) {
-                LockdownPolicyController.apply(context.applicationContext)
+                PolicyReconciliationCoordinator.callOnPolicyThread {
+                    LockdownPolicyController.apply(context.applicationContext)
+                }
             }
             working = false
             revision++

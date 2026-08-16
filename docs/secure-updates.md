@@ -88,7 +88,7 @@ exact APK to the intended channel before replacing `updates/pilot/latest.json`:
 python3 tools/verify_pilot_apk.py \
   --apk app/build/outputs/apk/release/app-release.apk \
   --expected-package com.example.lockdowndpc \
-  --expected-version-code 11 --expected-version-name 0.5.2 \
+  --expected-version-code 12 --expected-version-name 0.5.2 \
   --expected-signer-sha256 25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b \
   --expected-manifest-url https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json \
   --expected-public-key-file updates/pilot/public-key.pub \

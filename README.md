@@ -15,7 +15,7 @@ The app interface is fully bilingual: English is the default locale and Hebrew i
 - Built-in blocking for known browsers, app stores, and social-media apps.
 - A searchable system-application inventory with explicit safety tiers. Protected core components cannot be blocked from the console; reviewed system applications can; unclassified OEM components stay visible for diagnosis and require an explicit, recorded risk acceptance before they can be managed.
 - Verified system policy controls for debugging and ADB, USB file transfer, unknown-source installs, application stores, accounts, VPN, network, date and time, Safe Boot, factory reset, user creation, uninstall and application-control settings. Each control reports whether this Android release supports it and whether Android confirmed the requested state; a switch is never treated as proof.
-- Timed maintenance mode: an administrator opens named capabilities for a bounded period, and the window closes on expiry, on reboot, on a suspicious clock and on cancel, restoring and re-verifying the previous policy every time. ADB/debugging is a separate break-glass choice that is never implied by another capability.
+- Timed maintenance mode: an administrator opens named capabilities for a bounded period, and the window closes on expiry, on reboot, on app-process restart, on a suspicious clock and on cancel, restoring and re-verifying the previous policy every time. ADB/debugging is a separate break-glass choice that is never implied by another capability.
 - Management identity pinning: the console can read the installed signing certificate of a management package, pin it, and state plainly whether identity is proven, unproven but trusted by package name, or refused.
 - A local device health report with an administrator-initiated redacted export. No health data is transmitted: the feature has no scheduler, no endpoint and no network code, and anything unverified is reported as unverified rather than healthy.
 - HTTP/HTTPS link interception while protection is active.
@@ -93,7 +93,9 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Status
 
-Pilot release candidate: `0.5.2` (`versionCode 11`).
+Pilot release candidate: `0.5.2` (`versionCode 12`). Build 11 was the first
+hardware pilot and is intentionally superseded so that enrolled test devices
+can receive the final 0.5.2 artifact through the signed update channel.
 
 `0.5.2` keeps the pilot `applicationId` and signer, so it can update the already provisioned pilot device in place. It is not production-ready and remains a prerelease until the hardware gates pass.
 

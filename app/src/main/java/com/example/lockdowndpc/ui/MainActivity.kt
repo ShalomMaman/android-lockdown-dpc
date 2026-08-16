@@ -82,6 +82,7 @@ import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
@@ -265,6 +266,7 @@ private fun AdminConsole(
     var replacingPin by remember { mutableStateOf(false) }
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
+    var applyFailureMessage by remember { mutableStateOf<UiMessage?>(null) }
     var modePickerVisible by remember { mutableStateOf(false) }
     var languagePickerVisible by remember { mutableStateOf(false) }
     var auditLogVisible by remember { mutableStateOf(false) }
@@ -283,6 +285,7 @@ private fun AdminConsole(
     fun showLocked() {
         AdminSession.lock()
         message = null
+        applyFailureMessage = null
         replacingPin = false
         screen = ConsoleScreen.LOCKED
     }
@@ -302,6 +305,7 @@ private fun AdminConsole(
         }
         AdminSession.extend()
         message = null
+        applyFailureMessage = null
         statusRevision++
         screen = ConsoleScreen.ADMIN
     }
@@ -390,9 +394,12 @@ private fun AdminConsole(
         }
         policyOperationInProgress = true
         message = null
+        applyFailureMessage = null
         coroutineScope.launch {
             val result = withContext(Dispatchers.IO) {
-                LockdownPolicyController.apply(context.applicationContext)
+                PolicyReconciliationCoordinator.callOnPolicyThread {
+                    LockdownPolicyController.apply(context.applicationContext)
+                }
             }
             policyOperationInProgress = false
             statusRevision++
@@ -404,10 +411,12 @@ private fun AdminConsole(
                 // before it is embedded in a localized sentence.
                 val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
                 showAdmin()
-                message = UiMessage(
+                val failure = UiMessage(
                     context.getString(R.string.policy_failed, detail.bidiIsolated()),
                     isError = true,
                 )
+                message = failure
+                applyFailureMessage = failure
             } else {
                 AuditLog.append(context, context.getString(R.string.audit_apply))
                 showAdmin()
@@ -427,9 +436,12 @@ private fun AdminConsole(
         AdminSession.extend()
         policyOperationInProgress = true
         message = null
+        applyFailureMessage = null
         coroutineScope.launch {
             val result = withContext(Dispatchers.IO) {
-                LockdownPolicyController.pause(context.applicationContext)
+                PolicyReconciliationCoordinator.callOnPolicyThread {
+                    LockdownPolicyController.pause(context.applicationContext)
+                }
             }
             policyOperationInProgress = false
             statusRevision++
@@ -549,6 +561,29 @@ private fun AdminConsole(
     }
 
     LaunchedEffect(screen) { onSecureScreen(screen.secure) }
+
+    // Android 14+ may publish persistent-preferred-activity changes after the
+    // bounded direct apply check. A background reconciliation then reads the
+    // whole policy back as ACTIVE. Keep the original failure visible until that
+    // proof exists, but remove it once it becomes the one stale banner on an
+    // otherwise verified screen. Identity matters: an unrelated error must not
+    // disappear merely because protection is active.
+    LaunchedEffect(
+        status.policyState,
+        status.protectionEnabled,
+        message,
+        applyFailureMessage,
+    ) {
+        if (shouldDismissReconciledApplyFailure(
+                isCurrentApplyFailure = message === applyFailureMessage,
+                policyActive = status.policyState == AllowedAppsStore.PolicyState.ACTIVE,
+                protectionEnabled = status.protectionEnabled,
+            )
+        ) {
+            message = null
+            applyFailureMessage = null
+        }
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         when {

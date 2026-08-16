@@ -37,14 +37,15 @@ import java.util.Map;
  *       for. Nothing is less safe, but the window would be a lie, so the
  *       coordinator restores the base policy immediately and reports
  *       {@link MaintenanceStatus#FAILED}. Only if that restore <em>also</em>
- *       fails does it hand back a window to persist, because a device that may
- *       be partly relaxed must keep a record of what has to be undone.</li>
+ *       fails does it hand back the old window as failure evidence; durable
+ *       storage removes the authorization and keeps a restore-debt bit.</li>
  *   <li><b>Closing failed.</b> The device may still be relaxed — this is the
  *       dangerous direction. The outcome is {@link MaintenanceStatus#FAILED},
  *       {@link MaintenanceOutcome#restoreVerified()} is false, and the window is
- *       returned so the caller keeps it stored and retries. A close is never
- *       reported as done because the calls were made; only because the
- *       restrictions read back as restored.</li>
+ *       returned as failure evidence while durable storage keeps only the
+ *       restore debt and retries. A close is never reported as done because the
+ *       calls were made; only because the restrictions read back as restored.
+ *       The failed window is never persisted as a live authorization.</li>
  * </ul>
  */
 public final class MaintenanceCoordinator {
@@ -76,9 +77,11 @@ public final class MaintenanceCoordinator {
      *
      * @param phase       which operation this describes
      * @param status      the verified result
-     * @param window      the window the caller must now persist; {@code null}
-     *                    means "store nothing, there is no open window"
+     * @param window      the live window or transient failure evidence;
+     *                    {@link #windowForPersistence()} is the only value
+     *                    durable storage may treat as authorization
      * @param closeReason why a window closed, {@code null} otherwise
+     * @param restoreProven explicit readback evidence that the base policy is restored
      * @param plan        the plan that was applied, {@code null} when refused
      * @param report      the per-control evidence, never {@code null}
      * @param failures    non-sensitive summaries of every disagreement
@@ -89,6 +92,7 @@ public final class MaintenanceCoordinator {
             MaintenanceStatus status,
             MaintenanceWindow window,
             CloseReason closeReason,
+            boolean restoreProven,
             MaintenancePlan plan,
             SystemPolicyReport report,
             List<String> failures,
@@ -98,6 +102,16 @@ public final class MaintenanceCoordinator {
         public MaintenanceOutcome {
             failures = failures == null ? List.of() : List.copyOf(failures);
             report = report == null ? SystemPolicyReport.empty() : report;
+            if (restoreProven && (closeReason == null || window != null)) {
+                throw new IllegalArgumentException(
+                        "Restore proof requires a closed outcome with no live window");
+            }
+            if (restoreProven
+                    && !((phase == Phase.RESTORE && status == MaintenanceStatus.APPLIED)
+                    || (phase == Phase.OPEN && status == MaintenanceStatus.FAILED))) {
+                throw new IllegalArgumentException(
+                        "Restore proof does not match the maintenance phase and status");
+            }
         }
 
         public boolean failed() {
@@ -115,16 +129,27 @@ public final class MaintenanceCoordinator {
             return window != null && closeReason == null;
         }
 
-        /**
-         * Whether the caller must keep the window stored.
-         *
-         * <p>Always {@code window() != null}. Named separately because the
-         * storage rule is "persist exactly what the outcome hands back", and a
-         * caller that reads {@link #windowOpen()} instead would drop the record
-         * of a failed restore.
-         */
+        /** Whether the outcome carries window evidence for callers and audit. */
         public boolean windowMustBeStored() {
             return window != null;
+        }
+
+        /**
+         * The only window durable storage may treat as an authorization.
+         *
+         * <p>A failed close deliberately carries its old window for audit and
+         * operator evidence, but persisting that shape would let a later refresh
+         * reinterpret the failed close as a still-authorized live window. The
+         * separate restore-pending bit is the durable record of that unsafe
+         * state, so a failed close persists no authorization at all.
+         */
+        public MaintenanceWindow windowForPersistence() {
+            return windowOpen() ? window : null;
+        }
+
+        /** Whether a close was attempted but the base policy is still unproved. */
+        public boolean restoreOwed() {
+            return closeReason != null && !restoreProven();
         }
 
         /**
@@ -135,23 +160,6 @@ public final class MaintenanceCoordinator {
          */
         public boolean restoreVerified() {
             return phase == Phase.RESTORE && status == MaintenanceStatus.APPLIED;
-        }
-
-        /**
-         * Whether the base policy is proven back in force, whatever phase said so.
-         *
-         * <p>{@link #restoreVerified()} is deliberately phase-specific, and that
-         * specificity once hid a proven restore: a failed open restores the base
-         * policy, verifies it, and then reports the whole operation as
-         * {@link Phase#OPEN} — so the pending-restore flag stayed set and the
-         * next pass re-restored a device that was already proven clean, while
-         * the audit line claimed the restore had failed. The construction rule
-         * makes the truth recoverable: a window is kept <em>only</em> when the
-         * device may still be relaxed, so a closed outcome with no window to
-         * store is a proven restore.
-         */
-        public boolean restoreProven() {
-            return closeReason != null && window == null;
         }
 
         /**
@@ -189,6 +197,7 @@ public final class MaintenanceCoordinator {
     private final SystemPolicyProfile profile;
     private final Map<SystemPolicyControl, Boolean> baseChoices;
     private final SystemPolicyGateway gateway;
+    private final MaintenanceCapabilityGateway capabilityGateway;
     private final MaintenanceClock clock;
 
     /**
@@ -196,6 +205,8 @@ public final class MaintenanceCoordinator {
      * @param profile     the profile the stored choices are resolved against
      * @param baseChoices the administrator's stored choices, without maintenance
      * @param gateway     the device policy seam
+     * @param capabilityGateway non-restriction capability effects, including
+     *                          verified application-store visibility
      * @param clock       the two clock readings a window is judged by
      */
     public MaintenanceCoordinator(
@@ -203,6 +214,7 @@ public final class MaintenanceCoordinator {
             SystemPolicyProfile profile,
             Map<SystemPolicyControl, Boolean> baseChoices,
             SystemPolicyGateway gateway,
+            MaintenanceCapabilityGateway capabilityGateway,
             MaintenanceClock clock
     ) {
         if (profile == null) {
@@ -211,6 +223,9 @@ public final class MaintenanceCoordinator {
         if (gateway == null) {
             throw new IllegalArgumentException("A maintenance coordinator needs a policy gateway");
         }
+        if (capabilityGateway == null) {
+            throw new IllegalArgumentException("A maintenance coordinator needs a capability gateway");
+        }
         if (clock == null) {
             throw new IllegalArgumentException("A maintenance coordinator needs a clock");
         }
@@ -218,6 +233,7 @@ public final class MaintenanceCoordinator {
         this.profile = profile;
         this.baseChoices = baseChoices == null ? Map.of() : Map.copyOf(baseChoices);
         this.gateway = gateway;
+        this.capabilityGateway = capabilityGateway;
         this.clock = clock;
     }
 
@@ -237,6 +253,7 @@ public final class MaintenanceCoordinator {
                     MaintenanceStatus.REFUSED,
                     current,
                     null,
+                    false,
                     null,
                     SystemPolicyReport.empty(),
                     List.of(),
@@ -247,7 +264,8 @@ public final class MaintenanceCoordinator {
         MaintenancePlan plan = MaintenancePlan.forWindow(profile, baseChoices, window);
         SystemPolicyReport report =
                 SystemPolicyEnforcer.enforce(sdkInt, profile, plan.effectiveChoices(), gateway);
-        List<String> failures = openFailures(report, plan);
+        List<String> failures = new ArrayList<>(openFailures(report, plan));
+        failures.addAll(capabilityGateway.open(window));
 
         if (failures.isEmpty()) {
             return new MaintenanceOutcome(
@@ -255,6 +273,7 @@ public final class MaintenanceCoordinator {
                     MaintenanceStatus.APPLIED,
                     window,
                     null,
+                    false,
                     plan,
                     report,
                     List.of(),
@@ -270,9 +289,12 @@ public final class MaintenanceCoordinator {
         return new MaintenanceOutcome(
                 Phase.OPEN,
                 MaintenanceStatus.FAILED,
-                // Keep the window only when the device may still be relaxed.
+                // Keep the window as failure evidence when the device may still
+                // be relaxed. windowForPersistence() strips this closed window;
+                // the durable restore-pending bit is what drives the retry.
                 restoreVerified ? null : window,
                 CloseReason.OPEN_FAILED,
+                restoreVerified,
                 plan,
                 report,
                 combined,
@@ -294,6 +316,7 @@ public final class MaintenanceCoordinator {
                     MaintenanceStatus.UNCHANGED,
                     evaluation.window(),
                     null,
+                    false,
                     null,
                     SystemPolicyReport.empty(),
                     List.of(),
@@ -305,6 +328,7 @@ public final class MaintenanceCoordinator {
                     MaintenanceStatus.UNCHANGED,
                     null,
                     null,
+                    false,
                     null,
                     SystemPolicyReport.empty(),
                     List.of(),
@@ -322,6 +346,7 @@ public final class MaintenanceCoordinator {
                     MaintenanceStatus.UNCHANGED,
                     null,
                     null,
+                    false,
                     null,
                     SystemPolicyReport.empty(),
                     List.of(),
@@ -343,17 +368,21 @@ public final class MaintenanceCoordinator {
      */
     public MaintenanceOutcome restore(MaintenanceWindow window, CloseReason closeReason) {
         MaintenancePlan plan = MaintenancePlan.restore(profile, baseChoices);
+        List<String> failures = new ArrayList<>(capabilityGateway.restore());
         SystemPolicyReport report =
                 SystemPolicyEnforcer.enforce(sdkInt, profile, plan.effectiveChoices(), gateway);
-        List<String> failures = summaries(report.failures());
+        failures.addAll(summaries(report.failures()));
         boolean verified = failures.isEmpty();
         return new MaintenanceOutcome(
                 Phase.RESTORE,
                 verified ? MaintenanceStatus.APPLIED : MaintenanceStatus.FAILED,
-                // A restore that could not be proved leaves the record in place:
-                // the caller retries rather than forgetting the device was opened.
+                // A restore that could not be proved keeps the old window only
+                // as failure evidence. Durable storage removes its authorization
+                // shape and retains restore-pending, so the caller retries without
+                // any later refresh being able to reopen it.
                 verified ? null : window,
                 closeReason,
+                verified,
                 plan,
                 report,
                 failures,

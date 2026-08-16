@@ -311,6 +311,7 @@ class MaintenanceConsoleLogicTest {
             MaintenanceStatus.FAILED,
             window = null,
             closeReason = CloseReason.OPEN_FAILED,
+            restoreProven = true,
             failures = listOf("maintenance-not-relaxed:app_control_settings"),
             reason = "open-failed-policy-restored",
         )
@@ -387,6 +388,7 @@ class MaintenanceConsoleLogicTest {
             MaintenanceStatus.APPLIED,
             window = null,
             closeReason = CloseReason.ADMINISTRATOR_CANCELLED,
+            restoreProven = true,
             reason = "restore-verified",
         )
         val unverified = outcome(
@@ -537,7 +539,18 @@ class MaintenanceConsoleLogicTest {
         window: MaintenanceWindow?,
         closeReason: CloseReason? = null,
         plan: MaintenancePlan? = null,
+        restoreProven: Boolean = false,
         failures: List<String> = emptyList(),
         reason: String,
-    ) = MaintenanceOutcome(phase, status, window, closeReason, plan, null, failures, reason)
+    ) = MaintenanceOutcome(
+        phase,
+        status,
+        window,
+        closeReason,
+        restoreProven,
+        plan,
+        null,
+        failures,
+        reason,
+    )
 }

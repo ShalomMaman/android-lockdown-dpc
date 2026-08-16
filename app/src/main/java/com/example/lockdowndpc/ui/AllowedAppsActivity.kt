@@ -81,6 +81,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemAppClassifier.Category
 import com.example.lockdowndpc.policy.SystemAppClassifier.Origin
 import com.example.lockdowndpc.policy.SystemAppClassifier.ProtectedContext
@@ -180,7 +181,9 @@ class AllowedAppsActivity : AppCompatActivity() {
         // The controller owns the requested → applied/failed contract and marks
         // the policy state itself. Nothing here may pre-announce success.
         if (AllowedAppsStore.isProtectionEnabled(this)) {
-            LockdownPolicyController.apply(this)
+            PolicyReconciliationCoordinator.callOnPolicyThread {
+                LockdownPolicyController.apply(this)
+            }
         }
         AdminSession.extend()
         setResult(RESULT_OK)
@@ -263,84 +266,63 @@ private fun InventoryScreen(
             )
         },
     ) { insets ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(insets),
         ) {
-            Text(
-                text = stringResource(R.string.sysinv_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                // What a tick means depends on the protection method in force, so
-                // the screen restates it rather than assuming the operator
-                // remembers which radio button they left selected.
-                text = stringResource(
-                    if (allowSelected) R.string.apps_note_allow else R.string.apps_note_block,
-                ),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Spacer(Modifier.height(16.dp))
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                label = { Text(stringResource(R.string.sysinv_search)) },
-                singleLine = true,
-                shape = MaterialTheme.shapes.small,
-                leadingIcon = {
-                    Icon(imageVector = Icons.Rounded.Search, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = stringResource(R.string.sysinv_search_clear),
-                            )
-                        }
-                    }
-                },
-                // A query is as likely to be a package-name fragment as a Hebrew
-                // label, so the field resolves its own direction from what was
-                // typed instead of inheriting the page's — the platform
-                // equivalent of `dir="auto"` on an input.
-                textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            CategoryFilters(selected = category, onSelect = { category = it })
-            Spacer(Modifier.height(8.dp))
-
             when {
-                loading -> CenteredState(Modifier.weight(1f)) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(20.dp))
-                    Text(
-                        text = stringResource(R.string.sysinv_loading),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                loading -> Column(modifier = Modifier.fillMaxSize()) {
+                    InventoryControls(
+                        allowSelected = allowSelected,
+                        query = query,
+                        onQueryChange = { query = it },
+                        category = category,
+                        onCategoryChange = { category = it },
                     )
+                    CenteredState(Modifier.weight(1f)) {
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            text = stringResource(R.string.sysinv_loading),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
 
-                visible.isEmpty() -> CenteredState(Modifier.weight(1f)) {
-                    EmptyState(
-                        title = stringResource(R.string.sysinv_no_results_title),
-                        body = stringResource(R.string.sysinv_no_results_body),
+                visible.isEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
+                    InventoryControls(
+                        allowSelected = allowSelected,
+                        query = query,
+                        onQueryChange = { query = it },
+                        category = category,
+                        onCategoryChange = { category = it },
                     )
+                    CenteredState(Modifier.weight(1f)) {
+                        EmptyState(
+                            title = stringResource(R.string.sysinv_no_results_title),
+                            body = stringResource(R.string.sysinv_no_results_body),
+                        )
+                    }
                 }
 
                 else -> LazyColumn(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 16.dp),
                 ) {
+                    // On compact managed devices these controls scroll out of the
+                    // way with the list, replacing the previous one-row viewport
+                    // with the full available height after a single swipe.
+                    item(key = "inventory-controls") {
+                        InventoryControls(
+                            allowSelected = allowSelected,
+                            query = query,
+                            onQueryChange = { query = it },
+                            category = category,
+                            onCategoryChange = { category = it },
+                        )
+                    }
                     items(visible, key = { it.packageName }) { row ->
                         val ticked = row.packageName in state.ticked
                         InventoryRowItem(
@@ -413,6 +395,66 @@ private fun InventoryScreen(
             },
         )
     }
+}
+
+@Composable
+private fun InventoryControls(
+    allowSelected: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    category: Category,
+    onCategoryChange: (Category) -> Unit,
+) {
+    Text(
+        text = stringResource(R.string.sysinv_subtitle),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 20.dp),
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        // What a tick means depends on the protection method in force, so
+        // the screen restates it rather than assuming the operator
+        // remembers which radio button they left selected.
+        text = stringResource(
+            if (allowSelected) R.string.apps_note_allow else R.string.apps_note_block,
+        ),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 20.dp),
+    )
+    Spacer(Modifier.height(16.dp))
+    OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        label = { Text(stringResource(R.string.sysinv_search)) },
+        singleLine = true,
+        shape = MaterialTheme.shapes.small,
+        leadingIcon = {
+            Icon(imageVector = Icons.Rounded.Search, contentDescription = null)
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = stringResource(R.string.sysinv_search_clear),
+                    )
+                }
+            }
+        },
+        // A query is as likely to be a package-name fragment as a Hebrew
+        // label, so the field resolves its own direction from what was
+        // typed instead of inheriting the page's — the platform
+        // equivalent of `dir="auto"` on an input.
+        textStyle = LocalTextStyle.current.copy(textDirection = TextDirection.Content),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+    )
+    Spacer(Modifier.height(12.dp))
+    CategoryFilters(selected = category, onSelect = onCategoryChange)
+    Spacer(Modifier.height(8.dp))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -800,11 +842,13 @@ private fun SaveBar(systemCount: Int, enabled: Boolean, onSave: () -> Unit) {
     Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     // Hebrew inflects for one, two and many, so the counter is a
@@ -814,15 +858,16 @@ private fun SaveBar(systemCount: Int, enabled: Boolean, onSave: () -> Unit) {
                         systemCount,
                         systemCount,
                     ),
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(0.8f),
                 )
-                Spacer(Modifier.height(12.dp))
                 PrimaryAction(
                     text = stringResource(R.string.sysinv_save),
                     icon = Icons.Rounded.Check,
                     enabled = enabled,
                     onClick = onSave,
+                    modifier = Modifier.weight(1.2f),
                 )
             }
         }

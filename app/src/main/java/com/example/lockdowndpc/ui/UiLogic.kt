@@ -121,3 +121,16 @@ internal fun matchesAppQuery(label: String, packageName: String, query: String):
         label.contains(trimmed, ignoreCase = true) ||
         packageName.contains(trimmed, ignoreCase = true)
 }
+
+/**
+ * Whether a direct apply failure has become stale because a later reconciliation
+ * proved the requested protection active.
+ *
+ * Other error banners are never candidates: the caller supplies true only when
+ * the banner still on screen is the exact failure object produced by that apply.
+ */
+internal fun shouldDismissReconciledApplyFailure(
+    isCurrentApplyFailure: Boolean,
+    policyActive: Boolean,
+    protectionEnabled: Boolean,
+): Boolean = isCurrentApplyFailure && policyActive && protectionEnabled

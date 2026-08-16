@@ -8,7 +8,8 @@ in [`docs/secure-updates.md`](../../docs/secure-updates.md). A normal
 
 `latest.json` currently advertises **0.5.1 (`versionCode 10`)**, which is the last
 release whose APK was actually published and signed. The source tree has moved on
-to 0.5.2 (`versionCode 11`). Publishing 0.5.2 to this channel requires the offline
+to 0.5.2 (`versionCode 12`; build 11 was an unpublished hardware pilot).
+Publishing 0.5.2 to this channel requires the offline
 metadata signing key and an immutable published APK asset, neither of which exists
 in this repository; until that happens a device on this channel correctly sees no
 newer version rather than a broken one. Rehearse the transition with

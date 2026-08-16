@@ -19,6 +19,7 @@ import org.junit.Test;
 
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -61,6 +62,70 @@ public final class MaintenanceCoordinatorTest {
         // Everything the window did not open stays enforced.
         assertTrue(gateway.inForce.contains(USB));
         assertTrue(outcome.plan().relaxesDebugging());
+    }
+
+    @Test
+    public void applicationStoreAccessIsVisibleOnlyAfterCapabilityReadBack() {
+        FakeGateway gateway = new FakeGateway();
+        FakeCapabilityGateway capabilities = new FakeCapabilityGateway();
+        MaintenanceCoordinator coordinator = production(
+                gateway,
+                capabilities,
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome opened = coordinator.open(
+                null,
+                request(MaintenanceCapability.APP_STORE_ACCESS));
+
+        assertEquals(MaintenanceStatus.APPLIED, opened.status());
+        assertTrue("the verified window must expose stores", capabilities.storesVisible);
+
+        MaintenanceOutcome closed = coordinator.cancel(opened.window());
+        assertTrue(closed.restoreVerified());
+        assertFalse("closing must verify stores are hidden again", capabilities.storesVisible);
+    }
+
+    @Test
+    public void aStoreThatCannotBeShownMakesOpeningFailAndRestoresProtection() {
+        FakeGateway gateway = new FakeGateway();
+        FakeCapabilityGateway capabilities = new FakeCapabilityGateway();
+        capabilities.failOpen = true;
+        MaintenanceCoordinator coordinator = production(
+                gateway,
+                capabilities,
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome = coordinator.open(
+                null,
+                request(MaintenanceCapability.APP_STORE_ACCESS));
+
+        assertEquals(MaintenanceStatus.FAILED, outcome.status());
+        assertTrue(outcome.restoreProven());
+        assertFalse(capabilities.storesVisible);
+        assertTrue(outcome.failures().contains("maintenance-store-state-mismatch:test.store"));
+    }
+
+    @Test
+    public void aStoreThatCannotBeHiddenKeepsTheRestoreDebt() {
+        FakeGateway gateway = new FakeGateway();
+        FakeCapabilityGateway capabilities = new FakeCapabilityGateway();
+        MaintenanceCoordinator coordinator = production(
+                gateway,
+                capabilities,
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+        MaintenanceWindow window = coordinator.open(
+                null,
+                request(MaintenanceCapability.APP_STORE_ACCESS)).window();
+        capabilities.failRestore = true;
+
+        MaintenanceOutcome outcome = coordinator.cancel(window);
+
+        assertEquals(MaintenanceStatus.FAILED, outcome.status());
+        assertFalse(outcome.restoreVerified());
+        assertNotNull("an unverified store restore must remain retryable", outcome.window());
+        assertNull("a failed close must not persist a live authorization",
+                outcome.windowForPersistence());
+        assertTrue(capabilities.storesVisible);
     }
 
     @Test
@@ -147,7 +212,10 @@ public final class MaintenanceCoordinatorTest {
         assertEquals("open-failed-restore-failed", outcome.reason());
         assertNotNull("a device that may still be relaxed keeps its window", outcome.window());
         assertFalse("an unproven restore is never a proven one", outcome.restoreProven());
-        assertTrue(outcome.windowMustBeStored());
+        assertTrue("a failed-open window remains available as failure evidence",
+                outcome.windowMustBeStored());
+        assertNull(outcome.windowForPersistence());
+        assertTrue(outcome.restoreOwed());
         assertFalse("a window with a close reason is not an open window", outcome.windowOpen());
         assertFalse(outcome.restoreVerified());
     }
@@ -224,7 +292,10 @@ public final class MaintenanceCoordinatorTest {
         assertFalse(outcome.restoreVerified());
         assertEquals("restore-failed", outcome.reason());
         assertEquals(CloseReason.EXPIRED, outcome.closeReason());
-        assertNotNull("the window stays stored so the next pass retries", outcome.window());
+        assertNotNull("the old window remains available as failure evidence", outcome.window());
+        assertNull("expiry failure must leave debt without a reopenable window",
+                outcome.windowForPersistence());
+        assertTrue(outcome.restoreOwed());
         assertFalse(outcome.failures().isEmpty());
     }
 
@@ -280,6 +351,27 @@ public final class MaintenanceCoordinatorTest {
     }
 
     @Test
+    public void aFailedDebtOnlyRestoreIsNeverMistakenForProof() {
+        FakeGateway gateway = new FakeGateway();
+        FakeCapabilityGateway capabilities = new FakeCapabilityGateway();
+        capabilities.failRestore = true;
+        MaintenanceCoordinator coordinator = production(
+                gateway,
+                capabilities,
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.restore(null, CloseReason.UNREADABLE_RECORD);
+
+        assertEquals(Phase.RESTORE, outcome.phase());
+        assertEquals(MaintenanceStatus.FAILED, outcome.status());
+        assertNull(outcome.window());
+        assertFalse(outcome.restoreProven());
+        assertTrue(outcome.restoreOwed());
+        assertNull(outcome.windowForPersistence());
+    }
+
+    @Test
     public void theAuditLineCarriesTheDecisionAndNoSecret() {
         FakeGateway gateway = new FakeGateway();
         MaintenanceCoordinator coordinator =
@@ -322,22 +414,74 @@ public final class MaintenanceCoordinatorTest {
         FakeGateway gateway = new FakeGateway();
         FakeClock clock = new FakeClock(OPEN_WALL, OPEN_ELAPSED);
         for (Runnable construction : new Runnable[] {
-                () -> new MaintenanceCoordinator(ANDROID_TEN, null, Map.of(), gateway, clock),
                 () -> new MaintenanceCoordinator(
-                        ANDROID_TEN, SystemPolicyProfile.PILOT, Map.of(), null, clock),
+                        ANDROID_TEN, null, Map.of(), gateway, new FakeCapabilityGateway(), clock),
                 () -> new MaintenanceCoordinator(
-                        ANDROID_TEN, SystemPolicyProfile.PILOT, Map.of(), gateway, null)
+                        ANDROID_TEN, SystemPolicyProfile.PILOT, Map.of(), null,
+                        new FakeCapabilityGateway(), clock),
+                () -> new MaintenanceCoordinator(
+                        ANDROID_TEN, SystemPolicyProfile.PILOT, Map.of(), gateway, null, clock),
+                () -> new MaintenanceCoordinator(
+                        ANDROID_TEN, SystemPolicyProfile.PILOT, Map.of(), gateway,
+                        new FakeCapabilityGateway(), null)
         }) {
             org.junit.Assert.assertThrows(IllegalArgumentException.class, construction::run);
         }
+    }
+
+    @Test
+    public void restoreProofCannotBeAttachedToAnOpenOrUnverifiedOutcome() {
+        MaintenanceWindow open = new MaintenanceWindow(
+                EnumSet.of(MaintenanceCapability.ADB_DEBUGGING),
+                HALF_HOUR,
+                OPEN_WALL,
+                OPEN_ELAPSED,
+                OPEN_WALL,
+                OPEN_ELAPSED);
+
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () ->
+                new MaintenanceOutcome(
+                        Phase.OPEN,
+                        MaintenanceStatus.APPLIED,
+                        open,
+                        null,
+                        true,
+                        null,
+                        null,
+                        List.of(),
+                        "invalid-proof"));
+        org.junit.Assert.assertThrows(IllegalArgumentException.class, () ->
+                new MaintenanceOutcome(
+                        Phase.RESTORE,
+                        MaintenanceStatus.FAILED,
+                        null,
+                        CloseReason.UNREADABLE_RECORD,
+                        true,
+                        null,
+                        null,
+                        List.of("restore-failed"),
+                        "invalid-proof"));
     }
 
     private static MaintenanceCoordinator production(
             SystemPolicyGateway gateway,
             MaintenanceClock clock
     ) {
+        return production(gateway, new FakeCapabilityGateway(), clock);
+    }
+
+    private static MaintenanceCoordinator production(
+            SystemPolicyGateway gateway,
+            MaintenanceCapabilityGateway capabilityGateway,
+            MaintenanceClock clock
+    ) {
         return new MaintenanceCoordinator(
-                ANDROID_TEN, SystemPolicyProfile.PRODUCTION, Map.of(), gateway, clock);
+                ANDROID_TEN,
+                SystemPolicyProfile.PRODUCTION,
+                Map.of(),
+                gateway,
+                capabilityGateway,
+                clock);
     }
 
     private static OpenRequest request(MaintenanceCapability capability) {
@@ -427,6 +571,33 @@ public final class MaintenanceCoordinatorTest {
         @Override
         public boolean isRestrictionInForce(String key) {
             return inForce.contains(key);
+        }
+    }
+
+    private static final class FakeCapabilityGateway implements MaintenanceCapabilityGateway {
+        boolean storesVisible;
+        boolean failOpen;
+        boolean failRestore;
+
+        @Override
+        public List<String> open(MaintenanceWindow window) {
+            if (!MaintenanceAppPolicy.opensApplicationStores(window)) {
+                return List.of();
+            }
+            if (failOpen) {
+                return List.of("maintenance-store-state-mismatch:test.store");
+            }
+            storesVisible = true;
+            return List.of();
+        }
+
+        @Override
+        public List<String> restore() {
+            if (failRestore) {
+                return List.of("maintenance-store-state-mismatch:test.store");
+            }
+            storesVisible = false;
+            return List.of();
         }
     }
 }

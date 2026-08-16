@@ -8,7 +8,9 @@ import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadFactory;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -36,6 +38,41 @@ public final class PolicyReconciliationCoordinator {
      */
     public static void runOnPolicyThread(Runnable work) {
         EXECUTOR.execute(work);
+    }
+
+    /**
+     * Runs result-bearing device-policy work on the one policy thread and waits
+     * for its verified result.
+     *
+     * <p>Console actions need a result to render, but using an arbitrary IO
+     * dispatcher lets them interleave with maintenance expiry and lifecycle
+     * reconciliation. That can make a restore verify and clear its debt just
+     * before the console re-applies a stale relaxation. This method preserves
+     * the synchronous result contract while putting every writer in the same
+     * FIFO queue. Re-entrant calls from the policy thread run directly to avoid
+     * self-deadlock.
+     */
+    public static <T> T callOnPolicyThread(Supplier<T> work) {
+        if (Thread.currentThread() == ReconciliationThreadFactory.policyThread) {
+            return work.get();
+        }
+        FutureTask<T> task = new FutureTask<>(work::get);
+        EXECUTOR.execute(task);
+        try {
+            return task.get();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while waiting for policy work", exception);
+        } catch (ExecutionException exception) {
+            Throwable cause = exception.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            throw new IllegalStateException("Policy work failed", cause);
+        }
     }
 
     /**
@@ -246,10 +283,13 @@ public final class PolicyReconciliationCoordinator {
     }
 
     private static final class ReconciliationThreadFactory implements ThreadFactory {
+        private static volatile Thread policyThread;
+
         @Override
         public Thread newThread(Runnable runnable) {
             Thread thread = new Thread(runnable, THREAD_NAME);
             thread.setDaemon(false);
+            policyThread = thread;
             return thread;
         }
     }

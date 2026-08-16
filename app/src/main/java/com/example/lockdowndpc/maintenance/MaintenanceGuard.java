@@ -140,6 +140,12 @@ public final class MaintenanceGuard {
         // pre-existing debt (a discarded record, a failed earlier restore) would
         // silently trust a device that may still be relaxed, forever.
         boolean alreadyOwed = MaintenanceStore.restorePending(appContext);
+        if (restoreDebtBlocksOpen(alreadyOwed, current)) {
+            // Enforce the debt boundary here, not only in today's console
+            // caller. A future service/API must not be able to stack a new
+            // authorization over a restore that has not been read back.
+            return refusedBeforeAnySend(null, "restore-pending");
+        }
         if (!MaintenanceStore.markRestorePending(appContext)) {
             // The write-ahead record did not reach storage, so a crash after the
             // first DevicePolicyManager call would leave a relaxed device with
@@ -177,12 +183,17 @@ public final class MaintenanceGuard {
                 MaintenanceCoordinator.MaintenanceStatus.FAILED,
                 closed.window(),
                 CloseReason.OPEN_FAILED,
+                closed.restoreVerified(),
                 closed.plan(),
                 closed.report(),
                 closed.failures(),
                 closed.restoreVerified()
                         ? "open-unschedulable-policy-restored"
                         : "open-unschedulable-restore-failed");
+    }
+
+    static boolean restoreDebtBlocksOpen(boolean restorePending, MaintenanceWindow current) {
+        return restorePending && current == null;
     }
 
     /** A refusal decided before anything was sent to the device. */
@@ -195,6 +206,7 @@ public final class MaintenanceGuard {
                 MaintenanceCoordinator.MaintenanceStatus.REFUSED,
                 current,
                 null,
+                false,
                 null,
                 SystemPolicyReport.empty(),
                 List.of(),
@@ -217,6 +229,7 @@ public final class MaintenanceGuard {
                 MaintenanceCoordinator.MaintenanceStatus.UNCHANGED,
                 null,
                 null,
+                false,
                 null,
                 SystemPolicyReport.empty(),
                 List.of(),
@@ -345,6 +358,10 @@ public final class MaintenanceGuard {
                 SystemPolicyStore.effectiveProfile(context),
                 SystemPolicyStore.explicitChoices(context),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
+                new AndroidMaintenanceCapabilityGateway(
+                        dpm,
+                        LockdownAdminReceiver.componentName(context),
+                        context.getPackageManager()),
                 MaintenanceStore.deviceClock());
     }
 
