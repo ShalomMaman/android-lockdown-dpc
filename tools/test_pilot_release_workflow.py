@@ -82,6 +82,13 @@ class PilotReleaseWorkflowTest(unittest.TestCase):
         self.assertIn("debugSigning.storeFile = externalStoreFile", signing_script)
         self.assertNotIn("DEVICE_GUARD_PILOT_STORE_FILE", PILOT_CHANNEL.read_text(encoding="utf-8"))
 
+    def test_restored_keystore_identity_is_verified_before_the_expensive_build(self):
+        preflight = self.workflow.index("Verify the restored pilot signing identity")
+        build = self.workflow.index("Build and verify the enrolled pilot APK")
+        self.assertLess(preflight, build)
+        self.assertIn("tools/verify_pilot_keystore.py", self.workflow[preflight:build])
+        self.assertIn("--store-password-env", self.workflow[preflight:build])
+
 
 if __name__ == "__main__":
     unittest.main()

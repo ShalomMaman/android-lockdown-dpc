@@ -54,7 +54,10 @@ class PublishUpdateTest(unittest.TestCase):
         )
         with (
             mock.patch.object(publish_update.subprocess, "run", return_value=rejected),
-            self.assertRaises(publish_update.PublishError),
+            self.assertRaisesRegex(
+                publish_update.PublishError,
+                f"expected {expected}, observed {'cd' * 32}",
+            ),
         ):
             publish_update.verify_apk_signer(Path("app.apk"), Path("apksigner"), expected)
 
