@@ -2,6 +2,7 @@
 
 import argparse
 import base64
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -38,36 +39,52 @@ class PublishUpdateTest(unittest.TestCase):
         self.assertEqual(1, json.loads(payload)["schemaVersion"])
 
     def test_signer_preflight_requires_exactly_the_expected_certificate(self) -> None:
-        expected = "ab" * 32
+        certificate = b"expected-pilot-certificate"
+        expected = hashlib.sha256(certificate).hexdigest()
+        encoded = base64.b64encode(certificate).decode("ascii")
         accepted = mock.Mock(
             returncode=0,
-            stdout=f"Signer #1 certificate SHA-256 digest: {expected}\n",
+            stdout=f"-----BEGIN CERTIFICATE-----\n{encoded}\n-----END CERTIFICATE-----\n",
             stderr="",
         )
-        with mock.patch.object(publish_update.subprocess, "run", return_value=accepted):
+        with mock.patch.object(
+            publish_update.subprocess, "run", return_value=accepted
+        ) as run:
             publish_update.verify_apk_signer(Path("app.apk"), Path("apksigner"), expected)
+        self.assertEqual(
+            ["apksigner", "verify", "--print-certs-pem", "app.apk"],
+            [str(value) for value in run.call_args.args[0]],
+        )
 
+        rejected_certificate = b"unexpected-runner-certificate"
+        rejected_digest = hashlib.sha256(rejected_certificate).hexdigest()
         rejected = mock.Mock(
             returncode=0,
-            stdout=f"Signer #1 certificate SHA-256 digest: {'cd' * 32}\n",
+            stdout=(
+                "-----BEGIN CERTIFICATE-----\n"
+                f"{base64.b64encode(rejected_certificate).decode('ascii')}\n"
+                "-----END CERTIFICATE-----\n"
+            ),
             stderr="",
         )
         with (
             mock.patch.object(publish_update.subprocess, "run", return_value=rejected),
             self.assertRaisesRegex(
                 publish_update.PublishError,
-                f"expected {expected}, observed {'cd' * 32}",
+                f"expected {expected}, observed {rejected_digest}",
             ),
         ):
             publish_update.verify_apk_signer(Path("app.apk"), Path("apksigner"), expected)
 
     def test_signer_preflight_rejects_multiple_signers(self) -> None:
+        first = base64.b64encode(b"first-certificate").decode("ascii")
+        second = base64.b64encode(b"second-certificate").decode("ascii")
         expected = "ab" * 32
         result = mock.Mock(
             returncode=0,
             stdout=(
-                f"Signer #1 certificate SHA-256 digest: {expected}\n"
-                f"Signer #2 certificate SHA-256 digest: {'cd' * 32}\n"
+                f"-----BEGIN CERTIFICATE-----\n{first}\n-----END CERTIFICATE-----\n"
+                f"-----BEGIN CERTIFICATE-----\n{second}\n-----END CERTIFICATE-----\n"
             ),
             stderr="",
         )
@@ -80,8 +97,8 @@ class PublishUpdateTest(unittest.TestCase):
         duplicate = mock.Mock(
             returncode=0,
             stdout=(
-                f"Signer #1 certificate SHA-256 digest: {expected}\n"
-                f"Signer #2 certificate SHA-256 digest: {expected}\n"
+                f"-----BEGIN CERTIFICATE-----\n{first}\n-----END CERTIFICATE-----\n"
+                f"-----BEGIN CERTIFICATE-----\n{first}\n-----END CERTIFICATE-----\n"
             ),
             stderr="",
         )
