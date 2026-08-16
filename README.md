@@ -3,14 +3,14 @@
 **Open-source Android Device Owner (DPC) for verified app allowlisting, system-app controls, secure kiosk mode, and signed self-updates.**
 
 [![Android CI](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml/badge.svg)](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml)
-[![Pilot release](https://img.shields.io/badge/pilot-0.5.2-2563EB.svg)](https://github.com/ShalomMaman/android-lockdown-dpc/releases/tag/pilot-v0.5.2)
+[![Latest pilot release](https://img.shields.io/github/v/release/ShalomMaman/android-lockdown-dpc?include_prereleases&label=pilot&color=2563EB)](https://github.com/ShalomMaman/android-lockdown-dpc/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/about/versions/oreo)
 
-[Download the pilot APK](https://github.com/ShalomMaman/android-lockdown-dpc/releases/tag/pilot-v0.5.2) · [Provision a test device](docs/provisioning.md) · [See the production roadmap](docs/production-roadmap.md) · [Report a vulnerability](SECURITY.md)
+[Download the current pilot APK](https://github.com/ShalomMaman/android-lockdown-dpc/releases) · [Provision a test device](docs/provisioning.md) · [See the production roadmap](docs/production-roadmap.md) · [Report a vulnerability](SECURITY.md)
 
 > [!IMPORTANT]
-> Device Guard 0.5.2 is a public pilot, not a production-certified mobile device management product. Device Owner enrolment can require a factory reset, and kiosk or system-policy changes can make a test device difficult to recover. Use a dedicated test device and read the [deployment boundary](#project-status) before provisioning.
+> The currently published Device Guard build is a public pilot, not a production-certified mobile device management product. Device Owner enrolment can require a factory reset, and kiosk or system-policy changes can make a test device difficult to recover. Use a dedicated test device and read the [deployment boundary](#project-status) before provisioning.
 
 Device Guard turns a dedicated Android phone or tablet into a locally managed device. An authorized administrator chooses which applications remain available, controls selected Android system capabilities, or locks the device to one application or one website. Policy is protected by a local administrator PIN and is verified after Android applies it; a partial result is never presented as successful protection.
 
@@ -80,7 +80,7 @@ See [package reconciliation](docs/package-reconciliation.md), [secure updates](d
 
 ### Download or build
 
-The published [Pilot 0.5.2 release](https://github.com/ShalomMaman/android-lockdown-dpc/releases/tag/pilot-v0.5.2) is the current public test artifact. Verify release details before installing it.
+The current public test artifact is listed on [GitHub Releases](https://github.com/ShalomMaman/android-lockdown-dpc/releases). The signed [`latest.json`](updates/pilot/latest.json) channel record binds the exact version, APK URL, size and SHA-256 digest that enrolled pilot devices accept. Verify the release details before installing it.
 
 To build an ordinary development artifact with remote updates intentionally disabled:
 
@@ -123,14 +123,14 @@ Security issues belong in the private process described in [SECURITY.md](SECURIT
 
 ## Project status
 
-Current public release: **Pilot 0.5.2** (`versionCode 12`). It keeps the existing pilot application ID and signer so already enrolled pilot devices can update in place.
+Current public release: the pilot shown by the release badge above and recorded in the signed [`latest.json`](updates/pilot/latest.json) channel. It keeps the existing pilot application ID and signer so already enrolled pilot devices can update in place. The protected release process builds and signs the APK, rehearses the offline update, publishes the prerelease, merges its signed channel metadata and verifies the public read-back.
 
 The core implementation, JVM tests, emulator work, static analysis, lint, release build, offline update drill, and signed public update metadata are in place. Production readiness still depends on real-device evidence: provisioning, policy application, kiosk containment, reboot recovery, timed maintenance restoration, and a higher-version self-update must pass on every supported firmware family. The evidence ledger is [docs/device-matrix.md](docs/device-matrix.md); untested cells remain explicitly untested.
 
 | Release stage | Meaning |
 | --- | --- |
-| Pilot 0.5.2 | Features implemented and automated checks passing; dedicated-device testing is still required |
-| Pilot 0.5.3 target | Complete the physical-device, provisioning, kiosk, recovery, and signed-update gates |
+| Current public pilot | Features implemented, protected publication and automated checks passing; dedicated-device evidence is still incomplete |
+| Hardware validation phase | Complete the physical-device, provisioning, kiosk, recovery, and signed-update gates for every supported firmware family |
 | 1.0 production candidate | Freeze the production identity and external signing process, then support only device/firmware combinations with recorded evidence |
 
 Follow the [production roadmap](docs/production-roadmap.md), [hardware validation procedure](docs/hardware-validation.md), [device matrix](docs/device-matrix.md), and [update drill](docs/update-drill.md) for the exact gates.

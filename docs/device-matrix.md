@@ -10,8 +10,10 @@ The procedure that fills the cells is [`hardware-validation.md`](hardware-valida
 The behaviour being validated is described in [`kiosk-mode.md`](kiosk-mode.md)
 and [`production-roadmap.md`](production-roadmap.md).
 
-**Current state: every cell is "not tested."** Device Guard has never run on a
-Device Owner-provisioned handset. Nothing below has been observed.
+**Current state: every cell is "not tested."** Device Guard has been installed
+on pilot handsets, but no execution of the complete hardware-validation runbook
+has been recorded with the required firmware identity and evidence. Ad-hoc use
+does not populate this ledger, so nothing below is a support claim.
 
 ## Cell states
 
@@ -107,7 +109,8 @@ because that is the unit that behaves.
 | Run date and operator/witness | The run summary |
 | Evidence link | The hardware-validation issue comment holding the photographs and machine reason strings |
 
-**No device records exist.** The first run creates the first one.
+**No runbook-qualified device records exist.** The first complete evidenced run
+creates the first one.
 
 ### Record template
 

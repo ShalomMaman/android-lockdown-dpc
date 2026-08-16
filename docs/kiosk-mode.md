@@ -447,7 +447,7 @@ cleared after a pass that completed without errors.
 ### An administrator UI for `ADMIN_SELECTED_SYSTEM`
 
 The planned product behavior and production acceptance criteria are tracked in
-[`production-roadmap.md`](production-roadmap.md). As of 0.5.2 the administrator
+[`production-roadmap.md`](production-roadmap.md). As of 0.5.3 the administrator
 application picker **does** present system packages, behind explicit safety
 tiers, and `AllowedAppsStore.setAdminSelectedSystemPackages` is written by that
 screen rather than by nothing.
@@ -471,7 +471,7 @@ That is a hardware gate, not a code gate; see
 
 ### Management identity is configured in the console
 
-As of 0.5.2 the console exposes `AllowedAppsStore.setManagementCertificatePins`
+As of 0.5.3 the console exposes `AllowedAppsStore.setManagementCertificatePins`
 through **Management identity**, behind an administrator session and a
 confirmation. The screen lists each `ManagementPackage` record with the signer
 the platform reports, the digests the administrator approved, and the resulting

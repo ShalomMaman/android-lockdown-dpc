@@ -51,6 +51,11 @@ The environment is intentionally restricted to protected branches. Adding a
 required deployment reviewer is supported, but changes the operator experience
 from one action (dispatch) to two actions (dispatch and deployment approval).
 
+Repository Auto-merge must be enabled. The generated metadata Pull Request still
+obeys the protected `main` rules and the required `verify` check; Auto-merge does
+not bypass either control. It only lets GitHub complete the merge after those
+controls report success.
+
 ## Prepare a release commit
 
 1. Change `versionCode` and `versionName` once in `app/build.gradle.kts`.
@@ -82,7 +87,8 @@ enter release notes, and run it. The workflow then:
 8. opens a generated metadata Pull Request and explicitly runs Android CI on
    that bot-created commit;
 9. publishes the immutable GitHub Release;
-10. only after the APK is public, merges the verified metadata Pull Request;
+10. only after the APK is public, requests protected Auto-merge for the verified
+    metadata Pull Request and waits until GitHub confirms it was merged;
 11. reads `latest.json` back from public `main` and requires byte-for-byte
     equality with the verified envelope.
 
@@ -97,9 +103,11 @@ verification, drill, draft-release, or metadata-CI failure leaves the existing
 
 If a run stops after creating a draft release, inspect and delete that draft
 before retrying the same version. If it stops after publishing the release but
-before merging metadata, the release is a safe orphan: inspect the generated
-metadata Pull Request and merge it only if its recorded Android CI run passed.
-Do not recreate or overwrite the tag.
+before Auto-merge activates the metadata, the release is a safe orphan: inspect
+the generated metadata Pull Request, confirm its recorded Android CI run passed,
+and enable or complete its protected merge. Do not recreate or overwrite the
+tag. The workflow polls the Pull Request after requesting Auto-merge and refuses
+to verify the public channel until the merge is confirmed.
 
 If a bad build ever reaches a device, Android and the replay floor prevent a
 downgrade. Fix it with a new, higher `versionCode` and roll forward.
