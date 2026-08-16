@@ -110,6 +110,19 @@ jetpack-compose
 rtl
 ```
 
+The canonical social preview source is
+[`docs/assets/social-preview.svg`](assets/social-preview.svg), with the rendered
+1280×640 PNG stored beside it. The GitHub repository setting should use that
+PNG so shared links identify the product as an open-source Android DPC and a
+public pilot. Update both files together; do not replace the preview with an
+unverifiable product mockup or a production-readiness claim.
+
+Community entry points are intentionally separated: Discussions are for setup
+and design questions, Issue forms are for reproducible bugs and scoped feature
+requests, and private reporting is for vulnerabilities or confidential conduct
+concerns. The top-level support and conduct documents remain the authoritative
+routing policy.
+
 ## Evidence-led content plan
 
 Publish content only when it creates durable value for an operator or

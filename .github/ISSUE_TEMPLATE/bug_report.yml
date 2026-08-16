@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Device Guard version
-      placeholder: 0.4.1
+      placeholder: For example, 0.5.3
     validations:
       required: true
   - type: input
