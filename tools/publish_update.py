@@ -24,9 +24,8 @@ PACKAGE_LINE = re.compile(
     r"^package: name='(?P<package>[^']+)' versionCode='(?P<code>[0-9]+)' "
     r"versionName='(?P<name>[^']+)'"
 )
-CERT_SHA256_LINE = re.compile(
-    r"^Signer #[0-9]+ certificate SHA-256 digest: (?P<digest>[0-9a-fA-F]{64})$",
-)
+CERTIFICATE_BEGIN = "-----BEGIN CERTIFICATE-----"
+CERTIFICATE_END = "-----END CERTIFICATE-----"
 
 
 class PublishError(Exception):
@@ -153,9 +152,9 @@ def read_apk_identity(apk: Path, aapt2: Path) -> tuple[str, int, str]:
     return match.group("package"), int(match.group("code")), version_name
 
 
-def verify_apk_signer(apk: Path, apksigner: Path, expected_sha256: str) -> None:
+def read_apk_signer_sha256(apk: Path, apksigner: Path) -> str:
     result = subprocess.run(
-        [str(apksigner), "verify", "--print-certs", str(apk)],
+        [str(apksigner), "verify", "--print-certs-pem", str(apk)],
         check=False,
         text=True,
         stdout=subprocess.PIPE,
@@ -165,13 +164,25 @@ def verify_apk_signer(apk: Path, apksigner: Path, expected_sha256: str) -> None:
         detail = result.stderr.strip().splitlines()
         suffix = f": {detail[-1]}" if detail else ""
         raise PublishError(f"apksigner rejected the APK{suffix}")
-    signer_digests = [
-        match.group("digest").lower()
-        for line in result.stdout.splitlines()
-        if (match := CERT_SHA256_LINE.match(line.strip()))
-    ]
-    if signer_digests != [expected_sha256]:
-        observed = ",".join(signer_digests) if signer_digests else "none"
+    certificates: list[bytes] = []
+    remainder = result.stdout
+    while CERTIFICATE_BEGIN in remainder:
+        _, encoded_tail = remainder.split(CERTIFICATE_BEGIN, 1)
+        if CERTIFICATE_END not in encoded_tail:
+            raise PublishError("apksigner returned a malformed signing certificate")
+        encoded, remainder = encoded_tail.split(CERTIFICATE_END, 1)
+        try:
+            certificates.append(base64.b64decode("".join(encoded.split()), validate=True))
+        except ValueError as exc:
+            raise PublishError("apksigner returned an invalid signing certificate") from exc
+    if len(certificates) != 1:
+        raise PublishError("APK must have exactly one signing certificate")
+    return hashlib.sha256(certificates[0]).hexdigest()
+
+
+def verify_apk_signer(apk: Path, apksigner: Path, expected_sha256: str) -> None:
+    observed = read_apk_signer_sha256(apk, apksigner)
+    if observed != expected_sha256:
         raise PublishError(
             "APK signing certificate does not exactly match the expected SHA-256: "
             f"expected {expected_sha256}, observed {observed}"
