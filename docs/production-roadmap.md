@@ -1,8 +1,8 @@
 # Production roadmap
 
-This document records the product boundary at Pilot 0.5.3 and the planned work
-toward a supported managed-device release. It is intentionally explicit about
-what the administrator console can and cannot configure today.
+This document records the product boundary on the Pilot 0.5.4 release line and
+the planned work toward a supported managed-device release. It is intentionally
+explicit about what the administrator console can and cannot configure today.
 
 ## Execution tracking
 
@@ -16,7 +16,7 @@ security boundary; the linked Issues own scope, priority and acceptance:
   [timed maintenance mode](https://github.com/ShalomMaman/android-lockdown-dpc/issues/26), and
   [management-package identity pins](https://github.com/ShalomMaman/android-lockdown-dpc/issues/27).
   All four are covered by JVM tests and none has been exercised on hardware.
-- **Pilot 0.5.3 — current public pilot:** protected signed publication,
+- **Pilot 0.5.3 — delivered:** protected signed publication,
   cross-platform APK signer verification, an offline in-place update drill and
   public channel read-back are complete. The remaining release gates are:
   [real signed self-update drill](https://github.com/ShalomMaman/android-lockdown-dpc/issues/19),
@@ -28,6 +28,12 @@ security boundary; the linked Issues own scope, priority and acceptance:
   of #19 is implemented in `tools/update_drill.py` and the on-device half is
   documented in [`update-drill.md`](update-drill.md); #28 tooling and runbook are
   `tools/provisioning_payload.py` and [`provisioning.md`](provisioning.md).
+- **Pilot 0.5.4 — current release line:** an explicit, fail-closed Google Play
+  compatibility mode for applications that require the Store package, bounded
+  link-handler verification retries, and the public collaboration and release
+  documentation improvements are delivered. Strict store blocking remains the
+  default. Group P in [`hardware-validation.md`](hardware-validation.md) is the
+  remaining physical-device proof for the compatibility mode.
 - **1.0:** [final production identity and signing](https://github.com/ShalomMaman/android-lockdown-dpc/issues/25).
   [Privacy-preserving fleet health](https://github.com/ShalomMaman/android-lockdown-dpc/issues/24)
   is implemented in this release as a local, on-device report plus an
@@ -36,9 +42,9 @@ security boundary; the linked Issues own scope, priority and acceptance:
   assembled by whoever collects the exports. That is a security boundary, not a
   deferral.
 
-## What Pilot 0.5.3 does today
+## What Pilot 0.5.4 does today
 
-The 0.5.3 console implements the administrator experience the rest of this
+The 0.5.4 console implements the administrator experience the rest of this
 document describes: a searchable system-application inventory with safety tiers,
 verified system policy controls, timed maintenance mode, and management identity
 pinning. The remaining gates are hardware gates.
@@ -53,7 +59,7 @@ The `ADMIN_SELECTED_SYSTEM` classification is now written by an administrator
 screen rather than by nothing, so an opted-in system package is a recorded
 administrator decision with a risk acceptance behind it.
 
-| Capability | Pilot 0.5.3 status |
+| Capability | Pilot 0.5.4 status |
 | --- | --- |
 | Select ordinary installed applications | Available |
 | Remember and display DPC-hidden third-party applications | Available |
@@ -311,7 +317,7 @@ What is **not** proven: none of this has run on a device beyond the diagnostic
 maintenance window that established the dependency. Group P of
 [`hardware-validation.md`](hardware-validation.md) is what closes that gap.
 
-## Known gaps in the 0.5.3 implementation
+## Known gaps in the 0.5.4 implementation
 
 These are recorded rather than hidden, and none of them is a hardware gate:
 
@@ -336,7 +342,7 @@ The following are release gates rather than optional polish. Gates 4, 5, 6 and 7
 are executed with [`hardware-validation.md`](hardware-validation.md) and
 evidenced in [`device-matrix.md`](device-matrix.md); gate 2 uses
 [`provisioning.md`](provisioning.md) and gate 3 uses
-[`update-drill.md`](update-drill.md). As of 0.5.3 the offline release chain is
+[`update-drill.md`](update-drill.md). As of 0.5.4 the offline release chain is
 proven, but no complete runbook-qualified hardware record has been entered in
 [`device-matrix.md`](device-matrix.md).
 
@@ -362,9 +368,12 @@ proven, but no complete runbook-qualified hardware record has been entered in
   system policy controls, timed maintenance mode, management identity pinning
   and the local device health report, plus the provisioning, update-drill and
   hardware-validation tooling and runbooks.
-- **0.5.3 — current public pilot.** The protected release workflow, signed
+- **0.5.3 — delivered.** The protected release workflow, signed
   prerelease, metadata Auto-merge and public read-back are delivered. Hardware
   validation remains explicitly open.
+- **0.5.4 — current release line.** Google Play compatibility is an explicit
+  administrator choice with a verified installation lock and fail-closed
+  package visibility. The mode still requires its Group P hardware evidence.
 - **Next pilot validation phase.** Execute the validation runbook on real Device
   Owner devices, complete the signed higher-version self-update on hardware,
   rehearse provisioning, and fix what those runs find. This phase turns
