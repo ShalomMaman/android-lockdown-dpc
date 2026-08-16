@@ -154,6 +154,8 @@ private fun playCompatibilityStatusRes(state: PlayStoreCompatibility.State): Int
     PlayStoreCompatibility.State.ACTIVE -> R.string.system_policy_play_compat_state_active
     PlayStoreCompatibility.State.RELAXED_BY_MAINTENANCE ->
         R.string.system_policy_play_compat_state_maintenance
+    PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE ->
+        R.string.system_policy_play_compat_state_withheld
     PlayStoreCompatibility.State.INSTALL_LOCK_UNVERIFIED ->
         R.string.system_policy_play_compat_state_unverified
 }

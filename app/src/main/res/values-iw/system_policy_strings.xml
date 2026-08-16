@@ -122,7 +122,8 @@
     <string name="system_policy_play_compat_body">יישומים מסוימים שמופצים דרך Google Play מסרבים להיפתח אם חבילת חנות Play אינה זמינה, גם כאשר שירותי Google Play פועלים. הפעלת האפשרות הזו משאירה את החבילה הזו בלבד זמינה. Android אינו יכול להסתיר רק את הסמל של החנות, ולכן במסך בית רגיל ייתכן שהחנות תישאר גלויה וניתן יהיה לפתוח אותה. מה שנחסם במקום זאת הוא ההתקנה: כל התקנת החבילות והתקנה ממקורות לא ידועים נאכפות ומאומתות כל עוד האפשרות פועלת. במכשיר קיוסק החנות אינה חלק מהמשטח שהמשתמש יכול להגיע אליו. שירותי Google Play וספק ה-WebView מוגנים בנפרד ואינם משתנים בעקבות הבחירה הזו. שאר חנויות היישומים נשארות מוסתרות.</string>
     <string name="system_policy_play_compat_state_strict">כבוי — חנויות היישומים נשארות מוסתרות</string>
     <string name="system_policy_play_compat_state_active">פועל — חבילת החנות זמינה והמכשיר אישר שההתקנה חסומה</string>
-    <string name="system_policy_play_compat_state_maintenance">פועל — חלון תחזוקה פתח את ההתקנה, והיא תיסגר עם החלון</string>
+    <string name="system_policy_play_compat_state_maintenance">פועל — חלון תחזוקה פתח התקנה מחנות יישומים, והיא תיסגר עם החלון</string>
+    <string name="system_policy_play_compat_state_withheld">פועל, אך חלון תחזוקה פתח התקנה ממקורות לא ידועים, ולכן החנות נשארת מוסתרת עד לסגירת החלון</string>
     <string name="system_policy_play_compat_state_unverified">פועל, אך המכשיר לא אישר את נעילת ההתקנה, ולכן החנות נשארת מוסתרת</string>
     <string name="system_policy_play_compat_locked_control">נשאר פעיל בגלל תאימות ל-Google Play</string>
     <string name="system_policy_play_compat_confirm_enable_title">להשאיר את חנות Google Play זמינה?</string>

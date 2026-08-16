@@ -98,6 +98,12 @@ switch:
 - A fresh opt-in that has not been applied yet has no verified outcome, which is
   the absence of evidence rather than evidence of a lock. The console shows it
   as such.
+- A maintenance window excuses the control it relaxed from the verification
+  requirement — there is nothing to read back once an authorised window has
+  turned it off — but the excusal is per control and never widens. Only the
+  store installation control can grant store availability that way; a refused
+  store lock inside a local-APK window is still a failure, still hides the Store
+  and still faults.
 
 ## Maintenance windows, reboot, pause and reconciliation
 
@@ -108,21 +114,35 @@ definition, `SystemPolicyStore.baseChoices`, is what every stage reads:
 - **Reconciliation** (boot, package change, periodic sweep, console apply)
   applies the base policy, floor included.
 - **A maintenance window** is an exception to the base policy. A window that
-  opens application-store access still relaxes the installation lock for its
+  opens **application-store access** relaxes the store installation lock for its
   bounded, authenticated, audited duration, and makes the stores visible itself.
   The console reports that state distinctly instead of showing a relaxed device
   as a locked one.
+- **A window that opens only unknown sources** — the local APK install
+  capability — carries no store authorisation, so it does not grant store
+  availability. The Store is **withheld for the duration of that window** and
+  becomes available again when it closes. Authorising a technician to install a
+  local APK is not authorising an application store to sit beside it, and the
+  mode's contract is that the Store is available only while every installation
+  control it pins on is genuinely enforced. This is reported as its own state
+  and is **not** a fault: nothing failed, the device is simply stricter than the
+  compatibility mode would like, on the strength of an authorisation the
+  administrator actually gave.
 - **The restore** at expiry, reboot, cancel or failed open puts the base policy
   back — the floor with it. Restoring the administrator's raw switches would end
   a window with the Store available and no installation lock, which is exactly
   the fail-open this design removes.
-- **After a close**, on a device that has opted in, an ordinary reconciliation
-  pass follows. The restore hides every managed store, which is the correct
-  fail-closed default and is what a strict device wants; it has not verified the
-  installation lock at the moment it does so. The following pass re-asserts the
-  exception on the strength of its own read-back, so the sequence is always
-  *hidden first, available only once the lock is proven*. A device that never
-  opted in keeps exactly the maintenance behaviour it has today.
+- **After a window opens or closes**, on a device that has opted in, an ordinary
+  reconciliation pass follows. On a close it matters because the restore hides
+  every managed store — the correct fail-closed default, and what a strict device
+  wants — without having verified the installation lock at that moment; the
+  following pass re-asserts the exception on the strength of its own read-back,
+  so the sequence is always *hidden first, available only once the lock is
+  proven*. On an open it matters because nothing else hides a package for a
+  withheld state: the capability gateway only touches stores for
+  application-store access, so without the pass a local-APK window would leave
+  the Store available for its whole duration. A device that never opted in keeps
+  exactly the maintenance behaviour it has today.
 - **Pause** withdraws every control and unhides every managed package, this one
   included. A paused device is not a protected device and does not pretend to be.
 

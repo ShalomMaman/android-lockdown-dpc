@@ -260,6 +260,121 @@ public final class PlayStoreCompatibilityTest {
     }
 
     @Test
+    public void aLocalApkWindowDoesNotBuyStoreAvailability() {
+        // The authorisation boundary this case exists to hold: LOCAL_APK_INSTALL
+        // relaxes unknown sources and nothing else. An administrator who
+        // authorised a local APK install did not authorise an application store,
+        // so the Store is withheld for the window rather than handed over on the
+        // strength of an excusal meant for APP_STORE_ACCESS.
+        Map<SystemPolicyControl, Boolean> base =
+                PlayStoreCompatibility.baseChoices(true, Map.of());
+        MaintenancePlan plan = planFor(base, MaintenanceCapability.LOCAL_APK_INSTALL);
+
+        FakeGateway gateway = new FakeGateway();
+        SystemPolicyReport report = SystemPolicyEnforcer.enforce(
+                ANDROID_THIRTEEN, SystemPolicyProfile.PILOT, plan.effectiveChoices(), gateway);
+
+        assertEquals(
+                Set.of(SystemPolicyControl.UNKNOWN_SOURCE_INSTALLS),
+                new java.util.LinkedHashSet<>(plan.relaxed()));
+        // The store lock is untouched by this window and still verified in force.
+        assertTrue(gateway.inForce.contains(DISALLOW_INSTALL_APPS));
+        assertFalse(gateway.inForce.contains("no_install_unknown_sources"));
+
+        PlayStoreCompatibility.State state =
+                PlayStoreCompatibility.evaluate(true, plan.relaxed(), report);
+
+        assertEquals(PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE, state);
+        assertFalse(state.keepsPlayStoreAvailable());
+        assertFalse(PlayStoreCompatibility.keepsAvailable(
+                PLAY_STORE, state.keepsPlayStoreAvailable()));
+    }
+
+    @Test
+    public void withholdingTheStoreForAnAuthorisedWindowIsNotAFault() {
+        // Nothing failed: the device is stricter than the compatibility mode
+        // wants, on the strength of an authorisation the administrator gave.
+        // Faulting here would paint an authorised service action as a breach.
+        Map<SystemPolicyControl, Boolean> base =
+                PlayStoreCompatibility.baseChoices(true, Map.of());
+        MaintenancePlan plan = planFor(base, MaintenanceCapability.LOCAL_APK_INSTALL);
+
+        SystemPolicyReport report = SystemPolicyEnforcer.enforce(
+                ANDROID_THIRTEEN,
+                SystemPolicyProfile.PILOT,
+                plan.effectiveChoices(),
+                new FakeGateway());
+        PlayStoreCompatibility.State state =
+                PlayStoreCompatibility.evaluate(true, plan.relaxed(), report);
+
+        assertFalse(state.faultsProtection());
+        assertFalse("an authorised window is not a policy failure", report.faulted());
+    }
+
+    @Test
+    public void anExcusedUnknownSourceLockNeverMasksAFailedStoreLock() {
+        // The excusal is per control. A window that opened unknown sources must
+        // not carry a refused DISALLOW_INSTALL_APPS through as if it too had been
+        // authorised: that is a real failure and still hides the Store and faults.
+        Map<SystemPolicyControl, Boolean> base =
+                PlayStoreCompatibility.baseChoices(true, Map.of());
+        MaintenancePlan plan = planFor(base, MaintenanceCapability.LOCAL_APK_INSTALL);
+
+        FakeGateway gateway = new FakeGateway();
+        gateway.ignoreAdd.add(DISALLOW_INSTALL_APPS);
+        SystemPolicyReport report = SystemPolicyEnforcer.enforce(
+                ANDROID_THIRTEEN, SystemPolicyProfile.PILOT, plan.effectiveChoices(), gateway);
+
+        PlayStoreCompatibility.State state =
+                PlayStoreCompatibility.evaluate(true, plan.relaxed(), report);
+
+        assertEquals(PlayStoreCompatibility.State.INSTALL_LOCK_UNVERIFIED, state);
+        assertTrue(state.faultsProtection());
+        assertTrue(report.faulted());
+    }
+
+    @Test
+    public void onlyTheStoreControlCanGrantAvailabilityThroughAWindow() {
+        // Stated directly against the rule rather than through a window, so the
+        // boundary survives a future capability that relaxes something else.
+        assertEquals(
+                SystemPolicyControl.APP_STORES_AND_INSTALLERS,
+                PlayStoreCompatibility.STORE_INSTALL_CONTROL);
+        assertEquals(
+                PlayStoreCompatibility.State.RELAXED_BY_MAINTENANCE,
+                PlayStoreCompatibility.evaluateOutcomes(
+                        true,
+                        Set.of(PlayStoreCompatibility.STORE_INSTALL_CONTROL),
+                        allApplied()));
+        for (SystemPolicyControl control : PlayStoreCompatibility.REQUIRED_INSTALL_CONTROLS) {
+            if (control == PlayStoreCompatibility.STORE_INSTALL_CONTROL) {
+                continue;
+            }
+            assertEquals(
+                    control + " must not buy store availability",
+                    PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE,
+                    PlayStoreCompatibility.evaluateOutcomes(true, Set.of(control), allApplied()));
+        }
+    }
+
+    @Test
+    public void aWindowThatOpensBothControlsStillGrantsAvailability() {
+        // APP_STORE_ACCESS plus LOCAL_APK_INSTALL: the store authorisation is
+        // present, so maintenance owns store visibility for the duration.
+        MaintenancePlan plan = planFor(
+                PlayStoreCompatibility.baseChoices(true, Map.of()),
+                MaintenanceCapability.APP_STORE_ACCESS,
+                MaintenanceCapability.LOCAL_APK_INSTALL);
+
+        PlayStoreCompatibility.State state = PlayStoreCompatibility.evaluateOutcomes(
+                true, plan.relaxed(), Map.of());
+
+        assertEquals(PlayStoreCompatibility.State.RELAXED_BY_MAINTENANCE, state);
+        assertTrue(state.keepsPlayStoreAvailable());
+        assertFalse(state.faultsProtection());
+    }
+
+    @Test
     public void aLocalApkWindowStillReportsTheInstallLockAsAResidualBlocker() {
         // With the floor on, DISALLOW_INSTALL_APPS blocks a local APK install that
         // only opened unknown sources. The console has to say so rather than let a

@@ -130,7 +130,8 @@
     <string name="system_policy_play_compat_body">Some applications distributed through Google Play refuse to start unless the Play Store package is available, even when Google Play services are working. Turning this on keeps that one package available. Android cannot hide only the Store\'s icon, so on an ordinary launcher the Store may stay visible and can be opened. What is blocked instead is installation: all package installation and installation from unknown sources are enforced and verified for as long as this is on. On a kiosk device the Store is not part of the surface a user can reach. Google Play services and the WebView provider are protected separately and are not changed by this choice. Other application stores stay hidden.</string>
     <string name="system_policy_play_compat_state_strict">Off — application stores stay hidden</string>
     <string name="system_policy_play_compat_state_active">On — the Store package is available and this device confirmed that installation is blocked</string>
-    <string name="system_policy_play_compat_state_maintenance">On — a maintenance window has opened installation, and it closes with the window</string>
+    <string name="system_policy_play_compat_state_maintenance">On — a maintenance window has opened application-store installation, and it closes with the window</string>
+    <string name="system_policy_play_compat_state_withheld">On, but a maintenance window has opened installation from unknown sources, so the Store stays hidden until that window closes</string>
     <string name="system_policy_play_compat_state_unverified">On, but this device has not confirmed the installation lock, so the Store stays hidden</string>
     <string name="system_policy_play_compat_locked_control">Kept on by Google Play compatibility</string>
     <string name="system_policy_play_compat_confirm_enable_title">Keep the Google Play Store available?</string>

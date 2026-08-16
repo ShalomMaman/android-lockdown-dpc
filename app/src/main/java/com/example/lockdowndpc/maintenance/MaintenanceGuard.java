@@ -270,36 +270,57 @@ public final class MaintenanceGuard {
         }
         auditFrom(appContext, outcome);
         lastArmSucceeded = arm(appContext, outcome.windowOpen() ? outcome.window() : null);
-        reconcileAfterClose(appContext, outcome);
+        reconcileAfterMaintenanceChange(appContext, outcome);
         return outcome;
     }
 
     /**
-     * Re-applies the base package policy after a window closes, when the base
-     * policy has something to say about store visibility that a restore cannot
-     * know.
+     * Re-applies the base package policy when a window opens or closes, because
+     * on a Google Play compatibility device the base policy has something to say
+     * about store visibility that neither half of maintenance can know on its own.
      *
-     * <p>The capability gateway's restore hides every managed store, which is the
-     * right fail-closed default and is exactly what a strict device wants. On a
-     * device where an administrator has opted into Google Play compatibility, the
-     * base policy wants one of those stores to stay available — but only once the
-     * installation lock has been read back, which the restore has not done at the
-     * moment it hides them. So the ordering is deliberate: hide first, then let
-     * the ordinary policy pass re-assert the exception on the strength of its own
-     * verification. The pass is skipped while protection is paused.
+     * <p><b>On close.</b> The capability gateway's restore hides every managed
+     * store, which is the right fail-closed default and is exactly what a strict
+     * device wants. The base policy wants one of those stores to stay available —
+     * but only once the installation lock has been read back, which the restore
+     * has not done at the moment it hides them. So the ordering is deliberate:
+     * hide first, then let the ordinary policy pass re-assert the exception on the
+     * strength of its own verification.
      *
-     * <p>Gated on the opt-in so a device that never touches the feature keeps the
+     * <p><b>On open.</b> A window that opens installation from unknown sources
+     * without opening application-store access withholds the Store for its
+     * duration ({@code PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE}).
+     * Nothing in the maintenance path hides a package for that reason — the
+     * capability gateway only ever touches stores for {@code APP_STORE_ACCESS} —
+     * so without this the withholding would not reach the device until some later
+     * pass, which is the whole duration of the window on a quiet handset.
+     *
+     * <p>The pass is skipped while protection is paused, and the whole hook is
+     * gated on the opt-in so a device that never touches the feature keeps the
      * maintenance behaviour it has today, unchanged.
      */
-    private static void reconcileAfterClose(Context context, MaintenanceOutcome outcome) {
-        if (outcome.closeReason() == null || !PlayStoreCompatibilityStore.isEnabled(context)) {
+    private static void reconcileAfterMaintenanceChange(
+            Context context,
+            MaintenanceOutcome outcome
+    ) {
+        boolean opened = outcome.phase() == MaintenanceCoordinator.Phase.OPEN
+                && outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED;
+        boolean closed = outcome.closeReason() != null;
+        // A liveness pass that changed nothing is deliberately excluded: the
+        // fifteen-minute sweep must not queue a full policy pass every time it
+        // finds a window still open.
+        if ((!opened && !closed) || !PlayStoreCompatibilityStore.isEnabled(context)) {
             return;
         }
         // Asynchronous on the shared policy executor: this method is itself
         // reached from that thread on the job, boot and console paths, and a
         // blocking call there would deadlock the very pass it is queueing.
         PolicyReconciliationCoordinator.reconcileAsync(
-                context, "maintenance-closed-play-compatibility", null);
+                context,
+                closed
+                        ? "maintenance-closed-play-compatibility"
+                        : "maintenance-opened-play-compatibility",
+                null);
     }
 
     /**

@@ -1179,6 +1179,27 @@ console corrected it.
 again, and the installation controls return to whatever the administrator had
 saved — which on a default device means the store lock is off again.
 
+### P-7 A local APK window does not grant store availability
+
+**Steps**
+
+1. With compatibility on and verified, open a maintenance window for **local APK
+   installation only** — not application-store access.
+2. Read the Google Play compatibility status line in the console.
+3. Look for the Play Store and start the dependent application.
+4. Close the window, or let it expire, and look again.
+
+**Expected:** while the window is open the console reports that the Store is
+withheld because installation from unknown sources is open, the Store is hidden,
+and protection is **not** reported as faulty — this is an authorised state, not a
+failure. The dependent application may stop working for the duration; that is the
+designed trade. After the window closes the Store is available again and the
+application works.
+
+**Fail action:** if the Store stays available during a local-APK window, record
+it. An authorisation to install one APK must not silently carry an application
+store with it.
+
 ---
 
 ## Cases gated on unshipped features

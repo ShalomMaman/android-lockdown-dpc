@@ -138,6 +138,7 @@ public final class SystemPolicyLocaleParityTest {
                 "system_policy_play_compat_state_strict",
                 "system_policy_play_compat_state_active",
                 "system_policy_play_compat_state_maintenance",
+                "system_policy_play_compat_state_withheld",
                 "system_policy_play_compat_state_unverified",
                 "system_policy_play_compat_locked_control",
                 "system_policy_play_compat_confirm_enable_title",

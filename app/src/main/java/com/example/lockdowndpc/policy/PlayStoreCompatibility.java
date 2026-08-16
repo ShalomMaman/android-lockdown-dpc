@@ -40,7 +40,10 @@ import java.util.Set;
  *   <li><b>Fail-closed.</b> If that install lock is not confirmed by the device,
  *       {@link #evaluate} reports {@link State#INSTALL_LOCK_UNVERIFIED}: the
  *       Store stays hidden and the pass carries an error, so protection is never
- *       reported as active over an unverified install lock.</li>
+ *       reported as active over an unverified install lock. A maintenance window
+ *       that opens one of those controls without opening application-store
+ *       access withholds the Store for its duration instead — see
+ *       {@link State#WITHHELD_DURING_MAINTENANCE}.</li>
  * </ul>
  *
  * <h2>The boundary this class does not cross</h2>
@@ -77,6 +80,17 @@ public final class PlayStoreCompatibility {
             SystemPolicyControl.APP_STORES_AND_INSTALLERS,
             SystemPolicyControl.UNKNOWN_SOURCE_INSTALLS);
 
+    /**
+     * The one control whose authorised relaxation may leave the Store available.
+     *
+     * <p>{@code MaintenanceCapability.APP_STORE_ACCESS} is the only capability
+     * that relaxes it, which makes this the exact seam between "an administrator
+     * authorised working with an application store" and "an administrator
+     * authorised a local APK install". The second must never buy the first.
+     */
+    public static final SystemPolicyControl STORE_INSTALL_CONTROL =
+            SystemPolicyControl.APP_STORES_AND_INSTALLERS;
+
     /** The error a pass records when the mode is on but its price was not paid. */
     public static final String INSTALL_LOCK_UNVERIFIED_ERROR =
             "play-compatibility-install-lock-unverified";
@@ -93,14 +107,34 @@ public final class PlayStoreCompatibility {
         ACTIVE(true),
 
         /**
-         * Requested, and a live maintenance window has deliberately opened the
-         * installation controls this mode otherwise pins on.
+         * Requested, and a live maintenance window has deliberately opened
+         * <em>application-store installation</em> — the capability that owns
+         * store visibility for its duration.
          *
-         * <p>Not a failure: a window is authenticated, bounded, audited and
+         * <p>Not a failure: that window is authenticated, bounded, audited and
          * restored, and it makes the stores visible itself. Reported separately
          * so the console never shows a relaxed device as a locked one.
          */
         RELAXED_BY_MAINTENANCE(true),
+
+        /**
+         * Requested, but a live maintenance window has opened one of the other
+         * controls this mode pins on — today, unknown sources through
+         * {@code LOCAL_APK_INSTALL} — without opening application-store access.
+         *
+         * <p>The Store is withheld for the duration. The mode's contract is that
+         * the Store is available only while <em>every</em> installation control
+         * it pins on is actually enforced, and a window that opens unknown
+         * sources has, by definition, stopped enforcing one of them. The
+         * administrator authorised a local APK install; that authorisation does
+         * not extend to leaving an application store available beside it.
+         *
+         * <p>This is not a fault. Nothing failed: the device is stricter than
+         * the compatibility mode would like, on the strength of an authorisation
+         * the administrator actually gave. Faulting protection here would turn
+         * an authorised service action into a red console.
+         */
+        WITHHELD_DURING_MAINTENANCE(false),
 
         /**
          * Requested, but the device did not confirm the install lock. The Store
@@ -204,6 +238,19 @@ public final class PlayStoreCompatibility {
      * <p>A control with no recorded outcome is not treated as enforced: an
      * absent verdict is the absence of evidence, which is the whole reason the
      * console renders verified outcomes rather than saved switches.
+     *
+     * <h2>Which authorisation buys store availability</h2>
+     *
+     * <p>Only {@link #STORE_INSTALL_CONTROL}. A maintenance window excuses a
+     * control from the verification requirement — there is nothing to read back
+     * once an authorised window has deliberately turned it off — but excusing a
+     * control is not the same as authorising the Store, and the two must not be
+     * collapsed. {@code APP_STORE_ACCESS} is the capability an administrator
+     * opens to work with an application store, and it is the one that relaxes
+     * {@link #STORE_INSTALL_CONTROL}. A window that only opens unknown sources
+     * ({@code LOCAL_APK_INSTALL}) carries no such authorisation, so it withholds
+     * the Store instead of granting it — fail-closed, and without faulting,
+     * because nothing failed.
      */
     public static State evaluateOutcomes(
             boolean enabled,
@@ -213,10 +260,15 @@ public final class PlayStoreCompatibility {
         if (!enabled) {
             return State.STRICT;
         }
-        boolean relaxed = false;
+        boolean storeAccessOpened = false;
+        boolean otherLockOpened = false;
         for (SystemPolicyControl control : REQUIRED_INSTALL_CONTROLS) {
             if (relaxedByMaintenance != null && relaxedByMaintenance.contains(control)) {
-                relaxed = true;
+                if (control == STORE_INSTALL_CONTROL) {
+                    storeAccessOpened = true;
+                } else {
+                    otherLockOpened = true;
+                }
                 continue;
             }
             SystemPolicyOutcome outcome =
@@ -225,6 +277,9 @@ public final class PlayStoreCompatibility {
                 return State.INSTALL_LOCK_UNVERIFIED;
             }
         }
-        return relaxed ? State.RELAXED_BY_MAINTENANCE : State.ACTIVE;
+        if (storeAccessOpened) {
+            return State.RELAXED_BY_MAINTENANCE;
+        }
+        return otherLockOpened ? State.WITHHELD_DURING_MAINTENANCE : State.ACTIVE;
     }
 }
