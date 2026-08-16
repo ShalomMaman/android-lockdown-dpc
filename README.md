@@ -144,6 +144,7 @@ Follow the [production roadmap](docs/production-roadmap.md), [hardware validatio
 | Application policy and fail-closed reconciliation | [Package reconciliation](docs/package-reconciliation.md) |
 | Single-app and single-site containment | [Kiosk mode](docs/kiosk-mode.md) |
 | Signed remote update design | [Secure updates](docs/secure-updates.md) |
+| One-approval pilot publication | [Protected pilot release automation](docs/pilot-release-automation.md) |
 | Physical-device acceptance procedure | [Hardware validation](docs/hardware-validation.md) |
 | Supported-device evidence | [Device matrix](docs/device-matrix.md) |
 | Public positioning and discoverability | [Project positioning](docs/project-positioning.md) |

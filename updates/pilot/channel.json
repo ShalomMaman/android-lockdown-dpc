@@ -1,0 +1,8 @@
+{
+  "apkSignerSha256": "25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b",
+  "manifestUrl": "https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json",
+  "metadataPublicKeyFile": "public-key.pub",
+  "metadataPublicKeySha256": "c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc",
+  "packageName": "com.example.lockdowndpc",
+  "schemaVersion": 1
+}

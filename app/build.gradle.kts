@@ -80,3 +80,21 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20251224")
 }
+
+// Ordinary releases deliberately have no update channel. Keep this verification
+// version-aware so a release bump never requires copying version literals into CI.
+tasks.register<Exec>("verifyChannelDisabledRelease") {
+    dependsOn("assembleRelease")
+    group = "verification"
+    description = "Verifies that the ordinary release APK has no update channel."
+    commandLine(
+        "python3",
+        rootProject.file("tools/verify_pilot_apk.py"),
+        "--apk", layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile,
+        "--expected-package", android.defaultConfig.applicationId!!,
+        "--expected-version-code", android.defaultConfig.versionCode.toString(),
+        "--expected-version-name", android.defaultConfig.versionName!!,
+        "--require-single-signer",
+        "--expect-channel-disabled",
+    )
+}

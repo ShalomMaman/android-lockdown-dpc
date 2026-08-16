@@ -2,6 +2,12 @@
 
 This directory is the stable metadata endpoint for the existing Device Guard pilot installation.
 
+`channel.json` is the non-secret machine-readable trust record shared by the
+Gradle release gate and protected publication workflow. It pins the package,
+stable manifest URL, APK certificate, metadata-key fingerprint, and public-key
+file. Keeping those values in one reviewed record prevents release scripts and
+CI from drifting apart.
+
 Build the pilot channel with the repository-native fail-closed command documented
 in [`docs/secure-updates.md`](../../docs/secure-updates.md). A normal
 `assembleRelease` intentionally does not embed this channel.
@@ -17,4 +23,9 @@ offline rehearsal in [`docs/update-drill.md`](../../docs/update-drill.md).
 - Approved public-key DER SHA-256: `c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc`.
 - APK artifacts are immutable assets on GitHub Releases and are verified again by size, SHA-256, package identity, version, and Android signing certificate before installation.
 
-Publish the immutable APK before replacing `latest.json`. Never commit the corresponding private key or its passphrase. This channel is a prerelease compatibility path for the existing test device, not the production customer channel.
+Use the protected workflow in
+[`docs/pilot-release-automation.md`](../../docs/pilot-release-automation.md) for
+normal publication. It publishes the immutable APK before merging a generated,
+verified `latest.json`. Never commit the corresponding private key or its
+passphrase. This channel is a prerelease compatibility path for the existing
+test device, not the production customer channel.
