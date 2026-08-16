@@ -12,9 +12,9 @@ took effect, and recovery from a device enrolled with the wrong identity.
 
 > **Rehearsal status.** The payload builder and its refusals are covered by JVM
 > unit tests. The QR enrolment flow itself has **not** been rehearsed on any OEM
-> hardware family, and the only enrolment this project has actually performed is
-> the ADB path on the single pilot handset. Treat every device-side step below
-> as a procedure to be validated on the first unit of each model, not as
+> hardware family. Ad-hoc ADB pilot enrolments have been performed, but no
+> runbook-qualified OEM record has been completed. Treat every device-side step
+> below as a procedure to be validated on the first unit of each model, not as
 > verified behaviour. Issue #28 stays open until at least one QR enrolment has
 > been completed end to end on target hardware.
 
@@ -63,9 +63,9 @@ write anything if either disagrees with the operator's input.
 
 ```bash
 python3 tools/provisioning_payload.py \
-  --apk /secure/releases/device-guard-0.5.2.apk \
+  --apk /secure/releases/device-guard-pilot-v0.5.3.apk \
   --admin-component il.co.shalommaman.deviceguard/com.example.lockdowndpc.admin.LockdownAdminReceiver \
-  --download-location https://updates.example.test/device-guard-0.5.2.apk \
+  --download-location https://updates.example.test/device-guard-pilot-v0.5.3.apk \
   --signer-sha256 25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b \
   --locale iw_IL \
   --time-zone Asia/Jerusalem \
@@ -218,7 +218,7 @@ during a rehearsal at a bench.
 3. Install the exact release APK:
 
    ```bash
-   adb install /secure/releases/device-guard-0.5.2.apk
+   adb install /secure/releases/device-guard-pilot-v0.5.3.apk
    ```
 
 4. Set the device owner:

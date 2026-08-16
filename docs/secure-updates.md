@@ -98,13 +98,13 @@ exact APK to the intended channel before replacing `updates/pilot/latest.json`:
 python3 tools/verify_pilot_apk.py \
   --apk app/build/outputs/apk/release/app-release.apk \
   --expected-package com.example.lockdowndpc \
-  --expected-version-code 12 --expected-version-name 0.5.2 \
+  --expected-version-code 13 --expected-version-name 0.5.3 \
   --expected-signer-sha256 25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b \
   --expected-manifest-url https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json \
   --expected-public-key-file updates/pilot/public-key.pub \
   --expected-public-key-sha256 c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc \
   --manifest /secure/releases/latest.json \
-  --expected-apk-url https://github.com/ShalomMaman/android-lockdown-dpc/releases/download/pilot-v0.5.2/device-guard-pilot-v0.5.2.apk
+  --expected-apk-url https://github.com/ShalomMaman/android-lockdown-dpc/releases/download/pilot-v0.5.3/device-guard-pilot-v0.5.3.apk
 ```
 
 This final gate verifies the manifest ECDSA signature, current validity, immutable

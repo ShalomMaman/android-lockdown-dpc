@@ -1,7 +1,7 @@
 # Production roadmap
 
-This document records the product boundary after Pilot 0.5.1 and the planned
-work for the next managed-device release. It is intentionally explicit about
+This document records the product boundary at Pilot 0.5.3 and the planned work
+toward a supported managed-device release. It is intentionally explicit about
 what the administrator console can and cannot configure today.
 
 ## Execution tracking
@@ -10,13 +10,15 @@ The public [Device Guard Production Roadmap](https://github.com/users/ShalomMama
 is the execution source of truth. This document preserves the rationale and
 security boundary; the linked Issues own scope, priority and acceptance:
 
-- **Pilot 0.5.2 — implemented in this release:**
+- **Pilot 0.5.2 — delivered foundation:**
   [system-application inventory](https://github.com/ShalomMaman/android-lockdown-dpc/issues/18),
   [verified system controls](https://github.com/ShalomMaman/android-lockdown-dpc/issues/20),
   [timed maintenance mode](https://github.com/ShalomMaman/android-lockdown-dpc/issues/26), and
   [management-package identity pins](https://github.com/ShalomMaman/android-lockdown-dpc/issues/27).
   All four are covered by JVM tests and none has been exercised on hardware.
-- **Pilot 0.5.3 — the hardware gates:**
+- **Pilot 0.5.3 — current public pilot:** protected signed publication,
+  cross-platform APK signer verification, an offline in-place update drill and
+  public channel read-back are complete. The remaining release gates are:
   [real signed self-update drill](https://github.com/ShalomMaman/android-lockdown-dpc/issues/19),
   [physical kiosk validation](https://github.com/ShalomMaman/android-lockdown-dpc/issues/22),
   [Android/OEM matrix](https://github.com/ShalomMaman/android-lockdown-dpc/issues/23), and
@@ -34,9 +36,9 @@ security boundary; the linked Issues own scope, priority and acceptance:
   assembled by whoever collects the exports. That is a security boundary, not a
   deferral.
 
-## What Pilot 0.5.2 does today
+## What Pilot 0.5.3 does today
 
-The 0.5.2 console implements the administrator experience the rest of this
+The 0.5.3 console implements the administrator experience the rest of this
 document describes: a searchable system-application inventory with safety tiers,
 verified system policy controls, timed maintenance mode, and management identity
 pinning. The remaining gates are hardware gates.
@@ -51,7 +53,7 @@ The `ADMIN_SELECTED_SYSTEM` classification is now written by an administrator
 screen rather than by nothing, so an opted-in system package is a recorded
 administrator decision with a risk acceptance behind it.
 
-| Capability | Pilot 0.5.2 status |
+| Capability | Pilot 0.5.3 status |
 | --- | --- |
 | Select ordinary installed applications | Available |
 | Remember and display DPC-hidden third-party applications | Available |
@@ -278,7 +280,7 @@ the restore path and the break-glass warning are covered by JVM tests only, and
 group M of [`hardware-validation.md`](hardware-validation.md) is what closes
 that gap.
 
-## Known gaps in the 0.5.2 implementation
+## Known gaps in the 0.5.3 implementation
 
 These are recorded rather than hidden, and none of them is a hardware gate:
 
@@ -303,8 +305,9 @@ The following are release gates rather than optional polish. Gates 4, 5, 6 and 7
 are executed with [`hardware-validation.md`](hardware-validation.md) and
 evidenced in [`device-matrix.md`](device-matrix.md); gate 2 uses
 [`provisioning.md`](provisioning.md) and gate 3 uses
-[`update-drill.md`](update-drill.md). As of 0.5.2 none of them is met, because
-no case has been executed on hardware.
+[`update-drill.md`](update-drill.md). As of 0.5.3 the offline release chain is
+proven, but no complete runbook-qualified hardware record has been entered in
+[`device-matrix.md`](device-matrix.md).
 
 1. Fix the final production application ID and APK signing key before enrolling
    the first customer device.
@@ -328,10 +331,13 @@ no case has been executed on hardware.
   system policy controls, timed maintenance mode, management identity pinning
   and the local device health report, plus the provisioning, update-drill and
   hardware-validation tooling and runbooks.
-- **0.5.3 — hardware.** Execute the validation runbook on real Device Owner
-  devices, complete the signed higher-version self-update on hardware, rehearse
-  provisioning, and fix what those runs find. This is the release that turns
-  "implemented" into "proven".
+- **0.5.3 — current public pilot.** The protected release workflow, signed
+  prerelease, metadata Auto-merge and public read-back are delivered. Hardware
+  validation remains explicitly open.
+- **Next pilot validation phase.** Execute the validation runbook on real Device
+  Owner devices, complete the signed higher-version self-update on hardware,
+  rehearse provisioning, and fix what those runs find. This phase turns
+  "implemented" into "proven" for named firmware families.
 - **1.0 production candidate:** fixed production identity and signing, a
   supported-device matrix with real evidence in it, and staged rollout.
 
