@@ -280,6 +280,37 @@ the restore path and the break-glass warning are covered by JVM tests only, and
 group M of [`hardware-validation.md`](hardware-validation.md) is what closes
 that gap.
 
+## Google Play compatibility mode
+
+Some Play-distributed applications refuse to start unless the Google Play Store
+package is available, even when Google Play services and the WebView provider
+are untouched. That was reproduced on a Device Owner-provisioned Android 13
+pilot with protection verified.
+
+The response is an explicit administrator opt-in, off by default, that exempts
+`com.android.vending` — and no other store — from the hidden-store rule, and
+that pays for the exemption by pinning `DISALLOW_INSTALL_APPS` and both
+unknown-source restrictions on and reading them back. A pass that cannot confirm
+that installation lock hides the Store again and reports protection as
+unverified, so protection is never `ACTIVE` over an unverified lock. Google Play
+services and the active WebView provider stay protected by their own rules.
+
+The boundary is stated rather than papered over: Android can hide a package but
+not a single launcher entry, so on an ordinary launcher an available Store may
+remain visible and openable, and installation is what is blocked. Kiosk
+containment is stronger and unchanged — the Store can never be a lock-task
+allowlist member or a pinned target — so a contained device keeps it off the
+user's surface while dependent applications keep working.
+
+The full design, the operator workflow and the fail-closed rules are in
+[`play-store-compatibility.md`](play-store-compatibility.md). The cost is real
+and documented: the signed self-update path cannot install while the
+installation lock is on.
+
+What is **not** proven: none of this has run on a device beyond the diagnostic
+maintenance window that established the dependency. Group P of
+[`hardware-validation.md`](hardware-validation.md) is what closes that gap.
+
 ## Known gaps in the 0.5.3 implementation
 
 These are recorded rather than hidden, and none of them is a hardware gate:

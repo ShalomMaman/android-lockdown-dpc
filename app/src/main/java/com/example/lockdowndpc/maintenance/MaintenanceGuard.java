@@ -16,6 +16,8 @@ import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore;
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway;
 import com.example.lockdowndpc.policy.SystemPolicyReport;
 import com.example.lockdowndpc.policy.SystemPolicyStore;
@@ -268,7 +270,36 @@ public final class MaintenanceGuard {
         }
         auditFrom(appContext, outcome);
         lastArmSucceeded = arm(appContext, outcome.windowOpen() ? outcome.window() : null);
+        reconcileAfterClose(appContext, outcome);
         return outcome;
+    }
+
+    /**
+     * Re-applies the base package policy after a window closes, when the base
+     * policy has something to say about store visibility that a restore cannot
+     * know.
+     *
+     * <p>The capability gateway's restore hides every managed store, which is the
+     * right fail-closed default and is exactly what a strict device wants. On a
+     * device where an administrator has opted into Google Play compatibility, the
+     * base policy wants one of those stores to stay available — but only once the
+     * installation lock has been read back, which the restore has not done at the
+     * moment it hides them. So the ordering is deliberate: hide first, then let
+     * the ordinary policy pass re-assert the exception on the strength of its own
+     * verification. The pass is skipped while protection is paused.
+     *
+     * <p>Gated on the opt-in so a device that never touches the feature keeps the
+     * maintenance behaviour it has today, unchanged.
+     */
+    private static void reconcileAfterClose(Context context, MaintenanceOutcome outcome) {
+        if (outcome.closeReason() == null || !PlayStoreCompatibilityStore.isEnabled(context)) {
+            return;
+        }
+        // Asynchronous on the shared policy executor: this method is itself
+        // reached from that thread on the job, boot and console paths, and a
+        // blocking call there would deadlock the very pass it is queueing.
+        PolicyReconciliationCoordinator.reconcileAsync(
+                context, "maintenance-closed-play-compatibility", null);
     }
 
     /**
@@ -356,7 +387,12 @@ public final class MaintenanceGuard {
         return new MaintenanceCoordinator(
                 Build.VERSION.SDK_INT,
                 SystemPolicyStore.effectiveProfile(context),
-                SystemPolicyStore.explicitChoices(context),
+                // baseChoices, not the raw switches: a restore has to put back the
+                // policy this device is configured for, including the installation
+                // lock a Google Play compatibility opt-in pins on. Restoring the
+                // raw switches would end a window by leaving the Store available
+                // with installs unlocked.
+                SystemPolicyStore.baseChoices(context),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
                 new AndroidMaintenanceCapabilityGateway(
                         dpm,

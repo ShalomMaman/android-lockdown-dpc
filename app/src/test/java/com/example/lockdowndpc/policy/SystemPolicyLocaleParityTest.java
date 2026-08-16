@@ -125,6 +125,38 @@ public final class SystemPolicyLocaleParityTest {
                 consequence.toLowerCase(java.util.Locale.ROOT).contains("recover"));
     }
 
+    @Test
+    public void thePlayCompatibilityBoundaryIsStatedInBothLocales() {
+        // The console must describe this mode honestly in both languages. An
+        // operator reading the Hebrew screen has to learn the same thing: the
+        // Store package stays available, installation is what is blocked, and
+        // nobody is told the Store has been hidden.
+        for (String key : List.of(
+                "system_policy_section_play_compatibility",
+                "system_policy_play_compat_row",
+                "system_policy_play_compat_body",
+                "system_policy_play_compat_state_strict",
+                "system_policy_play_compat_state_active",
+                "system_policy_play_compat_state_maintenance",
+                "system_policy_play_compat_state_unverified",
+                "system_policy_play_compat_locked_control",
+                "system_policy_play_compat_confirm_enable_title",
+                "system_policy_play_compat_confirm_enable_body",
+                "system_policy_play_compat_confirm_disable_title",
+                "system_policy_play_compat_confirm_disable_body")) {
+            assertTrue("values/ is missing " + key, english.containsKey(key));
+            assertTrue("values-iw/ is missing " + key, hebrew.containsKey(key));
+        }
+        String body = english.get("system_policy_play_compat_body")
+                .toLowerCase(java.util.Locale.ROOT);
+        assertTrue(
+                "the compatibility text must say that installation is what is blocked",
+                body.contains("installation"));
+        assertTrue(
+                "the compatibility text must not claim the Store is hidden",
+                body.contains("may stay visible"));
+    }
+
     private static List<String> placeholdersOf(String text) {
         List<String> found = new ArrayList<>();
         Matcher matcher = PLACEHOLDER.matcher(text);

@@ -25,7 +25,6 @@ import com.example.lockdowndpc.kiosk.KioskMode;
 import com.example.lockdowndpc.maintenance.MaintenanceAppPolicy;
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.maintenance.MaintenancePlan;
-import com.example.lockdowndpc.maintenance.MaintenanceStateMachine;
 import com.example.lockdowndpc.maintenance.MaintenanceStore;
 import com.example.lockdowndpc.maintenance.MaintenanceWindow;
 import com.example.lockdowndpc.ui.BlockedBrowserActivity;
@@ -57,7 +56,17 @@ public final class LockdownPolicyController {
         }
 
         ArrayList<String> errors = new ArrayList<>();
-        applySystemPolicy(context, dpm, admin, errors);
+        SystemPolicyPass systemPolicy = applySystemPolicy(context, dpm, admin, errors);
+        // Resolved from this pass's read-back evidence, never from the stored
+        // switch: a compatibility mode whose install lock the device did not
+        // confirm leaves the Store hidden and the pass unverified.
+        PlayStoreCompatibility.State playCompatibility = PlayStoreCompatibility.evaluate(
+                PlayStoreCompatibilityStore.isEnabled(context),
+                systemPolicy.relaxedByMaintenance(),
+                systemPolicy.report());
+        if (playCompatibility.faultsProtection()) {
+            errors.add(PlayStoreCompatibility.INSTALL_LOCK_UNVERIFIED_ERROR);
+        }
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
@@ -66,7 +75,8 @@ public final class LockdownPolicyController {
         setBlockedBrowserComponentEnabled(context, true, errors);
         configureBlockedBrowser(context, dpm, admin, errors);
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
-        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement, errors);
+        int[] packageCounts = applyPackagePolicy(
+                context, dpm, admin, trustedManagement, playCompatibility, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
@@ -187,14 +197,17 @@ public final class LockdownPolicyController {
      * refusal and a restriction this Android release does not implement are
      * recorded and shown, but neither is allowed to brick a working device.
      */
-    private static void applySystemPolicy(
+    private static SystemPolicyPass applySystemPolicy(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
             List<String> errors
     ) {
         SystemPolicyProfile profile = SystemPolicyStore.effectiveProfile(context);
-        Map<SystemPolicyControl, Boolean> choices = effectiveChoicesFor(context, profile);
+        MaintenancePlan plan = maintenancePlanFor(context, profile);
+        Map<SystemPolicyControl, Boolean> choices = plan == null
+                ? SystemPolicyStore.baseChoices(context)
+                : plan.effectiveChoices();
         SystemPolicyReport report = SystemPolicyEnforcer.enforce(
                 Build.VERSION.SDK_INT,
                 profile,
@@ -205,10 +218,28 @@ public final class LockdownPolicyController {
         for (SystemPolicyControlStatus fault : report.faults()) {
             errors.add("system-policy:" + fault.summary());
         }
+        return new SystemPolicyPass(report, plan == null ? Set.of() : plan.relaxed());
     }
 
     /**
-     * The choices this pass should actually apply, maintenance included.
+     * What one system policy pass asked for, and what a live window relaxed.
+     *
+     * <p>The two are kept apart because they mean opposite things to the Google
+     * Play compatibility gate: a control the device refused to enforce is a
+     * failure that must hide the Store again, while a control an authenticated,
+     * bounded, audited window deliberately opened is not.
+     *
+     * @param report               the read-back evidence of the pass
+     * @param relaxedByMaintenance controls a live window legitimately turned off
+     */
+    private record SystemPolicyPass(
+            SystemPolicyReport report,
+            Set<SystemPolicyControl> relaxedByMaintenance
+    ) {}
+
+    /**
+     * The maintenance plan this pass must apply, or {@code null} when no window
+     * is live and the base policy stands on its own.
      *
      * <p>An apply is not the only thing that reaches this code: a reboot, a
      * package install and a periodic sweep all reconcile the policy. Without this,
@@ -223,14 +254,13 @@ public final class LockdownPolicyController {
      * and this pass re-applies the base policy anyway, which is the same device
      * state a restore would produce.
      */
-    private static Map<SystemPolicyControl, Boolean> effectiveChoicesFor(
+    private static MaintenancePlan maintenancePlanFor(
             Context context,
             SystemPolicyProfile profile
     ) {
-        Map<SystemPolicyControl, Boolean> stored = SystemPolicyStore.explicitChoices(context);
         MaintenanceWindow window = liveMaintenanceWindow(context);
         if (window == null) {
-            return stored;
+            return null;
         }
         // The full liveness evaluation, not a bare expiry check. An expiry-only
         // test reads a pre-reboot window as live — after a restart the monotonic
@@ -240,18 +270,17 @@ public final class LockdownPolicyController {
         // ones MaintenanceGuard closes the window with; this pass merely ignores
         // a window the guard would not honour, and leaves the closing (which
         // must be read back and audited) to the guard.
-        return MaintenancePlan.forWindow(profile, stored, window).effectiveChoices();
+        //
+        // The base handed in is SystemPolicyStore.baseChoices, so a window is an
+        // exception to the policy this device is actually configured for — the
+        // Google Play compatibility floor included — rather than to the raw
+        // switches, which would silently drop the floor for the window's duration.
+        return MaintenancePlan.forWindow(profile, SystemPolicyStore.baseChoices(context), window);
     }
 
     /** The stored window only when the state machine would still honour it. */
     private static MaintenanceWindow liveMaintenanceWindow(Context context) {
-        MaintenanceWindow window = MaintenanceStore.readWindow(context);
-        if (window == null) {
-            return null;
-        }
-        MaintenanceStateMachine.Evaluation evaluation =
-                MaintenanceStateMachine.evaluate(window, MaintenanceStore.deviceClock());
-        return evaluation.open() ? evaluation.window() : null;
+        return MaintenanceStore.liveWindow(context);
     }
 
     /**
@@ -583,6 +612,7 @@ public final class LockdownPolicyController {
             DevicePolicyManager dpm,
             ComponentName admin,
             Set<String> trustedManagement,
+            PlayStoreCompatibility.State playCompatibility,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -595,6 +625,7 @@ public final class LockdownPolicyController {
         Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
         boolean appStoreMaintenanceOpen = MaintenanceAppPolicy.opensApplicationStores(
                 liveMaintenanceWindow(context));
+        boolean playStoreAvailable = playCompatibility.keepsPlayStoreAvailable();
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
         String webViewProvider = resolveWebViewProvider(pm);
@@ -681,6 +712,18 @@ public final class LockdownPolicyController {
                 shouldBlock = false;
             }
 
+            // The Google Play compatibility exception: one package, only after an
+            // authenticated administrator asked for it, and only once this pass
+            // read the installation lock back as in force. Every other store in
+            // the built-in catalogue is untouched by it. Containment is unaffected
+            // either way: what a kiosk user can reach is the lock-task allowlist
+            // and the pinned target, and KioskAppCatalog refuses this package as
+            // both, so an available Store is available to dependent applications
+            // rather than added to a contained device's surface.
+            if (PlayStoreCompatibility.keepsAvailable(packageName, playStoreAvailable)) {
+                shouldBlock = false;
+            }
+
             // Kiosk hides the known escape surfaces even though Lock Task already
             // blocks navigation to most of them; a share sheet or OEM shortcut is
             // a real exit. Outside kiosk they are deliberately left alone.
@@ -724,7 +767,11 @@ public final class LockdownPolicyController {
                     || LockdownPackages.isManagementPackage(packageName)
                     || packageName.equals(webViewProvider);
             criticalPackage = criticalPackage
-                    || MaintenanceAppPolicy.keepsVisible(packageName, appStoreMaintenanceOpen);
+                    || MaintenanceAppPolicy.keepsVisible(packageName, appStoreMaintenanceOpen)
+                    // Without this the exception would be inert: a package whose
+                    // only reason to be touched is that it must be *unhidden*
+                    // fails every other criticality test and is skipped.
+                    || PlayStoreCompatibility.keepsAvailable(packageName, playStoreAvailable);
             if (!criticalPackage || !isInstalled(pm, packageName)) {
                 continue;
             }

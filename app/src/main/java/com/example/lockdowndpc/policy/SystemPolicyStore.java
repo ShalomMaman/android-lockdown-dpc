@@ -81,12 +81,29 @@ public final class SystemPolicyStore {
         return choices;
     }
 
-    /** What a control resolves to right now: the explicit choice, or the profile default. */
+    /**
+     * The base policy this device is configured for: the administrator's stored
+     * choices, raised by any explicit compatibility floor.
+     *
+     * <p>This is the single seam every consumer of the base policy reads —
+     * {@code LockdownPolicyController}, the maintenance coordinator that has to
+     * restore it, and the console rows. {@link #explicitChoices} stays the raw
+     * record of what was toggled; a caller that used it as "the base policy"
+     * would restore a device to a policy weaker than the one it is running.
+     */
+    public static Map<SystemPolicyControl, Boolean> baseChoices(Context context) {
+        return PlayStoreCompatibility.baseChoices(
+                PlayStoreCompatibilityStore.isEnabled(context),
+                explicitChoices(context)
+        );
+    }
+
+    /** What a control resolves to right now: the base choice, or the profile default. */
     public static boolean isRequested(Context context, SystemPolicyControl control) {
         return SystemPolicyEnforcer.requestedFor(
                 control,
                 effectiveProfile(context),
-                explicitChoices(context)
+                baseChoices(context)
         );
     }
 

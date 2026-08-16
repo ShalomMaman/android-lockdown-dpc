@@ -119,6 +119,27 @@ public final class MaintenanceStore {
         }
     }
 
+    /**
+     * The stored window, but only when the state machine would still honour it.
+     *
+     * <p>The full liveness evaluation, not a bare expiry check. An expiry-only
+     * test reads a pre-reboot window as live — after a restart the monotonic
+     * clock is near zero, comfortably below the old deadline — so a caller that
+     * checked the deadline alone would treat a dead window's relaxations as
+     * current. Closing a lapsed window stays {@link MaintenanceGuard}'s job,
+     * because that has to be read back and audited; this only answers whether a
+     * window is one the guard would still honour.
+     */
+    public static MaintenanceWindow liveWindow(Context context) {
+        MaintenanceWindow window = readWindow(context);
+        if (window == null) {
+            return null;
+        }
+        MaintenanceStateMachine.Evaluation evaluation =
+                MaintenanceStateMachine.evaluate(window, deviceClock());
+        return evaluation.open() ? evaluation.window() : null;
+    }
+
     /** Whether a restore still has to be verified before this device is trusted again. */
     public static boolean restorePending(Context context) {
         return prefs(context).getBoolean(KEY_RESTORE_PENDING, false);

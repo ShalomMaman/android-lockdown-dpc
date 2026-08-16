@@ -1062,6 +1062,125 @@ window. This is the same exposure as K-10 and is measured the same way.
 
 ---
 
+## Group P — Google Play compatibility
+
+**Gated:** these cases need a build with Google Play compatibility mode in the
+system policy console, an Android 13 or later device, and an installed
+application that is known to require the Google Play Store package — a Play Core,
+in-app update, licensing or integrity dependency. Record the application by
+category rather than by name if naming it would identify a customer. The contract
+under test is the one stated in
+[`play-store-compatibility.md`](play-store-compatibility.md).
+
+The letter O is skipped deliberately: it is unreadable next to a zero in a
+handwritten record.
+
+### P-1 Strict mode is the default
+
+**Steps**
+
+1. On a device that has never opened the Google Play compatibility section, apply
+   protection and read the console.
+2. Look for the Play Store on the launcher and try to open it.
+
+**Expected:** the compatibility switch is off, the Store is hidden, and the
+dependent application shows its own "Google Play is not available" style error.
+This is the shipped default and the baseline the next case is measured against.
+
+**Fail action:** if the switch is on without anyone turning it on, stop. An
+inferred opt-in is the defect this group exists to catch.
+
+### P-2 Opting in makes the application work and keeps installation blocked
+
+**Steps**
+
+1. With an active administrator PIN session, turn Google Play compatibility on,
+   read the confirmation dialog in full, and confirm it.
+2. Apply and verify. Record the status line under the switch.
+3. Start the dependent application.
+4. From the Play Store, try to install any application.
+5. From a file manager or a download, try to install a local APK.
+6. Read the two installation rows in the console.
+
+**Expected:** the application starts. Every installation attempt in steps 4 and 5
+is refused by Android. **All package installation, including stores** and
+**Installation from unknown sources** both read *Verified in force* and their
+switches are shown as kept on by the compatibility mode. Protection is reported
+as active and verified.
+
+**Evidence:** photograph the console status line and the refusal Android shows on
+the install attempt. Record which Android version and OEM build the refusal came
+from — the wording is vendor-specific and the refusal itself is the finding.
+
+**Fail action:** if any installation succeeds, this is a **critical** failure.
+Record it, turn compatibility back off, and do not deploy the build.
+
+### P-3 A device that refuses the installation lock hides the Store again
+
+**Steps**
+
+1. Only if the firmware under test refuses `DISALLOW_INSTALL_APPS` — which P-2
+   would already have shown as a failed control. Otherwise record this case as
+   **not applicable on this firmware** and say why.
+2. With compatibility on, apply and verify.
+
+**Expected:** protection is reported as **not verified**, the console names the
+control that failed, and the Play Store is hidden rather than left available.
+Device Guard never reports active protection over an unverified installation lock.
+
+### P-4 The boundary the console states is the boundary the device has
+
+**Steps**
+
+1. With compatibility on and verified, on an ordinary launcher, look for the
+   Play Store icon and try to open it.
+2. Configure a single-app kiosk with the dependent application as the target and
+   enter kiosk.
+3. From inside kiosk, try every route to the Store you can find: the launcher, a
+   share sheet, an in-app link, the Overview key.
+
+**Expected:** on the ordinary launcher the Store may be visible and openable —
+that is what the console says, and it is not a failure. Installation from it is
+refused. Inside kiosk the Store is not reachable by any route, and the dependent
+application still starts and works.
+
+**Fail action:** if the Store is reachable from inside kiosk, record the exact
+route. That is a containment failure and belongs with the Group K findings.
+
+### P-5 Maintenance, expiry and reboot leave the lock in place
+
+**Steps**
+
+1. With compatibility on and verified, open a maintenance window with
+   application-store access.
+2. Install something from the Store — this is expected to work inside the window.
+3. Let the window expire, or cancel it.
+4. Retry the installation. Reboot and retry once more.
+
+**Expected:** installation works only inside the window. After the window closes,
+and again after the reboot, installation is refused, the Play Store is still
+available to the dependent application, and the console reports protection as
+active and verified. The audit log records the open, the close reason and the
+verified restore.
+
+**Fail action:** if installation stays possible after the window closes, this is
+a **critical** fail-open. Record how long it persisted and whether opening the
+console corrected it.
+
+### P-6 Turning it off restores strict mode
+
+**Steps**
+
+1. Turn Google Play compatibility off, confirm, and apply.
+2. Look for the Store and start the dependent application.
+3. Read the two installation rows.
+
+**Expected:** the Store is hidden, the dependent application shows its own error
+again, and the installation controls return to whatever the administrator had
+saved — which on a default device means the store lock is off again.
+
+---
+
 ## Cases gated on unshipped features
 
 Record these as **blocked** rather than failed when the dependency is absent from
@@ -1073,6 +1192,7 @@ the build under test, and name the version tested.
 | Group S | A row in `MainActivity` that opens `SystemPolicyActivity` behind `requireSession()` — tracked as an open integration requirement in [`production-roadmap.md`](production-roadmap.md#open-integration-requirements). |
 | Group M | Timed maintenance mode. |
 | N-2, N-3 | A build that writes management certificate pins. N-1 needs nothing beyond the shipped read-only view. |
+| Group P | Google Play compatibility mode in the system policy console, an Android 13 or later device, and an installed application that requires the Google Play Store package. |
 
 A blocked group is not a pass. The matrix records it as *not tested*.
 
