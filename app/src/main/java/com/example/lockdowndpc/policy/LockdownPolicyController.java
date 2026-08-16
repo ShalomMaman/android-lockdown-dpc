@@ -41,6 +41,8 @@ import java.util.Set;
 
 public final class LockdownPolicyController {
     private static final String TAG = "LockdownPolicy";
+    private static final int LINK_HANDLER_VERIFY_ATTEMPTS = 20;
+    private static final long LINK_HANDLER_VERIFY_RETRY_DELAY_MS = 100L;
 
     private LockdownPolicyController() {}
 
@@ -335,10 +337,13 @@ public final class LockdownPolicyController {
             List<String> errors
     ) {
         ComponentName blockedActivity = new ComponentName(admin.getPackageName(), BlockedBrowserActivity.class.getName());
-        // Android 14+ applies this policy asynchronously. Register both filters
+        // Android can apply this policy asynchronously. Register both filters
         // first, then verify their effective resolution with a short bounded
-        // retry. PolicyUpdateAuditReceiver remains the authoritative backstop
-        // for a later conflicting-admin result.
+        // retry. A physical Android 13 OEM build also delayed resolver state
+        // after enabling this component, so the retry applies to every supported
+        // release rather than relying on the platform version. The first probe
+        // still returns immediately on the normal path. PolicyUpdateAuditReceiver
+        // remains the authoritative backstop for a later conflicting-admin result.
         for (String scheme : new String[]{"http", "https"}) {
             try {
                 IntentFilter filter = new IntentFilter(Intent.ACTION_VIEW);
@@ -368,16 +373,11 @@ public final class LockdownPolicyController {
             Intent intent,
             ComponentName expected
     ) {
-        int attempts = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE ? 20 : 1;
-        for (int attempt = 0; attempt < attempts; attempt++) {
-            if (expected.equals(resolveActivity(pm, intent))) {
-                return true;
-            }
-            if (attempt + 1 < attempts) {
-                SystemClock.sleep(100);
-            }
-        }
-        return false;
+        return BoundedVerificationRetry.verify(
+                LINK_HANDLER_VERIFY_ATTEMPTS,
+                () -> expected.equals(resolveActivity(pm, intent)),
+                () -> SystemClock.sleep(LINK_HANDLER_VERIFY_RETRY_DELAY_MS)
+        );
     }
 
     private static void setBlockedBrowserComponentEnabled(
