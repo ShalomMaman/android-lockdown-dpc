@@ -1206,7 +1206,26 @@ length if you see one.
 window, record it. An authorisation to install one APK must not silently carry an
 application store with it.
 
-### P-8 A device that cannot hide the Store refuses the window
+### P-8 Turning compatibility off without applying does not reopen the gap
+
+**Steps**
+
+1. With compatibility on **and applied**, confirm the Play Store is visible.
+2. Turn the compatibility switch **off** and confirm — but do **not** press
+   **Apply and verify now**. The Store is still visible at this point; that is
+   expected, because nothing has been applied.
+3. Open a maintenance window for **local APK installation only**.
+4. Watch the launcher from the moment you confirm the window.
+
+**Expected:** the Store is hidden as the window opens, before any restriction is
+relaxed. It does not remain visible for any part of the window.
+
+**Fail action:** if the Store is still present and openable after the window
+opens, this is a **critical** authorisation bypass — an install-relaxing window
+ran beside a usable store with no application-store authorisation. Record it and
+do not deploy the build.
+
+### P-9 A device that cannot hide the Store refuses the window
 
 **Steps**
 

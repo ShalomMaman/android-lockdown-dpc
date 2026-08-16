@@ -131,8 +131,19 @@ definition, `SystemPolicyStore.baseChoices`, is what every stage reads:
 
   The withholding is a **precondition, not an effect**. Before a single
   restriction is relaxed, the open path hides `com.android.vending` and reads it
-  back; only then does the enforcer touch the restrictions. If the Store cannot
-  be hidden, or cannot be proven hidden, **the window does not open** —
+  back; only then does the enforcer touch the restrictions. The precondition
+  reads **no preference at all** — it fires on the shape of the window, for every
+  window that relaxes an installation control without carrying application-store
+  access, whatever the compatibility switch currently says. That is deliberate:
+  the switch is intent, package visibility is device state, and the two disagree
+  for as long as an administrator has changed the switch without applying. A
+  precondition that consulted the switch could be skipped by turning
+  compatibility off and opening a local-APK window before the next apply, leaving
+  an already-visible Store beside cleared unknown-source restrictions. On a device
+  that is already strict the Store is already hidden and the extra write is a
+  verified no-op; a device without the Store installed is a safe no-op too. If
+  the Store cannot be hidden, or cannot be proven hidden, **the window does not
+  open** —
   `MaintenanceStatus.REFUSED` with reason `precondition-unverified`, no plan, no
   report, nothing relaxed, and the administrator's restore debt handled exactly
   as for any other refusal (an intent this call created is withdrawn; a debt owed

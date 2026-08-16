@@ -15,6 +15,7 @@ import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -367,13 +368,29 @@ public final class PlayStoreCompatibilityTest {
         Set<SystemPolicyControl> storeAccess = MaintenanceCapability.relaxedControls(
                 Set.of(MaintenanceCapability.APP_STORE_ACCESS));
 
-        assertTrue(PlayStoreCompatibility.withholdsStoreDuring(true, localApk));
+        assertTrue(PlayStoreCompatibility.requiresPlayStoreWithheld(localApk));
         assertFalse(
                 "an authorised store window owns store visibility itself",
-                PlayStoreCompatibility.withholdsStoreDuring(true, storeAccess));
-        assertFalse(
-                "strict mode has nothing to withhold",
-                PlayStoreCompatibility.withholdsStoreDuring(false, localApk));
+                PlayStoreCompatibility.requiresPlayStoreWithheld(storeAccess));
+    }
+
+    @Test
+    public void thePreconditionTakesNoPreferenceAtAll() {
+        // The rule is a property of the window, not of a saved switch. That is
+        // what closes the transition bypass: enable and apply so the Store is
+        // visible, save the switch back to off without applying, then open a
+        // local-APK window. A rule that consulted the preference skipped itself
+        // and left an already visible Store beside relaxed unknown sources.
+        List<java.lang.reflect.Method> overloads =
+                java.util.Arrays.stream(PlayStoreCompatibility.class.getDeclaredMethods())
+                        .filter(method -> method.getName().equals("requiresPlayStoreWithheld"))
+                        .collect(java.util.stream.Collectors.toList());
+
+        assertEquals("exactly one form of the rule may exist", 1, overloads.size());
+        assertEquals(
+                "the rule must take the window's controls and nothing else",
+                List.of(Set.class),
+                List.of(overloads.get(0).getParameterTypes()));
     }
 
     @Test
@@ -385,12 +402,11 @@ public final class PlayStoreCompatibilityTest {
         }) {
             assertFalse(
                     capability + " does not touch the installation floor",
-                    PlayStoreCompatibility.withholdsStoreDuring(
-                            true,
+                    PlayStoreCompatibility.requiresPlayStoreWithheld(
                             MaintenanceCapability.relaxedControls(Set.of(capability))));
         }
-        assertFalse(PlayStoreCompatibility.withholdsStoreDuring(true, Set.of()));
-        assertFalse(PlayStoreCompatibility.withholdsStoreDuring(true, null));
+        assertFalse(PlayStoreCompatibility.requiresPlayStoreWithheld(Set.of()));
+        assertFalse(PlayStoreCompatibility.requiresPlayStoreWithheld(null));
     }
 
     @Test
@@ -409,7 +425,7 @@ public final class PlayStoreCompatibilityTest {
             assertEquals(
                     capability + " precondition",
                     !opensStoreAccess && opensAnotherRequiredControl,
-                    PlayStoreCompatibility.withholdsStoreDuring(true, declared));
+                    PlayStoreCompatibility.requiresPlayStoreWithheld(declared));
         }
     }
 

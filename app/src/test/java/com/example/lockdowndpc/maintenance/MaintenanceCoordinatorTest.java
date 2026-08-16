@@ -45,6 +45,7 @@ public final class MaintenanceCoordinatorTest {
     private static final String UNKNOWN_SOURCES = "no_install_unknown_sources";
     private static final String UNKNOWN_SOURCES_GLOBAL = "no_install_unknown_sources_globally";
     private static final String INSTALL_APPS = "no_install_apps";
+    private static final String PLAY_STORE = "com.android.vending";
 
     @Test
     public void openingRelaxesTheDeviceAndReadsTheResultBack() {
@@ -553,6 +554,145 @@ public final class MaintenanceCoordinatorTest {
         assertTrue(outcome.windowMustBeStored());
     }
 
+    // ------------------------------- the saved-off-without-apply transition (#64)
+
+    /**
+     * The reported P1, end to end, through the real capability gateway.
+     *
+     * <p>Seeded exactly as the device is after the transition: compatibility was
+     * enabled <em>and applied</em>, so {@code com.android.vending} is visible on
+     * the device; the administrator has since saved the switch back to off
+     * <em>without</em> applying, so the base policy no longer pins the
+     * installation lock. Opening a local-APK window in that state used to leave
+     * the already visible Store beside cleared unknown-source restrictions, with
+     * no application-store authorisation anywhere in the transaction.
+     *
+     * <p>No preference is passed to anything here, which is the fix: the
+     * precondition is a property of the window.
+     */
+    @Test
+    public void aVisibleStoreIsHiddenBeforeAnyRestrictionIsClearedAfterCompatibilityIsSavedOff() {
+        List<String> log = new java.util.ArrayList<>();
+        FakeGateway gateway = new FakeGateway(log);
+        // The Store is visible: compatibility was applied before it was saved off.
+        FakeStoreDevice store = new FakeStoreDevice(log, false);
+        MaintenanceCoordinator coordinator = new MaintenanceCoordinator(
+                ANDROID_TEN,
+                SystemPolicyProfile.PRODUCTION,
+                // The base policy no longer pins the installation lock, because
+                // the compatibility floor is gone the moment the switch is saved.
+                Map.of(),
+                gateway,
+                new AndroidMaintenanceCapabilityGateway(store),
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.open(null, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(MaintenanceStatus.APPLIED, outcome.status());
+        assertTrue("the Store must end up hidden", store.playStoreHidden());
+
+        int hiddenAt = log.indexOf("store-hidden:" + PLAY_STORE);
+        assertTrue("the Store was never hidden: " + log, hiddenAt >= 0);
+        for (int index = 0; index < log.size(); index++) {
+            String entry = log.get(index);
+            if (entry.startsWith("clear:") || entry.startsWith("add:")) {
+                assertTrue(
+                        "restriction " + entry + " was written before the Store was hidden: " + log,
+                        index > hiddenAt);
+            }
+        }
+        // And the read-back is part of the precondition, not an afterthought.
+        assertTrue(
+                "the hide must be read back before any restriction write: " + log,
+                log.indexOf("store-read:" + PLAY_STORE + ":true") > hiddenAt
+                        && log.indexOf("store-read:" + PLAY_STORE + ":true")
+                                < firstRestrictionWrite(log));
+    }
+
+    @Test
+    public void aStoreThatCannotBeHiddenRefusesTheWindowBeforeAnyRestrictionIsCleared() {
+        List<String> log = new java.util.ArrayList<>();
+        FakeGateway gateway = new FakeGateway(log);
+        FakeStoreDevice store = new FakeStoreDevice(log, false);
+        store.refuseWrites = true;
+        MaintenanceCoordinator coordinator = new MaintenanceCoordinator(
+                ANDROID_TEN,
+                SystemPolicyProfile.PRODUCTION,
+                Map.of(),
+                gateway,
+                new AndroidMaintenanceCapabilityGateway(store),
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.open(null, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(MaintenanceStatus.REFUSED, outcome.status());
+        assertEquals("precondition-unverified", outcome.reason());
+        assertNull(outcome.window());
+        assertFalse(store.playStoreHidden());
+        assertTrue(
+                "no restriction may be written when the precondition failed: " + log,
+                log.stream().noneMatch(entry ->
+                        entry.startsWith("clear:") || entry.startsWith("add:")));
+        assertTrue(gateway.touched.isEmpty());
+    }
+
+    @Test
+    public void anAbsentStoreDoesNotBlockALocalApkWindow() {
+        List<String> log = new java.util.ArrayList<>();
+        FakeStoreDevice store = new FakeStoreDevice(log, false);
+        store.installed = false;
+        MaintenanceCoordinator coordinator = new MaintenanceCoordinator(
+                ANDROID_TEN,
+                SystemPolicyProfile.PRODUCTION,
+                Map.of(),
+                new FakeGateway(log),
+                new AndroidMaintenanceCapabilityGateway(store),
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.open(null, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(MaintenanceStatus.APPLIED, outcome.status());
+    }
+
+    @Test
+    public void storeAccessThroughTheRealGatewayUnhidesOnlyAfterTheRestrictions() {
+        // The other ordering, through the production gateway: a store must not
+        // become visible while the installation controls it needs are in force.
+        List<String> log = new java.util.ArrayList<>();
+        FakeStoreDevice store = new FakeStoreDevice(log, true);
+        MaintenanceCoordinator coordinator = new MaintenanceCoordinator(
+                ANDROID_TEN,
+                SystemPolicyProfile.PRODUCTION,
+                Map.of(SystemPolicyControl.APP_STORES_AND_INSTALLERS, true),
+                new FakeGateway(log),
+                new AndroidMaintenanceCapabilityGateway(store),
+                new FakeClock(OPEN_WALL, OPEN_ELAPSED));
+
+        MaintenanceOutcome outcome =
+                coordinator.open(null, request(MaintenanceCapability.APP_STORE_ACCESS));
+
+        assertEquals(MaintenanceStatus.APPLIED, outcome.status());
+        assertFalse("the Store is visible for the window", store.playStoreHidden());
+        assertTrue(
+                "the installation lock comes off before the Store appears: " + log,
+                log.indexOf("clear:" + INSTALL_APPS)
+                        < log.indexOf("store-shown:" + PLAY_STORE));
+    }
+
+    /** The index of the first restriction write, or {@code log.size()} when none. */
+    private static int firstRestrictionWrite(List<String> log) {
+        for (int index = 0; index < log.size(); index++) {
+            String entry = log.get(index);
+            if (entry.startsWith("clear:") || entry.startsWith("add:")) {
+                return index;
+            }
+        }
+        return log.size();
+    }
+
     private static MaintenanceCoordinator production(
             SystemPolicyGateway gateway,
             MaintenanceClock clock
@@ -702,6 +842,63 @@ public final class MaintenanceCoordinatorTest {
             }
             storesVisible = false;
             return List.of();
+        }
+    }
+
+    /**
+     * A device that models Play Store visibility, sharing the restriction gateway's
+     * log so the order of the two boundaries is provable.
+     *
+     * <p>Used with the production {@link AndroidMaintenanceCapabilityGateway}
+     * rather than a stub, so these cases exercise the real precondition rather
+     * than a test double's idea of it.
+     */
+    private static final class FakeStoreDevice
+            implements AndroidMaintenanceCapabilityGateway.StoreVisibilityDevice {
+
+        private final List<String> log;
+        private final Set<String> hiddenPackages = new LinkedHashSet<>();
+        boolean installed = true;
+        boolean refuseWrites;
+
+        /** @param playStoreHidden the Play Store's visibility before the window */
+        FakeStoreDevice(List<String> log, boolean playStoreHidden) {
+            this.log = log;
+            if (playStoreHidden) {
+                hiddenPackages.add(PLAY_STORE);
+            }
+        }
+
+        /** Whether the Play Store — the package under test — is hidden right now. */
+        boolean playStoreHidden() {
+            return hiddenPackages.contains(PLAY_STORE);
+        }
+
+        @Override
+        public boolean isInstalled(String packageName) {
+            return installed;
+        }
+
+        @Override
+        public boolean isHidden(String packageName) {
+            boolean hidden = hiddenPackages.contains(packageName);
+            log.add("store-read:" + packageName + ":" + hidden);
+            return hidden;
+        }
+
+        @Override
+        public boolean setHidden(String packageName, boolean hide) {
+            if (refuseWrites) {
+                log.add("store-write-refused:" + packageName);
+                return false;
+            }
+            if (hide) {
+                hiddenPackages.add(packageName);
+            } else {
+                hiddenPackages.remove(packageName);
+            }
+            log.add((hide ? "store-hidden:" : "store-shown:") + packageName);
+            return true;
         }
     }
 

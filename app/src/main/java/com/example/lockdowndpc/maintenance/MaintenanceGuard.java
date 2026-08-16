@@ -302,7 +302,11 @@ public final class MaintenanceGuard {
      *
      * <p>The pass is skipped while protection is paused, and the whole hook is
      * gated on the opt-in so a device that never touches the feature keeps the
-     * maintenance behaviour it has today, unchanged.
+     * maintenance behaviour it has today, unchanged. Reading the preference is
+     * safe <em>here</em>, and only here, because this hook restores availability
+     * rather than withdrawing it: the worst a stale or saved-off preference can
+     * do is leave the Store hidden. The precondition, which is the half that must
+     * withdraw, reads no preference at all.
      */
     private static void reconcileAfterMaintenanceChange(
             Context context,
@@ -427,11 +431,15 @@ public final class MaintenanceGuard {
                 // with installs unlocked.
                 SystemPolicyStore.baseChoices(context),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
+                // No compatibility preference is handed in on purpose. The
+                // precondition inside the gateway must fire on the shape of the
+                // window, not on a switch an administrator may have saved without
+                // applying — the Store can still be visible from an earlier
+                // applied state long after the switch says otherwise.
                 new AndroidMaintenanceCapabilityGateway(
                         dpm,
                         LockdownAdminReceiver.componentName(context),
-                        context.getPackageManager(),
-                        PlayStoreCompatibilityStore.isEnabled(context)),
+                        context.getPackageManager()),
                 MaintenanceStore.deviceClock());
     }
 

@@ -216,28 +216,48 @@ public final class PlayStoreCompatibility {
      * Store — the precondition an open has to satisfy <em>before</em> it relaxes
      * anything.
      *
-     * <p>Decided from the window's declared set rather than from the plan's
-     * effective set on purpose. The effective set depends on what the base policy
-     * happens to be enforcing at that moment; the declared set is what the
-     * administrator authorised. A precondition that asks "what will actually be
-     * relaxed" can be argued out of running by a base policy that has drifted,
-     * and this one must not be.
+     * <h2>Why this does not ask whether compatibility is enabled</h2>
      *
-     * <p>{@link State#WITHHELD_DURING_MAINTENANCE} is the state this produces
-     * once the window is open. The two are separate because they answer
-     * different questions at different times: this one gates the open, that one
-     * describes the device afterwards.
+     * <p>It deliberately takes no preference. The compatibility flag is an
+     * <em>intent</em>; whether {@link #PLAY_STORE_PACKAGE} is actually visible is
+     * <em>device state</em>, and the two disagree for as long as an administrator
+     * has changed the switch without applying. That gap was a reachable bypass:
+     * enable and apply so the Store is visible, save the switch back to off
+     * without applying, then open a window that clears the unknown-source
+     * restrictions. A precondition that consulted the preference skipped itself,
+     * the base policy no longer pinned the installation lock, and an already
+     * visible Store stayed usable with no application-store authorisation
+     * anywhere in the transaction.
+     *
+     * <p>So the question is asked of the window alone: does it relax an
+     * installation control this exception is priced at, without carrying the
+     * application-store authorisation that owns store visibility? If it does, the
+     * Store is hidden and read back first, whatever any preference says. On a
+     * device that is already strict the Store is already hidden and the extra
+     * write is a verified no-op, which is the cheapest possible way to be sure.
+     *
+     * <p>Decided from the window's declared set rather than from the plan's
+     * effective set for the same reason. The effective set depends on what the
+     * base policy happens to be enforcing at that moment; the declared set is
+     * what the administrator authorised. A precondition that asks "what will
+     * actually be relaxed" can be argued out of running by a base policy that has
+     * drifted, and this one must not be.
+     *
+     * <p>{@link State#WITHHELD_DURING_MAINTENANCE} is the state the compatibility
+     * mode reports once such a window is open. The two are separate because they
+     * answer different questions at different times, and only one of them may
+     * depend on the preference: this one gates the open and must not, that one
+     * describes a device running the exception and must.
      */
-    public static boolean withholdsStoreDuring(
-            boolean enabled,
+    public static boolean requiresPlayStoreWithheld(
             Set<SystemPolicyControl> windowRelaxableControls
     ) {
-        if (!enabled || windowRelaxableControls == null) {
+        if (windowRelaxableControls == null) {
             return false;
         }
         if (windowRelaxableControls.contains(STORE_INSTALL_CONTROL)) {
             // Application-store access is authorised, so the window owns store
-            // visibility and unhides the stores itself.
+            // visibility and unhides the stores itself — after the restrictions.
             return false;
         }
         for (SystemPolicyControl control : REQUIRED_INSTALL_CONTROLS) {

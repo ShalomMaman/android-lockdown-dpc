@@ -22,49 +22,42 @@ final class AndroidMaintenanceCapabilityGateway implements MaintenanceCapability
 
     private final StoreVisibilityDevice device;
 
-    /**
-     * Whether an administrator has opted into Google Play compatibility.
-     *
-     * <p>Captured when the coordinator is built, which is once per maintenance
-     * operation, so a window is judged against the decision that was on file
-     * when it was requested.
-     */
-    private final boolean playCompatibilityEnabled;
-
     AndroidMaintenanceCapabilityGateway(
             DevicePolicyManager dpm,
             ComponentName admin,
-            PackageManager packageManager,
-            boolean playCompatibilityEnabled
+            PackageManager packageManager
     ) {
-        this(new AndroidStoreVisibilityDevice(dpm, admin, packageManager), playCompatibilityEnabled);
+        this(new AndroidStoreVisibilityDevice(dpm, admin, packageManager));
     }
 
-    AndroidMaintenanceCapabilityGateway(
-            StoreVisibilityDevice device,
-            boolean playCompatibilityEnabled
-    ) {
+    AndroidMaintenanceCapabilityGateway(StoreVisibilityDevice device) {
         if (device == null) {
             throw new IllegalArgumentException("A store visibility device is required");
         }
         this.device = device;
-        this.playCompatibilityEnabled = playCompatibilityEnabled;
     }
 
     /**
-     * Hides the Google Play Store before a window that withholds it is allowed to
-     * relax anything, and proves it is hidden.
+     * Hides the Google Play Store before a window that must not run beside it is
+     * allowed to relax anything, and proves it is hidden.
      *
-     * <p>Only the one package the compatibility exception makes available. The
-     * other managed stores are already hidden by the base policy, and a window
-     * that opens application-store access is handled by {@link #open} instead —
-     * which runs after the restrictions are relaxed, preserving that ordering.
+     * <p>The decision is taken from the window alone. This class deliberately
+     * holds no compatibility preference: whether the Store is visible is device
+     * state, the preference is intent, and a preference saved without an apply
+     * leaves the two disagreeing — which is exactly how a window could once be
+     * opened beside a Store that was still visible from an earlier applied
+     * compatibility state. On an already-strict device the package is already
+     * hidden, so this costs one verified no-op write.
+     *
+     * <p>Only the one package the compatibility exception can make available. The
+     * other managed stores are hidden by the base policy, and a window that opens
+     * application-store access is handled by {@link #open} instead — which runs
+     * after the restrictions are relaxed, preserving that ordering.
      */
     @Override
     public List<String> prepare(MaintenanceWindow window) {
         if (window == null
-                || !PlayStoreCompatibility.withholdsStoreDuring(
-                        playCompatibilityEnabled, window.relaxableControls())) {
+                || !PlayStoreCompatibility.requiresPlayStoreWithheld(window.relaxableControls())) {
             return List.of();
         }
         ArrayList<String> failures = new ArrayList<>();
