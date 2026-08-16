@@ -61,7 +61,7 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2025.04.01")
     implementation(composeBom)
 
-    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.core:core-ktx:1.19.0")
     // Per-app display language on API 26+. AppCompatDelegate.setApplicationLocales
     // forwards to the platform LocaleManager on API 33+ and persists the choice
     // itself below that; see AndroidManifest.xml and ui/AppLocales.kt.
