@@ -4,6 +4,7 @@
  */
 gradle.beforeProject {
     if (path == ":app") {
+        apply(from = rootProject.file("gradle/pilot-signing.gradle"))
         afterEvaluate {
             apply(from = rootProject.file("gradle/pilot-update.gradle"))
         }
