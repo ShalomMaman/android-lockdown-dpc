@@ -49,6 +49,15 @@ class PilotReleaseWorkflowTest(unittest.TestCase):
         android_ci = ANDROID_CI.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch:", android_ci)
 
+    def test_metadata_merge_uses_auto_merge_and_waits_for_completion(self):
+        merge = self.workflow.index("Merge the verified metadata pull request")
+        readback = self.workflow.index("Verify the active public metadata")
+        merge_step = self.workflow[merge:readback]
+        self.assertIn('--auto', merge_step)
+        self.assertIn('repos/$GITHUB_REPOSITORY/pulls/$pr_number', merge_step)
+        self.assertIn('if [[ "$merged" == "true" ]]', merge_step)
+        self.assertIn('Timed out waiting', merge_step)
+
     def test_ephemeral_keys_have_unconditional_cleanup(self):
         cleanup = self.workflow.index("Remove ephemeral key material")
         self.assertIn("if: always()", self.workflow[cleanup : cleanup + 300])
