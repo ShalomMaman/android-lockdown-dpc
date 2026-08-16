@@ -6,6 +6,8 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
+import com.example.lockdowndpc.policy.PlayStoreCompatibility;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -20,19 +22,58 @@ final class AndroidMaintenanceCapabilityGateway implements MaintenanceCapability
 
     private final StoreVisibilityDevice device;
 
+    /**
+     * Whether an administrator has opted into Google Play compatibility.
+     *
+     * <p>Captured when the coordinator is built, which is once per maintenance
+     * operation, so a window is judged against the decision that was on file
+     * when it was requested.
+     */
+    private final boolean playCompatibilityEnabled;
+
     AndroidMaintenanceCapabilityGateway(
             DevicePolicyManager dpm,
             ComponentName admin,
-            PackageManager packageManager
+            PackageManager packageManager,
+            boolean playCompatibilityEnabled
     ) {
-        this(new AndroidStoreVisibilityDevice(dpm, admin, packageManager));
+        this(new AndroidStoreVisibilityDevice(dpm, admin, packageManager), playCompatibilityEnabled);
     }
 
-    AndroidMaintenanceCapabilityGateway(StoreVisibilityDevice device) {
+    AndroidMaintenanceCapabilityGateway(
+            StoreVisibilityDevice device,
+            boolean playCompatibilityEnabled
+    ) {
         if (device == null) {
             throw new IllegalArgumentException("A store visibility device is required");
         }
         this.device = device;
+        this.playCompatibilityEnabled = playCompatibilityEnabled;
+    }
+
+    /**
+     * Hides the Google Play Store before a window that withholds it is allowed to
+     * relax anything, and proves it is hidden.
+     *
+     * <p>Only the one package the compatibility exception makes available. The
+     * other managed stores are already hidden by the base policy, and a window
+     * that opens application-store access is handled by {@link #open} instead —
+     * which runs after the restrictions are relaxed, preserving that ordering.
+     */
+    @Override
+    public List<String> prepare(MaintenanceWindow window) {
+        if (window == null
+                || !PlayStoreCompatibility.withholdsStoreDuring(
+                        playCompatibilityEnabled, window.relaxableControls())) {
+            return List.of();
+        }
+        ArrayList<String> failures = new ArrayList<>();
+        for (String failure : setHidden(List.of(PlayStoreCompatibility.PLAY_STORE_PACKAGE), true)) {
+            // Named as a precondition so an audit line cannot be mistaken for a
+            // restore that failed after the device had already been relaxed.
+            failures.add("maintenance-precondition:" + failure);
+        }
+        return Collections.unmodifiableList(failures);
     }
 
     @Override
@@ -49,8 +90,12 @@ final class AndroidMaintenanceCapabilityGateway implements MaintenanceCapability
     }
 
     private List<String> setStoresHidden(boolean hidden) {
+        return setHidden(MaintenanceAppPolicy.managedStorePackages(), hidden);
+    }
+
+    private List<String> setHidden(Iterable<String> packages, boolean hidden) {
         ArrayList<String> failures = new ArrayList<>();
-        for (String packageName : MaintenanceAppPolicy.managedStorePackages()) {
+        for (String packageName : packages) {
             if (!device.isInstalled(packageName)) {
                 continue;
             }

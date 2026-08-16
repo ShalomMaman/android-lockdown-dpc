@@ -358,6 +358,62 @@ public final class PlayStoreCompatibilityTest {
     }
 
     @Test
+    public void thePreconditionIsDecidedFromWhatTheAdministratorAuthorised() {
+        // Declared capabilities, not the plan's effective set: the precondition
+        // gates the open, and must not be argued out of running by a base policy
+        // that happens not to be enforcing the control at that moment.
+        Set<SystemPolicyControl> localApk = MaintenanceCapability.relaxedControls(
+                Set.of(MaintenanceCapability.LOCAL_APK_INSTALL));
+        Set<SystemPolicyControl> storeAccess = MaintenanceCapability.relaxedControls(
+                Set.of(MaintenanceCapability.APP_STORE_ACCESS));
+
+        assertTrue(PlayStoreCompatibility.withholdsStoreDuring(true, localApk));
+        assertFalse(
+                "an authorised store window owns store visibility itself",
+                PlayStoreCompatibility.withholdsStoreDuring(true, storeAccess));
+        assertFalse(
+                "strict mode has nothing to withhold",
+                PlayStoreCompatibility.withholdsStoreDuring(false, localApk));
+    }
+
+    @Test
+    public void aWindowThatTouchesNoInstallControlNeedsNoPrecondition() {
+        for (MaintenanceCapability capability : new MaintenanceCapability[]{
+                MaintenanceCapability.ADB_DEBUGGING,
+                MaintenanceCapability.USB_FILE_TRANSFER,
+                MaintenanceCapability.SELECTED_SETTINGS
+        }) {
+            assertFalse(
+                    capability + " does not touch the installation floor",
+                    PlayStoreCompatibility.withholdsStoreDuring(
+                            true,
+                            MaintenanceCapability.relaxedControls(Set.of(capability))));
+        }
+        assertFalse(PlayStoreCompatibility.withholdsStoreDuring(true, Set.of()));
+        assertFalse(PlayStoreCompatibility.withholdsStoreDuring(true, null));
+    }
+
+    @Test
+    public void everyCapabilityThatOpensTheFloorWithoutStoreAccessWithholdsTheStore() {
+        // Stated over the whole catalogue so a capability added later cannot open
+        // an installation control this mode pins on without being noticed here.
+        for (MaintenanceCapability capability : MaintenanceCapability.values()) {
+            Set<SystemPolicyControl> declared =
+                    MaintenanceCapability.relaxedControls(Set.of(capability));
+            boolean opensStoreAccess =
+                    declared.contains(PlayStoreCompatibility.STORE_INSTALL_CONTROL);
+            boolean opensAnotherRequiredControl = PlayStoreCompatibility.REQUIRED_INSTALL_CONTROLS
+                    .stream()
+                    .anyMatch(control -> control != PlayStoreCompatibility.STORE_INSTALL_CONTROL
+                            && declared.contains(control));
+            assertEquals(
+                    capability + " precondition",
+                    !opensStoreAccess && opensAnotherRequiredControl,
+                    PlayStoreCompatibility.withholdsStoreDuring(true, declared));
+        }
+    }
+
+    @Test
     public void aWindowThatOpensBothControlsStillGrantsAvailability() {
         // APP_STORE_ACCESS plus LOCAL_APK_INSTALL: the store authorisation is
         // present, so maintenance owns store visibility for the duration.

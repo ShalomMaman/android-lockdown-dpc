@@ -212,6 +212,43 @@ public final class PlayStoreCompatibility {
     }
 
     /**
+     * Whether opening a window with these declared relaxations must withhold the
+     * Store — the precondition an open has to satisfy <em>before</em> it relaxes
+     * anything.
+     *
+     * <p>Decided from the window's declared set rather than from the plan's
+     * effective set on purpose. The effective set depends on what the base policy
+     * happens to be enforcing at that moment; the declared set is what the
+     * administrator authorised. A precondition that asks "what will actually be
+     * relaxed" can be argued out of running by a base policy that has drifted,
+     * and this one must not be.
+     *
+     * <p>{@link State#WITHHELD_DURING_MAINTENANCE} is the state this produces
+     * once the window is open. The two are separate because they answer
+     * different questions at different times: this one gates the open, that one
+     * describes the device afterwards.
+     */
+    public static boolean withholdsStoreDuring(
+            boolean enabled,
+            Set<SystemPolicyControl> windowRelaxableControls
+    ) {
+        if (!enabled || windowRelaxableControls == null) {
+            return false;
+        }
+        if (windowRelaxableControls.contains(STORE_INSTALL_CONTROL)) {
+            // Application-store access is authorised, so the window owns store
+            // visibility and unhides the stores itself.
+            return false;
+        }
+        for (SystemPolicyControl control : REQUIRED_INSTALL_CONTROLS) {
+            if (windowRelaxableControls.contains(control)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Resolves the state from a pass that has just run.
      *
      * @param enabled              the administrator's stored decision

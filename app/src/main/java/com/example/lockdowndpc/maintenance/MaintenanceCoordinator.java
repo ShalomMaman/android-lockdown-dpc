@@ -52,7 +52,16 @@ public final class MaintenanceCoordinator {
 
     /** The verified result of one maintenance operation. */
     public enum MaintenanceStatus {
-        /** Refused before anything was sent to the device. */
+        /**
+         * Refused before a single restriction was relaxed.
+         *
+         * <p>The security-relevant guarantee, and the one the caller's
+         * restore-debt logic rests on: nothing this device was enforcing has been
+         * withdrawn, so there is no relaxation to owe a restore for. A refusal
+         * from the precondition phase may have withdrawn application state in the
+         * <em>stricter</em> direction — hiding an application store — which the
+         * next ordinary reconciliation pass puts back.
+         */
         REFUSED,
         /** Nothing needed changing; no policy call was made. */
         UNCHANGED,
@@ -261,10 +270,35 @@ public final class MaintenanceCoordinator {
         }
 
         MaintenanceWindow window = decision.window();
+
+        // The precondition, before a single restriction is relaxed. Application
+        // state that must not survive into this window is withdrawn and read back
+        // first, so there is no interval in which the window's relaxations and
+        // that state are both live. A failure here refuses the window outright:
+        // nothing has been relaxed, so the cost is one retry.
+        List<String> preconditionFailures = capabilityGateway.prepare(window);
+        if (!preconditionFailures.isEmpty()) {
+            return new MaintenanceOutcome(
+                    Phase.OPEN,
+                    MaintenanceStatus.REFUSED,
+                    // `current` untouched, exactly like every other refusal: a
+                    // refused open must not become a way to forget an open window.
+                    current,
+                    null,
+                    false,
+                    null,
+                    SystemPolicyReport.empty(),
+                    preconditionFailures,
+                    "precondition-unverified");
+        }
+
         MaintenancePlan plan = MaintenancePlan.forWindow(profile, baseChoices, window);
         SystemPolicyReport report =
                 SystemPolicyEnforcer.enforce(sdkInt, profile, plan.effectiveChoices(), gateway);
         List<String> failures = new ArrayList<>(openFailures(report, plan));
+        // After the restrictions, never before: application-store access must not
+        // make a store visible while the installation controls it needs are still
+        // in force.
         failures.addAll(capabilityGateway.open(window));
 
         if (failures.isEmpty()) {

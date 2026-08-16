@@ -1189,16 +1189,38 @@ saved — which on a default device means the store lock is off again.
 3. Look for the Play Store and start the dependent application.
 4. Close the window, or let it expire, and look again.
 
-**Expected:** while the window is open the console reports that the Store is
-withheld because installation from unknown sources is open, the Store is hidden,
-and protection is **not** reported as faulty — this is an authorised state, not a
-failure. The dependent application may stop working for the duration; that is the
-designed trade. After the window closes the Store is available again and the
-application works.
+**Expected:** the Store is hidden **from the moment the window opens** — not a
+few seconds later — because Device Guard hides it and reads it back before it
+relaxes anything. The console reports that the Store is withheld because
+installation from unknown sources is open, and protection is **not** reported as
+faulty: this is an authorised state, not a failure. The dependent application may
+stop working for the duration; that is the designed trade. After the window
+closes the Store is available again and the application works.
 
-**Fail action:** if the Store stays available during a local-APK window, record
-it. An authorisation to install one APK must not silently carry an application
-store with it.
+**Evidence:** watch the launcher while confirming the window. Photograph it
+immediately after the confirmation. An interval in which the Store icon is still
+present and openable is the finding this case exists to measure; record its
+length if you see one.
+
+**Fail action:** if the Store stays available at any point during a local-APK
+window, record it. An authorisation to install one APK must not silently carry an
+application store with it.
+
+### P-8 A device that cannot hide the Store refuses the window
+
+**Steps**
+
+1. Only on firmware where `setApplicationHidden` for `com.android.vending` is
+   refused or silently ignored — P-2 or P-7 would already have shown it.
+   Otherwise record this case as **not applicable on this firmware** and say why.
+2. With compatibility on, try to open a local-APK maintenance window.
+
+**Expected:** the window **does not open**. The console reports the refusal, no
+restriction is relaxed, and the device is left exactly as it was. Device Guard
+never opens a window it cannot make safe first.
+
+**Fail action:** if the window opens anyway, this is a **critical** failure and
+the build must not be deployed on that firmware.
 
 ---
 

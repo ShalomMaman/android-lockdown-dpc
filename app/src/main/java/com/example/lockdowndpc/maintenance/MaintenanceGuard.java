@@ -73,6 +73,9 @@ public final class MaintenanceGuard {
 
     private static final long SWEEP_PERIOD_MILLIS = 15L * 60L * 1_000L;
 
+    /** The coordinator's reason token for a window refused by its precondition. */
+    private static final String PRECONDITION_REFUSAL = "precondition-unverified";
+
     /**
      * Whether the last {@link #record} write reached storage, and whether the
      * last {@link #arm} actually scheduled the close.
@@ -287,13 +290,15 @@ public final class MaintenanceGuard {
      * hide first, then let the ordinary policy pass re-assert the exception on the
      * strength of its own verification.
      *
-     * <p><b>On open.</b> A window that opens installation from unknown sources
-     * without opening application-store access withholds the Store for its
-     * duration ({@code PlayStoreCompatibility.State.WITHHELD_DURING_MAINTENANCE}).
-     * Nothing in the maintenance path hides a package for that reason — the
-     * capability gateway only ever touches stores for {@code APP_STORE_ACCESS} —
-     * so without this the withholding would not reach the device until some later
-     * pass, which is the whole duration of the window on a quiet handset.
+     * <p><b>On a refused precondition.</b> The gateway may have hidden the Store
+     * and failed only to prove it. That is the stricter direction and no window
+     * opened, so the repair is an ordinary pass rather than a restore.
+     *
+     * <p>This is <em>not</em> what enforces the withheld state. The precondition
+     * in {@link MaintenanceCoordinator#open} hides the Store synchronously, and
+     * read-back failure refuses the window, so no interval exists in which a
+     * relaxed window runs beside a visible Store. This hook only brings package
+     * visibility back into line with the base policy afterwards.
      *
      * <p>The pass is skipped while protection is paused, and the whole hook is
      * gated on the opt-in so a device that never touches the feature keeps the
@@ -306,21 +311,28 @@ public final class MaintenanceGuard {
         boolean opened = outcome.phase() == MaintenanceCoordinator.Phase.OPEN
                 && outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED;
         boolean closed = outcome.closeReason() != null;
+        boolean preconditionRefused =
+                outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED
+                        && PRECONDITION_REFUSAL.equals(outcome.reason());
         // A liveness pass that changed nothing is deliberately excluded: the
         // fifteen-minute sweep must not queue a full policy pass every time it
         // finds a window still open.
-        if ((!opened && !closed) || !PlayStoreCompatibilityStore.isEnabled(context)) {
+        if ((!opened && !closed && !preconditionRefused)
+                || !PlayStoreCompatibilityStore.isEnabled(context)) {
             return;
         }
         // Asynchronous on the shared policy executor: this method is itself
         // reached from that thread on the job, boot and console paths, and a
         // blocking call there would deadlock the very pass it is queueing.
-        PolicyReconciliationCoordinator.reconcileAsync(
-                context,
-                closed
-                        ? "maintenance-closed-play-compatibility"
-                        : "maintenance-opened-play-compatibility",
-                null);
+        String reason;
+        if (closed) {
+            reason = "maintenance-closed-play-compatibility";
+        } else if (opened) {
+            reason = "maintenance-opened-play-compatibility";
+        } else {
+            reason = "maintenance-precondition-play-compatibility";
+        }
+        PolicyReconciliationCoordinator.reconcileAsync(context, reason, null);
     }
 
     /**
@@ -418,7 +430,8 @@ public final class MaintenanceGuard {
                 new AndroidMaintenanceCapabilityGateway(
                         dpm,
                         LockdownAdminReceiver.componentName(context),
-                        context.getPackageManager()),
+                        context.getPackageManager(),
+                        PlayStoreCompatibilityStore.isEnabled(context)),
                 MaintenanceStore.deviceClock());
     }
 

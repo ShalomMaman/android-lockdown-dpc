@@ -120,14 +120,27 @@ definition, `SystemPolicyStore.baseChoices`, is what every stage reads:
   as a locked one.
 - **A window that opens only unknown sources** — the local APK install
   capability — carries no store authorisation, so it does not grant store
-  availability. The Store is **withheld for the duration of that window** and
-  becomes available again when it closes. Authorising a technician to install a
-  local APK is not authorising an application store to sit beside it, and the
-  mode's contract is that the Store is available only while every installation
-  control it pins on is genuinely enforced. This is reported as its own state
-  and is **not** a fault: nothing failed, the device is simply stricter than the
-  compatibility mode would like, on the strength of an authorisation the
+  availability. Authorising a technician to install a local APK is not
+  authorising an application store to sit beside it, and the mode's contract is
+  that the Store is available only while every installation control it pins on
+  is genuinely enforced. The Store is **withheld for the duration of that
+  window** and becomes available again when it closes. This is reported as its
+  own state and is **not** a fault: nothing failed, the device is simply stricter
+  than the compatibility mode would like, on the strength of an authorisation the
   administrator actually gave.
+
+  The withholding is a **precondition, not an effect**. Before a single
+  restriction is relaxed, the open path hides `com.android.vending` and reads it
+  back; only then does the enforcer touch the restrictions. If the Store cannot
+  be hidden, or cannot be proven hidden, **the window does not open** —
+  `MaintenanceStatus.REFUSED` with reason `precondition-unverified`, no plan, no
+  report, nothing relaxed, and the administrator's restore debt handled exactly
+  as for any other refusal (an intent this call created is withdrawn; a debt owed
+  by an already-open window is kept). The ordering matters because the exposure
+  is the Store's own interface and network surface, which no installation
+  restriction closes: hiding it afterwards, or on a later reconciliation pass,
+  would leave a real interval in which a relaxed window and a reachable Store are
+  both live.
 - **The restore** at expiry, reboot, cancel or failed open puts the base policy
   back — the floor with it. Restoring the administrator's raw switches would end
   a window with the Store available and no installation lock, which is exactly
@@ -138,11 +151,11 @@ definition, `SystemPolicyStore.baseChoices`, is what every stage reads:
   wants — without having verified the installation lock at that moment; the
   following pass re-asserts the exception on the strength of its own read-back,
   so the sequence is always *hidden first, available only once the lock is
-  proven*. On an open it matters because nothing else hides a package for a
-  withheld state: the capability gateway only touches stores for
-  application-store access, so without the pass a local-APK window would leave
-  the Store available for its whole duration. A device that never opted in keeps
-  exactly the maintenance behaviour it has today.
+  proven*. On an open, and after a refused precondition, it only brings package
+  visibility back into line with the base policy; it is **not** what enforces the
+  withheld state, which the synchronous precondition above has already done. A
+  device that never opted in keeps exactly the maintenance behaviour it has
+  today.
 - **Pause** withdraws every control and unhides every managed package, this one
   included. A paused device is not a protected device and does not pretend to be.
 

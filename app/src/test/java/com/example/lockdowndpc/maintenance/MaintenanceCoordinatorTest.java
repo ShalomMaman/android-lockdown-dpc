@@ -44,6 +44,7 @@ public final class MaintenanceCoordinatorTest {
     private static final String USB = "no_usb_file_transfer";
     private static final String UNKNOWN_SOURCES = "no_install_unknown_sources";
     private static final String UNKNOWN_SOURCES_GLOBAL = "no_install_unknown_sources_globally";
+    private static final String INSTALL_APPS = "no_install_apps";
 
     @Test
     public void openingRelaxesTheDeviceAndReadsTheResultBack() {
@@ -463,6 +464,95 @@ public final class MaintenanceCoordinatorTest {
                         "invalid-proof"));
     }
 
+    // ------------------------------------------- precondition ordering (#64)
+
+    @Test
+    public void thePreconditionRunsBeforeAnyRestrictionIsRelaxed() {
+        // The exposure this ordering closes is the Google Play Store's own
+        // interface and network surface, which no installation restriction shuts.
+        // Proving it needs the order, not the end state: a Store hidden after the
+        // relaxations still leaves an interval in which both are live.
+        List<String> log = new java.util.ArrayList<>();
+        FakeGateway gateway = new FakeGateway(log);
+        OrderedCapabilityGateway capabilities = new OrderedCapabilityGateway(log);
+
+        MaintenanceOutcome outcome = production(gateway, capabilities, new FakeClock(OPEN_WALL, OPEN_ELAPSED))
+                .open(null, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(MaintenanceStatus.APPLIED, outcome.status());
+        assertEquals("prepare", log.get(0));
+        assertTrue(
+                "no restriction may be touched before the precondition: " + log,
+                log.indexOf("prepare") < log.indexOf("clear:" + UNKNOWN_SOURCES));
+        assertTrue(
+                "store visibility is applied after the restrictions: " + log,
+                log.indexOf("clear:" + UNKNOWN_SOURCES) < log.indexOf("open"));
+    }
+
+    @Test
+    public void storeAccessStillRelaxesRestrictionsBeforeUnhidingStores() {
+        // The other ordering, unchanged: a store must not become visible while the
+        // installation controls it needs are still in force.
+        List<String> log = new java.util.ArrayList<>();
+        FakeGateway gateway = new FakeGateway(log);
+        OrderedCapabilityGateway capabilities = new OrderedCapabilityGateway(log);
+
+        MaintenanceOutcome outcome = production(gateway, capabilities, new FakeClock(OPEN_WALL, OPEN_ELAPSED))
+                .open(null, request(MaintenanceCapability.APP_STORE_ACCESS));
+
+        assertEquals(MaintenanceStatus.APPLIED, outcome.status());
+        assertTrue(capabilities.storesVisible);
+        assertTrue(
+                "restrictions come off before the stores appear: " + log,
+                log.indexOf("clear:" + INSTALL_APPS) < log.indexOf("open"));
+    }
+
+    @Test
+    public void aPreconditionFailureRefusesTheWindowWithNothingRelaxed() {
+        // Fail-closed and complete: no window, no relaxation, no report to imply
+        // one, and the failure carried through so the console can name it.
+        List<String> log = new java.util.ArrayList<>();
+        FakeGateway gateway = new FakeGateway(log);
+        OrderedCapabilityGateway capabilities = new OrderedCapabilityGateway(log);
+        capabilities.failPrepare = true;
+
+        MaintenanceOutcome outcome = production(gateway, capabilities, new FakeClock(OPEN_WALL, OPEN_ELAPSED))
+                .open(null, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(Phase.OPEN, outcome.phase());
+        assertEquals(MaintenanceStatus.REFUSED, outcome.status());
+        assertEquals("precondition-unverified", outcome.reason());
+        assertNull(outcome.window());
+        assertFalse(outcome.windowOpen());
+        assertFalse(outcome.windowMustBeStored());
+        assertNull(outcome.plan());
+        assertTrue(outcome.report().statuses().isEmpty());
+        assertEquals(List.of("maintenance-precondition:test-store-not-hidden"), outcome.failures());
+        assertEquals("nothing may be sent to the restriction gateway: " + log, List.of("prepare"), log);
+        assertTrue(gateway.touched.isEmpty());
+    }
+
+    @Test
+    public void aRefusedPreconditionDoesNotForgetAnAlreadyOpenWindow() {
+        // A refusal must never be a way to lose an authorization that is live.
+        FakeClock clock = new FakeClock(OPEN_WALL, OPEN_ELAPSED);
+        OrderedCapabilityGateway capabilities = new OrderedCapabilityGateway(new java.util.ArrayList<>());
+        MaintenanceCoordinator coordinator = production(new FakeGateway(), capabilities, clock);
+        MaintenanceWindow current =
+                coordinator.open(null, request(MaintenanceCapability.USB_FILE_TRANSFER)).window();
+        assertNotNull(current);
+
+        capabilities.failPrepare = true;
+        MaintenanceOutcome outcome =
+                coordinator.open(current, request(MaintenanceCapability.LOCAL_APK_INSTALL));
+
+        assertEquals(MaintenanceStatus.REFUSED, outcome.status());
+        assertEquals(current, outcome.window());
+        // windowMustBeStored keeps the caller's restore debt owed for the window
+        // that is genuinely open, which is what MaintenanceGuard.open reads.
+        assertTrue(outcome.windowMustBeStored());
+    }
+
     private static MaintenanceCoordinator production(
             SystemPolicyGateway gateway,
             MaintenanceClock clock
@@ -541,8 +631,15 @@ public final class MaintenanceCoordinatorTest {
         final Set<String> refuseAdd = new HashSet<>();
         final Set<String> refuseClear = new HashSet<>();
         final Set<String> ignoreAdd = new HashSet<>();
+        /** Every call in order, shared with the capability gateway for ordering proofs. */
+        final List<String> log;
 
         FakeGateway() {
+            this(new java.util.ArrayList<>());
+        }
+
+        FakeGateway(List<String> log) {
+            this.log = log;
             // A production device starts with its hardened policy already in force.
             inForce.addAll(SystemPolicyControl.allRestrictionKeys(ANDROID_TEN));
         }
@@ -550,6 +647,7 @@ public final class MaintenanceCoordinatorTest {
         @Override
         public void addRestriction(String key) {
             touched.add(key);
+            log.add("add:" + key);
             if (refuseAdd.contains(key)) {
                 throw new SecurityException("refused " + key);
             }
@@ -562,6 +660,7 @@ public final class MaintenanceCoordinatorTest {
         @Override
         public void clearRestriction(String key) {
             touched.add(key);
+            log.add("clear:" + key);
             if (refuseClear.contains(key)) {
                 throw new SecurityException("refused " + key);
             }
@@ -580,6 +679,11 @@ public final class MaintenanceCoordinatorTest {
         boolean failRestore;
 
         @Override
+        public List<String> prepare(MaintenanceWindow window) {
+            return List.of();
+        }
+
+        @Override
         public List<String> open(MaintenanceWindow window) {
             if (!MaintenanceAppPolicy.opensApplicationStores(window)) {
                 return List.of();
@@ -596,6 +700,48 @@ public final class MaintenanceCoordinatorTest {
             if (failRestore) {
                 return List.of("maintenance-store-state-mismatch:test.store");
             }
+            storesVisible = false;
+            return List.of();
+        }
+    }
+
+    /**
+     * The same fake, writing each call into a log shared with {@link FakeGateway}.
+     *
+     * <p>Ordering is the property under test, not the end state, so the proof has
+     * to be a sequence: a Store hidden after the relaxations lands in the same
+     * final state as one hidden before them, and only one of the two is safe.
+     */
+    private static final class OrderedCapabilityGateway implements MaintenanceCapabilityGateway {
+
+        private final List<String> log;
+        boolean storesVisible;
+        boolean failPrepare;
+
+        OrderedCapabilityGateway(List<String> log) {
+            this.log = log;
+        }
+
+        @Override
+        public List<String> prepare(MaintenanceWindow window) {
+            log.add("prepare");
+            return failPrepare
+                    ? List.of("maintenance-precondition:test-store-not-hidden")
+                    : List.of();
+        }
+
+        @Override
+        public List<String> open(MaintenanceWindow window) {
+            log.add("open");
+            if (MaintenanceAppPolicy.opensApplicationStores(window)) {
+                storesVisible = true;
+            }
+            return List.of();
+        }
+
+        @Override
+        public List<String> restore() {
+            log.add("restore");
             storesVisible = false;
             return List.of();
         }
