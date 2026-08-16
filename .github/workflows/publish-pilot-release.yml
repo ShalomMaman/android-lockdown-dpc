@@ -1,0 +1,338 @@
+name: Publish Pilot Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_notes:
+        description: Optional release notes; generated notes are used when empty
+        required: false
+        type: string
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: publish-pilot-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build, verify, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: pilot-release
+
+    steps:
+      - name: Check out the authorized source commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the current protected main commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "Pilot publication must be dispatched from main." >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if [[ "$GITHUB_SHA" != "$(git rev-parse origin/main)" ]]; then
+            echo "The selected commit is no longer current main." >&2
+            exit 1
+          fi
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Verify Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+
+      - name: Restore release keys into the ephemeral runner
+        id: keys
+        shell: bash
+        env:
+          PILOT_SIGNING_KEYSTORE_B64: ${{ secrets.PILOT_SIGNING_KEYSTORE_B64 }}
+          PILOT_UPDATE_PRIVATE_KEY_B64: ${{ secrets.PILOT_UPDATE_PRIVATE_KEY_B64 }}
+        run: |
+          set -euo pipefail
+          : "${PILOT_SIGNING_KEYSTORE_B64:?PILOT_SIGNING_KEYSTORE_B64 is not configured}"
+          : "${PILOT_UPDATE_PRIVATE_KEY_B64:?PILOT_UPDATE_PRIVATE_KEY_B64 is not configured}"
+          signing_store="$RUNNER_TEMP/device-guard-pilot.keystore"
+          metadata_key="$RUNNER_TEMP/device-guard-pilot-update.pem"
+          printf '%s' "$PILOT_SIGNING_KEYSTORE_B64" | base64 --decode > "$signing_store"
+          printf '%s' "$PILOT_UPDATE_PRIVATE_KEY_B64" | base64 --decode > "$metadata_key"
+          chmod 600 "$signing_store" "$metadata_key"
+          printf 'signing_store=%s\nmetadata_key=%s\n' "$signing_store" "$metadata_key" >> "$GITHUB_OUTPUT"
+
+      - name: Build and verify the enrolled pilot APK
+        shell: bash
+        env:
+          DEVICE_GUARD_PILOT_STORE_FILE: ${{ steps.keys.outputs.signing_store }}
+          DEVICE_GUARD_PILOT_STORE_PASSWORD: ${{ secrets.PILOT_SIGNING_STORE_PASSWORD }}
+          DEVICE_GUARD_PILOT_KEY_ALIAS: ${{ secrets.PILOT_SIGNING_KEY_ALIAS }}
+          DEVICE_GUARD_PILOT_KEY_PASSWORD: ${{ secrets.PILOT_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${DEVICE_GUARD_PILOT_STORE_PASSWORD:?PILOT_SIGNING_STORE_PASSWORD is not configured}"
+          : "${DEVICE_GUARD_PILOT_KEY_ALIAS:?PILOT_SIGNING_KEY_ALIAS is not configured}"
+          : "${DEVICE_GUARD_PILOT_KEY_PASSWORD:?PILOT_SIGNING_KEY_PASSWORD is not configured}"
+          ./gradlew -I gradle/pilot-update.init.gradle.kts \
+            --no-daemon --max-workers=2 clean pilotChannelRelease
+
+      - name: Create a fail-closed release plan
+        id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/plan_pilot_release.py \
+            --apk app/build/outputs/apk/release/app-release.apk \
+            --channel updates/pilot/channel.json \
+            --current-manifest updates/pilot/latest.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Refuse existing release names
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          METADATA_BRANCH: ${{ steps.plan.outputs.metadata_branch }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; releases are never overwritten." >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; tags are never overwritten." >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "refs/heads/$METADATA_BRANCH" >/dev/null 2>&1; then
+            echo "Metadata branch $METADATA_BRANCH already exists; inspect the prior run." >&2
+            exit 1
+          fi
+
+      - name: Sign and verify the exact release envelope
+        shell: bash
+        env:
+          DEVICE_GUARD_UPDATE_KEY_PASSWORD: ${{ secrets.PILOT_UPDATE_KEY_PASSWORD }}
+          METADATA_KEY: ${{ steps.keys.outputs.metadata_key }}
+          PACKAGE_NAME: ${{ steps.plan.outputs.package_name }}
+          SIGNER_SHA256: ${{ steps.plan.outputs.signer_sha256 }}
+          METADATA_KEY_SHA256: ${{ steps.plan.outputs.metadata_key_sha256 }}
+          VERSION_CODE: ${{ steps.plan.outputs.version_code }}
+          VERSION_NAME: ${{ steps.plan.outputs.version_name }}
+          CURRENT_VERSION_CODE: ${{ steps.plan.outputs.current_version_code }}
+          RELEASE_URL: ${{ steps.plan.outputs.release_url }}
+          MANIFEST_URL: ${{ steps.plan.outputs.manifest_url }}
+          PUBLIC_KEY: ${{ steps.plan.outputs.metadata_public_key }}
+          ASSET_NAME: ${{ steps.plan.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          : "${DEVICE_GUARD_UPDATE_KEY_PASSWORD:?PILOT_UPDATE_KEY_PASSWORD is not configured}"
+          mkdir -p "$RUNNER_TEMP/pilot-release"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/pilot-release/$ASSET_NAME"
+          python3 tools/publish_update.py \
+            --apk "$RUNNER_TEMP/pilot-release/$ASSET_NAME" \
+            --apk-url "$RELEASE_URL" \
+            --expected-package "$PACKAGE_NAME" \
+            --expected-signer-sha256 "$SIGNER_SHA256" \
+            --private-key "$METADATA_KEY" \
+            --expected-metadata-key-sha256 "$METADATA_KEY_SHA256" \
+            --key-passphrase-env DEVICE_GUARD_UPDATE_KEY_PASSWORD \
+            --output "$RUNNER_TEMP/pilot-release/latest.json"
+          python3 tools/verify_pilot_apk.py \
+            --apk "$RUNNER_TEMP/pilot-release/$ASSET_NAME" \
+            --expected-package "$PACKAGE_NAME" \
+            --expected-version-code "$VERSION_CODE" \
+            --expected-version-name "$VERSION_NAME" \
+            --expected-signer-sha256 "$SIGNER_SHA256" \
+            --expected-manifest-url "$MANIFEST_URL" \
+            --expected-public-key-file "$PUBLIC_KEY" \
+            --expected-public-key-sha256 "$METADATA_KEY_SHA256" \
+            --manifest "$RUNNER_TEMP/pilot-release/latest.json" \
+            --expected-apk-url "$RELEASE_URL" \
+            --minimum-version-code "$CURRENT_VERSION_CODE"
+
+      - name: Rehearse the signed in-place update offline
+        shell: bash
+        env:
+          CURRENT_APK_URL: ${{ steps.plan.outputs.current_apk_url }}
+          CURRENT_APK_SHA256: ${{ steps.plan.outputs.current_apk_sha256 }}
+          CURRENT_APK_SIZE: ${{ steps.plan.outputs.current_apk_size }}
+          PACKAGE_NAME: ${{ steps.plan.outputs.package_name }}
+          SIGNER_SHA256: ${{ steps.plan.outputs.signer_sha256 }}
+          METADATA_KEY_SHA256: ${{ steps.plan.outputs.metadata_key_sha256 }}
+          CURRENT_VERSION_CODE: ${{ steps.plan.outputs.current_version_code }}
+          RELEASE_URL: ${{ steps.plan.outputs.release_url }}
+          PUBLIC_KEY: ${{ steps.plan.outputs.metadata_public_key }}
+          ASSET_NAME: ${{ steps.plan.outputs.asset_name }}
+        run: |
+          set -euo pipefail
+          current_apk="$RUNNER_TEMP/pilot-release/current.apk"
+          curl --fail --location --max-redirs 3 --proto '=https' --tlsv1.2 \
+            --output "$current_apk" "$CURRENT_APK_URL"
+          if [[ "$(stat -c '%s' "$current_apk")" != "$CURRENT_APK_SIZE" ]]; then
+            echo "Published current APK size does not match its signed metadata." >&2
+            exit 1
+          fi
+          printf '%s  %s\n' "$CURRENT_APK_SHA256" "$current_apk" | sha256sum --check --status
+          python3 tools/update_drill.py \
+            --from-apk "$current_apk" \
+            --to-apk "$RUNNER_TEMP/pilot-release/$ASSET_NAME" \
+            --envelope "$RUNNER_TEMP/pilot-release/latest.json" \
+            --metadata-public-key "$PUBLIC_KEY" \
+            --expected-metadata-key-sha256 "$METADATA_KEY_SHA256" \
+            --expected-package "$PACKAGE_NAME" \
+            --expected-signer-sha256 "$SIGNER_SHA256" \
+            --expected-apk-url "$RELEASE_URL" \
+            --highest-authorized-version-code "$CURRENT_VERSION_CODE" \
+            --record "$RUNNER_TEMP/pilot-release/update-drill.json"
+
+      - name: Create a draft release with verified artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          RELEASE_NAME: ${{ steps.plan.outputs.release_name }}
+          ASSET_NAME: ${{ steps.plan.outputs.asset_name }}
+          RELEASE_NOTES: ${{ inputs.release_notes }}
+        run: |
+          set -euo pipefail
+          arguments=(
+            "$TAG"
+            "$RUNNER_TEMP/pilot-release/$ASSET_NAME#$ASSET_NAME"
+            "$RUNNER_TEMP/pilot-release/latest.json#latest.json"
+            "$RUNNER_TEMP/pilot-release/update-drill.json#update-drill.json"
+            --repo "$GITHUB_REPOSITORY"
+            --target "$GITHUB_SHA"
+            --title "$RELEASE_NAME"
+            --draft
+            --prerelease
+          )
+          if [[ -n "$RELEASE_NOTES" ]]; then
+            notes_file="$RUNNER_TEMP/pilot-release/release-notes.md"
+            printf '%s\n' "$RELEASE_NOTES" > "$notes_file"
+            arguments+=(--notes-file "$notes_file")
+          else
+            arguments+=(--generate-notes)
+          fi
+          gh release create "${arguments[@]}"
+
+      - name: Open the verified metadata pull request
+        id: metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION_NAME: ${{ steps.plan.outputs.version_name }}
+          VERSION_CODE: ${{ steps.plan.outputs.version_code }}
+          METADATA_BRANCH: ${{ steps.plan.outputs.metadata_branch }}
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/pilot-release/latest.json" updates/pilot/latest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$METADATA_BRANCH"
+          git add -- updates/pilot/latest.json
+          git commit -m "Publish $TAG update metadata"
+          metadata_sha="$(git rev-parse HEAD)"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$METADATA_BRANCH"
+          body_file="$RUNNER_TEMP/pilot-release/metadata-pr.md"
+          printf '%s\n' \
+            '## Release metadata' \
+            '' \
+            "Publishes the signed update envelope for **Pilot $VERSION_NAME** (\`versionCode $VERSION_CODE\`)." \
+            '' \
+            '- The exact APK signer, metadata key, package, version, hash, size, and immutable URL passed the release gate.' \
+            '- The previous published APK was downloaded and checked against its signed hash and size.' \
+            '- The offline signed in-place update drill passed before this PR was opened.' \
+            '- The GitHub Release remains a draft until this metadata commit passes Android CI.' \
+            '' \
+            '## Hebrew summary' \
+            '' \
+            "המעטפת החתומה לגרסת הפיילוט $VERSION_NAME נוצרה ואומתה מול ה־APK המדויק. הריליס יפורסם לפני מיזוג המטא־דאטה, כך שהערוץ הפעיל לא יצביע על קובץ שאינו זמין." \
+            > "$body_file"
+          pr_url="$(gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base main \
+            --head "$METADATA_BRANCH" \
+            --title "Publish $TAG update metadata" \
+            --body-file "$body_file")"
+          printf 'sha=%s\npr_url=%s\n' "$metadata_sha" "$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Run Android CI on the generated metadata commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          METADATA_BRANCH: ${{ steps.plan.outputs.metadata_branch }}
+          METADATA_SHA: ${{ steps.metadata.outputs.sha }}
+        run: |
+          set -euo pipefail
+          gh workflow run android-ci.yml --repo "$GITHUB_REPOSITORY" --ref "$METADATA_BRANCH"
+          run_id=""
+          for _ in {1..30}; do
+            run_id="$(gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow android-ci.yml \
+              --branch "$METADATA_BRANCH" \
+              --event workflow_dispatch \
+              --limit 20 \
+              --json databaseId,headSha \
+              --jq "map(select(.headSha == \"$METADATA_SHA\"))[0].databaseId // empty")"
+            [[ -n "$run_id" ]] && break
+            sleep 2
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "The generated Android CI run was not found." >&2
+            exit 1
+          fi
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status
+
+      - name: Publish the release before activating its channel metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+
+      - name: Merge the verified metadata pull request
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ steps.metadata.outputs.pr_url }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_URL" --repo "$GITHUB_REPOSITORY" --squash --delete-branch
+
+      - name: Verify the active public metadata
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          remote_manifest="$RUNNER_TEMP/pilot-release/remote-latest.json"
+          gh api \
+            "repos/$GITHUB_REPOSITORY/contents/updates/pilot/latest.json?ref=main" \
+            --jq .content | base64 --decode > "$remote_manifest"
+          cmp --silent "$RUNNER_TEMP/pilot-release/latest.json" "$remote_manifest"
+
+      - name: Remove ephemeral key material
+        if: always()
+        shell: bash
+        run: |
+          rm -f \
+            "$RUNNER_TEMP/device-guard-pilot.keystore" \
+            "$RUNNER_TEMP/device-guard-pilot-update.pem"

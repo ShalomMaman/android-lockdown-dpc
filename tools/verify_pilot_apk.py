@@ -161,28 +161,21 @@ def read_compiled_build_config(apk: Path, dexdump: Path) -> dict[str, str]:
     return fields
 
 
-def verify_signed_manifest(
-    manifest: Path,
-    apk: Path,
-    public_key_file: Path,
-    expected_package: str,
-    expected_version_code: int,
-    expected_version_name: str,
-    expected_apk_url: str,
-    minimum_version_code: int,
-) -> None:
-    expected_apk_url = validate_clean_https_url(expected_apk_url)
-    if "/releases/download/" not in expected_apk_url:
-        raise VerificationError("pilot APK URL must be an immutable GitHub release asset URL")
+def read_signed_manifest(manifest: Path, public_key_file: Path) -> dict[str, object]:
+    """Return a manifest payload only after its detached ECDSA signature verifies."""
     try:
         envelope = json.loads(manifest.read_text(encoding="utf-8"))
         if set(envelope) != {"payload", "signature"}:
             raise ValueError("unexpected envelope fields")
+        if not isinstance(envelope["payload"], str) or not isinstance(envelope["signature"], str):
+            raise ValueError("envelope values must be strings")
         payload = base64.urlsafe_b64decode(envelope["payload"] + "=" * (-len(envelope["payload"]) % 4))
         signature = base64.urlsafe_b64decode(
             envelope["signature"] + "=" * (-len(envelope["signature"]) % 4)
         )
         authorized = json.loads(payload)
+        if not isinstance(authorized, dict):
+            raise ValueError("payload must be an object")
     except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
         raise VerificationError("pilot update manifest is malformed") from exc
     with tempfile.TemporaryDirectory() as directory:
@@ -200,6 +193,23 @@ def verify_signed_manifest(
         )
     if result.returncode != 0 or result.stdout.strip() != "Verified OK":
         raise VerificationError("pilot update manifest signature is invalid")
+    return authorized
+
+
+def verify_signed_manifest(
+    manifest: Path,
+    apk: Path,
+    public_key_file: Path,
+    expected_package: str,
+    expected_version_code: int,
+    expected_version_name: str,
+    expected_apk_url: str,
+    minimum_version_code: int,
+) -> None:
+    expected_apk_url = validate_clean_https_url(expected_apk_url)
+    if "/releases/download/" not in expected_apk_url:
+        raise VerificationError("pilot APK URL must be an immutable GitHub release asset URL")
+    authorized = read_signed_manifest(manifest, public_key_file)
     digest = hashlib.sha256()
     size = 0
     with apk.open("rb") as apk_file:

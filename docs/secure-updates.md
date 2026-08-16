@@ -65,6 +65,16 @@ Store the private key and passphrase in an organizational vault with encrypted b
 
 ## Create a release
 
+Pilot releases should normally use the protected GitHub workflow documented in
+[`pilot-release-automation.md`](pilot-release-automation.md). After one explicit
+dispatch from current `main`, it performs the build, signer and channel checks,
+offline update drill, immutable Release publication, signed metadata Pull
+Request, CI verification, merge, and public read-back. Ordinary merges never
+publish a release.
+
+The manual commands below remain the recovery and independent-audit path. They
+are not the normal pilot publication procedure.
+
 `tools/publish_update.py` verifies APK identity and signer with the Android SDK tools before creating the signed manifest. It never overwrites an existing output unless `--force` is explicit.
 
 ```bash

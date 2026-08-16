@@ -10,13 +10,26 @@ import java.security.interfaces.ECPublicKey
 import java.security.spec.ECGenParameterSpec
 import java.security.spec.ECParameterSpec
 import java.security.spec.X509EncodedKeySpec
+import groovy.json.JsonSlurper
 
-def pilotManifestUrl = 'https://raw.githubusercontent.com/ShalomMaman/android-lockdown-dpc/main/updates/pilot/latest.json'
-def approvedMetadataFingerprint = 'c83816c000a61a600d90b8d4dab4a63aa27585292d605938ba8104b6559955cc'
-def approvedPilotSigner = '25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b'
-def expectedApplicationId = 'com.example.lockdowndpc'
-def expectedVersionCode = 12
-def expectedVersionName = '0.5.2'
+def channelFile = rootProject.file('updates/pilot/channel.json')
+if (!channelFile.isFile()) {
+    throw new GradleException('Missing committed pilot channel configuration')
+}
+def channel = new JsonSlurper().parse(channelFile)
+def expectedChannelFields = [
+    'schemaVersion', 'packageName', 'manifestUrl', 'metadataPublicKeyFile',
+    'metadataPublicKeySha256', 'apkSignerSha256'
+] as Set
+if (!(channel instanceof Map)
+        || channel.keySet() != expectedChannelFields
+        || channel.schemaVersion != 1) {
+    throw new GradleException('Pilot channel configuration has an unsupported schema')
+}
+def pilotManifestUrl = channel.manifestUrl
+def approvedMetadataFingerprint = channel.metadataPublicKeySha256
+def approvedPilotSigner = channel.apkSignerSha256
+def expectedApplicationId = channel.packageName
 
 def asBuildConfigString = { String value ->
     '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
@@ -33,7 +46,7 @@ def validateCleanHttps = { String value ->
     }
 }
 
-def publicKeyFile = rootProject.file('updates/pilot/public-key.pub')
+def publicKeyFile = rootProject.file('updates/pilot/' + channel.metadataPublicKeyFile)
 if (!publicKeyFile.isFile()) {
     throw new GradleException('Missing committed pilot metadata public key')
 }
@@ -73,11 +86,36 @@ plugins.withId('com.android.application') {
     def configuredApplicationId = android.defaultConfig.applicationId
     def configuredVersionCode = android.defaultConfig.versionCode
     def configuredVersionName = android.defaultConfig.versionName
+
+    def pilotSigningEnvironment = [
+        storeFile: System.getenv('DEVICE_GUARD_PILOT_STORE_FILE'),
+        storePassword: System.getenv('DEVICE_GUARD_PILOT_STORE_PASSWORD'),
+        keyAlias: System.getenv('DEVICE_GUARD_PILOT_KEY_ALIAS'),
+        keyPassword: System.getenv('DEVICE_GUARD_PILOT_KEY_PASSWORD')
+    ]
+    def suppliedSigningValues = pilotSigningEnvironment.findAll { key, value ->
+        value != null && !value.trim().isEmpty()
+    }
+    if (!suppliedSigningValues.isEmpty() && suppliedSigningValues.size() != pilotSigningEnvironment.size()) {
+        throw new GradleException('Pilot signing configuration must supply all four external values')
+    }
+    if (suppliedSigningValues.size() == pilotSigningEnvironment.size()) {
+        def externalStoreFile = rootProject.file(pilotSigningEnvironment.storeFile)
+        if (!externalStoreFile.isFile()) {
+            throw new GradleException('External pilot signing keystore does not exist')
+        }
+        def debugSigning = android.signingConfigs.getByName('debug')
+        debugSigning.storeFile = externalStoreFile
+        debugSigning.storePassword = pilotSigningEnvironment.storePassword
+        debugSigning.keyAlias = pilotSigningEnvironment.keyAlias
+        debugSigning.keyPassword = pilotSigningEnvironment.keyPassword
+    }
+
     def releaseSigningName = android.buildTypes.release.signingConfig?.name
     if (configuredApplicationId != expectedApplicationId
-            || configuredVersionCode != expectedVersionCode
-            || configuredVersionName != expectedVersionName) {
-        throw new GradleException('Pilot identity/version drifted from the approved 0.5.2 release')
+            || configuredVersionCode == null || configuredVersionCode <= 0
+            || configuredVersionName == null || configuredVersionName.trim().isEmpty()) {
+        throw new GradleException('Pilot identity/version is invalid for the configured channel')
     }
     if (releaseSigningName != 'debug') {
         throw new GradleException('Pilot release no longer uses the pilot-compatible signing configuration')
@@ -95,8 +133,8 @@ plugins.withId('com.android.application') {
         commandLine 'python3', rootProject.file('tools/verify_pilot_apk.py'),
             '--apk', layout.buildDirectory.file('outputs/apk/release/app-release.apk').get().asFile,
             '--expected-package', expectedApplicationId,
-            '--expected-version-code', expectedVersionCode.toString(),
-            '--expected-version-name', expectedVersionName,
+            '--expected-version-code', configuredVersionCode.toString(),
+            '--expected-version-name', configuredVersionName,
             '--expected-signer-sha256', approvedPilotSigner,
             '--expected-manifest-url', pilotManifestUrl,
             '--expected-public-key-file', publicKeyFile,
@@ -104,7 +142,7 @@ plugins.withId('com.android.application') {
     }
     tasks.register('pilotChannelRelease') {
         group = 'build'
-        description = 'Builds, tests, lints, and verifies the explicit Pilot 0.5.2 update-channel APK.'
+        description = 'Builds, tests, lints, and verifies the explicit pilot update-channel APK.'
         dependsOn 'test', 'lintRelease', 'verifyPilotRelease'
     }
     tasks.register('verifyPilotChannelForCi', Exec) {
@@ -114,8 +152,8 @@ plugins.withId('com.android.application') {
         commandLine 'python3', rootProject.file('tools/verify_pilot_apk.py'),
             '--apk', layout.buildDirectory.file('outputs/apk/release/app-release.apk').get().asFile,
             '--expected-package', expectedApplicationId,
-            '--expected-version-code', expectedVersionCode.toString(),
-            '--expected-version-name', expectedVersionName,
+            '--expected-version-code', configuredVersionCode.toString(),
+            '--expected-version-name', configuredVersionName,
             '--require-single-signer',
             '--expected-manifest-url', pilotManifestUrl,
             '--expected-public-key-file', publicKeyFile,
