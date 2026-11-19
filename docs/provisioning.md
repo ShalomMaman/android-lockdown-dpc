@@ -209,51 +209,75 @@ passphrase, the administrator PIN or a recovery code.
 
 ## Home filter
 
-1. Factory reset the managed device and complete **Runbook A** to enrol Device
-   Guard as Device Owner. Verify the enrolled device has only the intended user
-   and set the Device Guard administrator PIN. The QR hardware validation gap
-   noted in Runbook A still applies.
-2. Before enabling the filter, install the official Tailscale app
-   (`com.tailscale.ipn`), sign in to the family tailnet, and verify the device
-   can reach the family proxy over it. Do this before enforcing the app and
-   account restrictions. Use **Management identity** to verify and pin the
-   Tailscale signer from a trusted source when using Device Guard app
-   protection. If you use a different VPN package, ensure the existing app
-   allowlist and kiosk configuration let the VPN run.
-3. In Device Guard, unlock with the PIN and open **Home filter network**. Keep
-   the default VPN package or enter the approved package. Enter the HTTP or
-   HTTPS URL of the PAC file that points to the family mitmproxy service. Use
-   HTTPS with a certificate the device already trusts to protect the PAC in
-   transit. Choose the filter's **public** CA certificate as a single PEM or
-   DER file. Never transfer the proxy's private key to the device. Select
-   **Enable home filter**.
-4. Verify Android confirms the intended VPN package, lockdown with no app
-   exemptions, the recommended PAC URL, the selected CA when requested, and
-   the device restrictions. On Android 8 and 9 the VPN lockdown remains
-   unconfirmed because Android cannot read it back. A missing or hidden VPN
-   app cannot produce an active result. Reboot the device and check again.
-5. Verify traffic reaches the family filter, including from mobile data and
-   another Wi-Fi network. Disconnect the VPN and confirm ordinary apps lose
-   network access. With the VPN running, test a direct connection from an app
-   that ignores the proxy. Verify the family gateway denies unauthorized
-   direct traffic, including alternate DNS and IPv6 routes, before relying on
-   the setup.
+1. Use Android 10 (API 29) or later. Complete **Runbook A** to enroll Device
+   Guard as Device Owner, set the administrator PIN, and verify the device has
+   only the intended user and no work or private profile.
+2. Install a current official Tailscale Android build (`com.tailscale.ipn`),
+   sign in to the intended tailnet, and verify you can reach the home proxy
+   through the intended exit node. Obtain the APK signing certificate's
+   SHA-256 digest from a trusted source. Enter it under **Management identity**
+   for the default package, or directly in **Home filter network** for the
+   selected package. An absent or mismatched pin leaves the VPN untrusted.
+   An alternate package must be a trusted Tailscale build that implements the
+   same Android managed configuration schema.
+3. In **Home filter network**, enter the tailnet ID, the HTTPS coordination
+   server URL (prefilled for Tailscale), one stable exit node ID from the
+   admin console, and the organization name. Enter the PAC URL for the family
+   mitmproxy service. Prefer HTTPS with an already-trusted certificate. If the
+   filter needs a user CA, select its single **public** PEM or DER certificate.
+   Keep the proxy private key on the server. Select **Enable home filter**.
+4. Optionally enter an HTTPS check URL and its expected response. Use an
+   endpoint that returns HTTP 200 with the exact configured UTF-8 text only
+   when reached through the home filter. Use a TLS certificate Device Guard
+   already trusts, and keep the response at or below 1 KiB without redirects.
+   The app checks it in the background, with a four-second deadline, and
+   does not log the response body.
+5. Reboot the device and verify the settings again. Inspect the installed
+   Tailscale client and verify it uses the configured exit node. Test the
+   canary from mobile data and another Wi-Fi network. Confirm ordinary apps
+   lose access when the tunnel goes down. Test direct connections from apps
+   that ignore the PAC and verify the home gateway denies unauthorized egress,
+   including alternate DNS and IPv6 routes.
 
-The profile keeps its six device restrictions in force when Device Guard's
-app blocking is paused. **Remove certificate** removes only the selected CA
-from the Android user trust store. **Turn off home filter** withdraws that
-profile's VPN and proxy settings and removes its selected CA. Android keeps
-any restrictions still requested by the ordinary system policy. Keep the PIN
-available for local recovery if the VPN or proxy cannot be reached.
+Device Guard reads back the VPN signer, per-app uninstall block, always-on VPN
+with lockdown and no exemptions, managed configuration, opportunistic
+(automatic) Private DNS, recommended PAC URL, selected CA when configured, and
+device restrictions. The [Tailscale Android managed configuration schema] and
+[Tailscale system policies] specify `ForceEnabled=true`, `Tailnet=required:<ID>`,
+`LoginURL`, `ExitNodeID`, `ExitNodesPicker=hide`, and
+`ManagedByOrganizationName`. Android confirms it stored these values. Verify
+that the installed client applies them. The Android schema currently has no
+published sign-out or account-switching restriction. Check these paths with the
+deployed client and keep the administrator PIN available for local recovery.
+An older Device Guard profile without routing settings must be disabled and
+configured again. A corrupt configuration records an apply failure and leaves
+the existing device policy in place pending administrator recovery.
 
-Android supplies a *recommended* proxy. Apps may ignore it, so a reachable
-PAC and a confirmed lockdown setting alone do not prove traffic goes through
-mitmproxy. For bypass resistance, use a full-tunnel family gateway that limits
-device egress to the approved proxy and other explicitly required services.
-Keep app split tunneling and direct LAN access disabled, avoid `DIRECT` in the
-PAC, and prevent users from changing the VPN application's routing settings.
-The Device Guard screen confirms Android settings and does not test that
-network configuration. Android may exempt system traffic from lockdown.
+The console displays **Android settings confirmed** after Android read-back.
+**Home filter active** also requires a passing configured HTTPS check. A failing
+check leaves the filter status inactive and the Android policy in force. The
+check measures reachability at the time it runs. It cannot certify enforcement
+for every app or network path.
+
+The app allowlist keeps the configured VPN package visible while the home
+filter is enabled. Pausing app protection keeps the home-filter restrictions,
+including install and uninstall controls, app settings, date and time, work
+profile creation and, on Android 15 (API 35) or later, Private Space creation.
+Maintenance cannot relax these controls. While all app installation is
+restricted, plan Device Guard and Tailscale updates with the administrator.
+**Remove certificate** removes the selected CA. **Turn off home filter** clears
+the profile's VPN, managed settings, proxy and selected CA, and releases its
+restrictions. Other Device Guard policies continue to govern their own
+restrictions. The Private DNS mode remains automatic after disable.
+
+Android exposes the effective PAC URL through `ConnectivityManager`. This
+read-back cannot distinguish a matching Wi-Fi PAC from the global PAC, so
+Device Guard also requires evidence that the global setter ran successfully.
+A matching Wi-Fi PAC can also leave removal unconfirmed. Some apps ignore
+Android's recommended proxy, and Android may exempt system traffic from VPN
+lockdown. Restrict device egress at the family gateway, use a full tunnel,
+and verify that split tunneling and direct LAN access cannot provide an
+unfiltered path. Omit `DIRECT` from the PAC.
 
 Apps that pin certificates or ignore user CAs cannot have their encrypted
 traffic inspected. Apps targeting Android 7 or later ignore user-added CAs by
@@ -264,6 +288,9 @@ domain is identifiable.
 See [Android VPN management](https://developer.android.com/work/dpc/network-telephony.html),
 [Android CA trust defaults](https://developer.android.com/privacy-and-security/security-config),
 and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
+
+[Tailscale Android managed configuration schema]: https://github.com/tailscale/tailscale-android/blob/main/android/src/main/res/xml/app_restrictions.xml
+[Tailscale system policies]: https://tailscale.com/kb/1315/mdm-keys
 
 ## Runbook B — ADB fallback
 

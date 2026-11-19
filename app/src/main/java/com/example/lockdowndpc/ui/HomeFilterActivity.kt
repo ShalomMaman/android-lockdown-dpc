@@ -2,6 +2,7 @@ package com.example.lockdowndpc.ui
 
 import android.content.pm.ApplicationInfo
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
@@ -40,6 +41,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.HomeFilterCertificate
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
+import com.example.lockdowndpc.policy.HomeFilterProbe
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import kotlinx.coroutines.CancellationException
@@ -90,8 +92,18 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     var error by remember { mutableStateOf<Int?>(null) }
     var vpn by remember { mutableStateOf(HomeFilterPolicy.DEFAULT_VPN_PACKAGE) }
     var pac by remember { mutableStateOf("") }
+    var signerPin by remember { mutableStateOf("") }
+    var tailnetId by remember { mutableStateOf("") }
+    var loginUrl by remember { mutableStateOf(HomeFilterPolicy.DEFAULT_LOGIN_URL) }
+    var exitNodeId by remember { mutableStateOf("") }
+    var organization by remember { mutableStateOf("") }
+    var canaryUrl by remember { mutableStateOf("") }
+    var canaryBody by remember { mutableStateOf("") }
+    var probe by remember { mutableStateOf(HomeFilterPolicy.ProbeState.NOT_RUN) }
     var selectedCa by remember { mutableStateOf<String?>(null) }
     var confirm by remember { mutableStateOf<HomeFilterAction?>(null) }
+    var pendingConfig by remember { mutableStateOf<HomeFilterPolicy.Config?>(null) }
+    val supported = HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)
 
     fun authorize(): Boolean {
         if (!AdminSession.isUnlocked()) {
@@ -105,6 +117,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     fun applyPolicy(operation: () -> HomeFilterController.Snapshot) {
         if (busy || !authorize()) return
         busy = true
+        probe = HomeFilterPolicy.ProbeState.NOT_RUN
         error = null
         scope.launch {
             try {
@@ -112,10 +125,16 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 selectedCa = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: HomeFilterController.CorruptConfigurationException) {
+                snapshot = null
+                error = R.string.home_filter_corrupt_settings
+            } catch (_: UnsupportedOperationException) {
+                error = R.string.home_filter_requires_android_10
             } catch (_: Exception) {
                 error = R.string.home_filter_operation_failed
             } finally {
                 busy = false
+                revision++
             }
         }
     }
@@ -161,12 +180,24 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         onDispose { detach.run() }
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++ }
-    LaunchedEffect(revision) {
-        if (AdminSession.isUnlocked()) {
+    LaunchedEffect(revision, busy) {
+        if (!busy && AdminSession.isUnlocked()) {
+            probe = HomeFilterPolicy.ProbeState.NOT_RUN
             try {
-                snapshot = withContext(Dispatchers.IO) { HomeFilterController.read(context) }
+                val android = withContext(Dispatchers.IO) { HomeFilterController.read(context) }
+                snapshot = android
+                val canary = android.settings().config()?.canary()
+                if (canary != null && android.report().androidSettingsConfirmed(android.settings())) {
+                    val result = withContext(Dispatchers.IO) { HomeFilterProbe.check(canary) }
+                    val fresh = withContext(Dispatchers.IO) { HomeFilterController.read(context) }
+                    snapshot = fresh
+                    if (fresh.settings() == android.settings()) probe = result
+                }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: HomeFilterController.CorruptConfigurationException) {
+                snapshot = null
+                error = R.string.home_filter_corrupt_settings
             } catch (_: Exception) {
                 snapshot = null
                 error = R.string.home_filter_operation_failed
@@ -184,32 +215,23 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         subtitle = stringResource(R.string.home_filter_description),
     ) {
         if (current != null) {
-            HomeFilterStatus(current, busy)
+            HomeFilterStatus(current, busy, probe)
             Spacer(Modifier.height(16.dp))
         }
         error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
-        if (current != null && !current.settings().configured()) {
-            val ltrText = MaterialTheme.typography.bodyLarge.copy(textDirection = TextDirection.Ltr)
-            OutlinedTextField(
-                value = vpn,
-                onValueChange = { vpn = it },
-                label = { Text(stringResource(R.string.home_filter_vpn_package)) },
-                textStyle = ltrText,
-                singleLine = true,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
-            )
-            OutlinedTextField(
-                value = pac,
-                onValueChange = { pac = it },
-                label = { Text(stringResource(R.string.home_filter_pac_url)) },
-                textStyle = ltrText,
-                singleLine = true,
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-            )
+        if (!supported) {
+            Text(stringResource(R.string.home_filter_requires_android_10), color = MaterialTheme.colorScheme.error)
+        }
+        if (current != null && !current.settings().configured() && supported) {
+            HomeFilterField(vpn, { vpn = it }, R.string.home_filter_vpn_package, busy, KeyboardType.Ascii)
+            HomeFilterField(signerPin, { signerPin = it }, R.string.home_filter_signer_pin, busy, KeyboardType.Ascii)
+            HomeFilterField(tailnetId, { tailnetId = it }, R.string.home_filter_tailnet_id, busy, KeyboardType.Ascii)
+            HomeFilterField(loginUrl, { loginUrl = it }, R.string.home_filter_login_url, busy, KeyboardType.Uri)
+            HomeFilterField(exitNodeId, { exitNodeId = it }, R.string.home_filter_exit_node, busy, KeyboardType.Ascii)
+            HomeFilterField(organization, { organization = it }, R.string.home_filter_organization, busy)
+            HomeFilterField(pac, { pac = it }, R.string.home_filter_pac_url, busy, KeyboardType.Uri)
+            HomeFilterField(canaryUrl, { canaryUrl = it }, R.string.home_filter_canary_url, busy, KeyboardType.Uri)
+            HomeFilterField(canaryBody, { canaryBody = it }, R.string.home_filter_canary_body, busy)
             TextButton(onClick = ::chooseCertificate, enabled = !busy) {
                 Text(stringResource(R.string.home_filter_choose_ca))
             }
@@ -223,7 +245,10 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 text = stringResource(R.string.home_filter_enable),
                 onClick = {
                     try {
-                        HomeFilterPolicy.Config(vpn, pac)
+                        val routing = HomeFilterPolicy.Routing(tailnetId, loginUrl, exitNodeId, organization)
+                        val canary = if (canaryUrl.isBlank() && canaryBody.isBlank()) null
+                            else HomeFilterPolicy.Canary(canaryUrl, canaryBody)
+                        pendingConfig = HomeFilterPolicy.Config(vpn, pac, signerPin, routing, canary)
                         error = null
                         confirm = HomeFilterAction.ENABLE
                     } catch (_: IllegalArgumentException) {
@@ -234,6 +259,9 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             )
         } else if (current?.settings()?.configured() == true) {
             val settings = current.settings()
+            if (settings.enabled() && settings.config().routing() == null) {
+                Text(stringResource(R.string.home_filter_routing_missing))
+            }
             PrimaryAction(
                 text = stringResource(R.string.home_filter_retry),
                 onClick = { applyPolicy { HomeFilterController.retry(context) } },
@@ -269,8 +297,10 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                     val ca = selectedCa
                     when (action) {
                         HomeFilterAction.ENABLE -> {
-                            val config = HomeFilterPolicy.Config(vpn, pac)
-                            applyPolicy { HomeFilterController.enable(context, config, ca) }
+                            pendingConfig?.let { config ->
+                                applyPolicy { HomeFilterController.enable(context, config, ca) }
+                            }
+                            pendingConfig = null
                         }
                         HomeFilterAction.DISABLE ->
                             applyPolicy { HomeFilterController.disable(context) }
@@ -292,20 +322,50 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
 }
 
 @Composable
-private fun HomeFilterStatus(snapshot: HomeFilterController.Snapshot, busy: Boolean) {
+private fun HomeFilterField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: Int,
+    busy: Boolean,
+    keyboardType: KeyboardType = KeyboardType.Text,
+) {
+    val typography = MaterialTheme.typography.bodyLarge
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(stringResource(label)) },
+        textStyle = if (keyboardType == KeyboardType.Text) typography
+            else typography.copy(textDirection = TextDirection.Ltr),
+        singleLine = true,
+        enabled = !busy,
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+    )
+}
+
+@Composable
+private fun HomeFilterStatus(
+    snapshot: HomeFilterController.Snapshot,
+    busy: Boolean,
+    probe: HomeFilterPolicy.ProbeState,
+) {
     val settings = snapshot.settings()
     val report = snapshot.report()
-    val active = !busy && report.active(settings)
-    val headline = when {
-        busy -> R.string.home_filter_checking
-        active -> R.string.home_filter_confirmed
-        settings.enabled() -> R.string.home_filter_inactive
-        settings.configured() -> R.string.home_filter_removal_pending
-        else -> R.string.home_filter_off
+    val status = report.status(settings, probe)
+    val headline = if (busy) R.string.home_filter_checking else when (status) {
+        HomeFilterPolicy.Status.ANDROID_SETTINGS_CONFIRMED, HomeFilterPolicy.Status.PROBE_PENDING ->
+            R.string.home_filter_confirmed
+        HomeFilterPolicy.Status.FILTER_ACTIVE -> R.string.home_filter_active
+        HomeFilterPolicy.Status.SETTINGS_UNCONFIRMED, HomeFilterPolicy.Status.PROBE_FAILED ->
+            R.string.home_filter_inactive
+        HomeFilterPolicy.Status.REMOVAL_PENDING -> R.string.home_filter_removal_pending
+        HomeFilterPolicy.Status.OFF -> R.string.home_filter_off
     }
     val tone = when {
         busy -> StatusTone.APPLYING
-        active -> StatusTone.VERIFIED
+        status == HomeFilterPolicy.Status.FILTER_ACTIVE ||
+            status == HomeFilterPolicy.Status.ANDROID_SETTINGS_CONFIRMED -> StatusTone.VERIFIED
+        status == HomeFilterPolicy.Status.PROBE_PENDING -> StatusTone.APPLYING
         settings.configured() -> StatusTone.FAILED
         else -> StatusTone.INACTIVE
     }
@@ -315,6 +375,7 @@ private fun HomeFilterStatus(snapshot: HomeFilterController.Snapshot, busy: Bool
         stringResource(R.string.home_filter_pac_url) to config.pacUrl().bidiIsolated(),
         stringResource(R.string.home_filter_vpn_status) to stringResource(homeFilterState(report.vpn())),
         stringResource(R.string.home_filter_proxy_status) to stringResource(homeFilterState(report.proxy())),
+        stringResource(R.string.home_filter_private_dns) to stringResource(homeFilterState(report.privateDns())),
         stringResource(
             if (settings.removeCa()) R.string.home_filter_ca_removal_status
             else R.string.home_filter_ca_status,
@@ -323,7 +384,15 @@ private fun HomeFilterStatus(snapshot: HomeFilterController.Snapshot, busy: Bool
             if (settings.enabled()) R.string.home_filter_restrictions
             else R.string.home_filter_restrictions_removal,
         ) to stringResource(homeFilterState(report.restrictions())),
-    )
+    ) + if (config.canary() != null && settings.enabled()) {
+        val probeLabel = when (status) {
+            HomeFilterPolicy.Status.FILTER_ACTIVE -> R.string.home_filter_probe_passed
+            HomeFilterPolicy.Status.PROBE_FAILED -> R.string.home_filter_probe_failed
+            HomeFilterPolicy.Status.PROBE_PENDING -> R.string.home_filter_probe_checking
+            else -> R.string.home_filter_probe_not_run
+        }
+        listOf(stringResource(R.string.home_filter_probe_status) to stringResource(probeLabel))
+    } else emptyList()
     PolicyStatusCard(tone, stringResource(headline), facts)
 }
 

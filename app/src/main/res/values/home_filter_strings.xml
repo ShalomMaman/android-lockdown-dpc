@@ -2,11 +2,19 @@
 <resources>
     <string name="home_filter_title">Home filter network</string>
     <string name="home_filter_row">Manage the family VPN, proxy and certificate</string>
-    <string name="home_filter_description">Android can confirm these settings. Test separately that traffic reaches the home filter and that direct internet access is blocked.</string>
+    <string name="home_filter_description">Use an approved Tailscale app and exit node. An optional HTTPS check can verify that this device reaches the home filter.</string>
     <string name="home_filter_vpn_package">VPN app package</string>
+    <string name="home_filter_signer_pin">Signer SHA-256 (or use Management identity)</string>
+    <string name="home_filter_tailnet_id">Tailscale tailnet ID</string>
+    <string name="home_filter_login_url">Tailscale coordination server (HTTPS)</string>
+    <string name="home_filter_exit_node">Tailscale exit node ID</string>
+    <string name="home_filter_organization">Organization name</string>
+    <string name="home_filter_canary_url">Optional HTTPS check URL</string>
+    <string name="home_filter_canary_body">Expected response text for the HTTPS check</string>
     <string name="home_filter_pac_url">Proxy configuration URL (PAC)</string>
-    <string name="home_filter_vpn_status">VPN lockdown</string>
+    <string name="home_filter_vpn_status">VPN identity, lockdown and managed settings</string>
     <string name="home_filter_proxy_status">Recommended proxy</string>
+    <string name="home_filter_private_dns">Automatic Private DNS</string>
     <string name="home_filter_ca_status">Filter certificate</string>
     <string name="home_filter_ca_removal_status">Certificate removal</string>
     <string name="home_filter_restrictions">Device restrictions</string>
@@ -22,12 +30,16 @@
     <string name="home_filter_confirm_disable">Remove the VPN and proxy settings from this profile, and remove the selected certificate from Android. Other Device Guard controls still follow their own settings.</string>
     <string name="home_filter_confirm_ca">Install only the public CA certificate from the family filter you trust. Apps that trust this certificate can have their encrypted traffic inspected by that filter.</string>
     <string name="home_filter_confirm_remove_ca">Remove the selected certificate from Android. Apps that need it to use the filter may lose access.</string>
-    <string name="home_filter_invalid_settings">Enter a valid VPN package and an HTTP or HTTPS address for the PAC file.</string>
+    <string name="home_filter_invalid_settings">Check the VPN package, signer, Tailscale settings and PAC URL. For the optional check, enter both an HTTPS URL and the expected response.</string>
     <string name="home_filter_invalid_ca">Choose a file with one public CA certificate in PEM or DER format.</string>
     <string name="home_filter_picker_unavailable">Android could not open the file picker.</string>
     <string name="home_filter_operation_failed">Could not complete the home filter operation.</string>
+    <string name="home_filter_corrupt_settings">The saved home filter settings could not be read. Contact the administrator to recover the configuration.</string>
+    <string name="home_filter_requires_android_10">The home filter requires Android 10 (API 29) or later.</string>
+    <string name="home_filter_routing_missing">This profile is missing Tailscale routing settings. Turn it off and set it up again with the approved routing settings.</string>
     <string name="home_filter_checking">Checking home filter settings</string>
-    <string name="home_filter_confirmed">Home filter settings confirmed</string>
+    <string name="home_filter_confirmed">Android settings confirmed</string>
+    <string name="home_filter_active">Home filter active</string>
     <string name="home_filter_inactive">Home filter protection is not active</string>
     <string name="home_filter_removal_pending">Home filter removal is pending</string>
     <string name="home_filter_off">Home filter is off</string>
@@ -39,6 +51,11 @@
     <string name="home_filter_vpn_hidden">VPN app is hidden or disabled</string>
     <string name="home_filter_vpn_unverified">Android did not confirm home filter VPN lockdown.</string>
     <string name="home_filter_control_required">Required while the home filter is enabled.</string>
-    <string name="home_filter_vpn_untrusted">The VPN app signature does not match the approved signer</string>
+    <string name="home_filter_vpn_untrusted">The VPN app has no approved signer or its signature does not match</string>
     <string name="home_filter_restrictions_removal">Restore device restrictions</string>
+    <string name="home_filter_probe_status">HTTPS check</string>
+    <string name="home_filter_probe_checking">Checking</string>
+    <string name="home_filter_probe_passed">Expected response received</string>
+    <string name="home_filter_probe_failed">The expected response could not be verified</string>
+    <string name="home_filter_probe_not_run">Waiting for Android settings confirmation</string>
 </resources>

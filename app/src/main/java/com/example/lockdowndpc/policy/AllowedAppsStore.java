@@ -360,8 +360,12 @@ public final class AllowedAppsStore {
     }
 
     public static void markApplyFailed(Context context, String error) {
+        markApplyFailed(context, error, true);
+    }
+
+    static void markApplyFailed(Context context, String error, boolean protectionEnabled) {
         prefs(context).edit()
-                .putBoolean(KEY_ENABLED, true)
+                .putBoolean(KEY_ENABLED, protectionEnabled)
                 .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())
                 .putString(KEY_POLICY_ERROR, error)
                 .commit();

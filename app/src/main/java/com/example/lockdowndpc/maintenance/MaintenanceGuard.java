@@ -16,6 +16,8 @@ import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.policy.HomeFilterController;
+import com.example.lockdowndpc.policy.HomeFilterPolicy;
 import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway;
@@ -140,6 +142,11 @@ public final class MaintenanceGuard {
             OpenRequest request
     ) {
         Context appContext = context.getApplicationContext();
+        if (HomeFilterController.isEnabled(appContext)
+                && !HomeFilterPolicy.permitsRelaxing(
+                        MaintenanceCapability.relaxedControls(request.capabilities()))) {
+            return refusedBeforeAnySend(current, "home-filter-controls-required");
+        }
         // Whether a restore was already owed before this call. A refusal below
         // may only withdraw the intent this call created — clearing a
         // pre-existing debt (a discarded record, a failed earlier restore) would

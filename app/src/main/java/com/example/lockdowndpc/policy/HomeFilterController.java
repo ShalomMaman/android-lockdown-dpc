@@ -22,13 +22,21 @@ import java.util.Set;
 import java.util.function.UnaryOperator;
 
 public final class HomeFilterController {
+    static final String CORRUPT_CONFIGURATION = "home-filter:corrupt-configuration";
+
     private HomeFilterController() {}
 
     public record Snapshot(HomeFilterPolicy.Settings settings, HomeFilterPolicy.Report report) {}
 
+    public static final class CorruptConfigurationException extends IllegalStateException {
+        private CorruptConfigurationException() {
+            super(CORRUPT_CONFIGURATION);
+        }
+    }
+
     public static Snapshot read(Context context) {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> {
-            HomeFilterPolicy.Settings settings = HomeFilterStore.read(context);
+            HomeFilterPolicy.Settings settings = requireSettings(context);
             HomeFilterPolicy.Report report = HomeFilterPolicy.inspect(
                     settings, Build.VERSION.SDK_INT, gateway(context));
             return new Snapshot(settings, HomeFilterStore.includeApplyEvidence(
@@ -38,6 +46,12 @@ public final class HomeFilterController {
 
     public static Snapshot enable(Context context, HomeFilterPolicy.Config config, String ca) {
         return change(context, settings -> {
+            if (!HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
+                throw new UnsupportedOperationException("Home filter requires Android 10 (API 29) or later");
+            }
+            if (config.routing() == null) {
+                throw new IllegalArgumentException("Tailscale routing settings are required");
+            }
             if (settings.configured()) {
                 throw new IllegalStateException("Home filter configuration is already present");
             }
@@ -73,7 +87,7 @@ public final class HomeFilterController {
                     || !dpm.isDeviceOwnerApp(context.getPackageName())) {
                 throw new SecurityException("An unlocked device owner is required");
             }
-            HomeFilterPolicy.Settings before = HomeFilterStore.read(context);
+            HomeFilterPolicy.Settings before = requireSettings(context);
             HomeFilterPolicy.Settings after = operation.apply(before);
             if (!before.equals(after)) {
                 HomeFilterStore.write(context, after);
@@ -91,16 +105,22 @@ public final class HomeFilterController {
     /** Device-owner lifecycle entry point. It only reasserts saved administrator intent. */
     static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
                           List<String> errors) {
-        HomeFilterPolicy.Settings settings = HomeFilterStore.read(context);
+        HomeFilterPolicy.Settings settings = readStored(context);
+        if (settings == null) {
+            errors.add(CORRUPT_CONFIGURATION);
+            return;
+        }
         if (!settings.configured()) {
             return;
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
-        boolean verified = settings.enabled() ? report.active(settings) : report.removed();
+        boolean verified = settings.enabled()
+                ? report.androidSettingsConfirmed(settings) : report.removed();
         if (!verified) {
             errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
-                    + ",ca=" + report.ca() + ",restrictions=" + report.restrictions());
+                    + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
+                    + ",private-dns=" + report.privateDns());
         }
         HomeFilterPolicy.Settings remaining = settings.afterReadback(report);
         if (!remaining.equals(settings)) {
@@ -112,22 +132,42 @@ public final class HomeFilterController {
     }
 
     public static boolean isEnabled(Context context) {
-        return HomeFilterStore.read(context).enabled();
+        HomeFilterPolicy.Settings settings = readStored(context);
+        return settings == null || settings.enabled();
     }
 
     static boolean needsReconciliation(Context context) {
-        return HomeFilterStore.read(context).configured();
+        HomeFilterPolicy.Settings settings = readStored(context);
+        return settings == null || settings.configured();
     }
 
     public static boolean isConfiguredVpn(Context context, String packageName) {
-        HomeFilterPolicy.Settings settings = HomeFilterStore.read(context);
+        HomeFilterPolicy.Settings settings = readStored(context);
+        if (settings == null) return false;
         return settings.configured() && settings.config().vpnPackage().equals(packageName);
     }
 
     public static boolean vpnBlocksActiveStatus(Context context) {
-        HomeFilterPolicy.Settings settings = HomeFilterStore.read(context);
-        return settings.enabled() && HomeFilterPolicy.inspectVpn(settings, Build.VERSION.SDK_INT,
-                gateway(context)) != HomeFilterPolicy.State.CONFIRMED;
+        HomeFilterPolicy.Settings settings = readStored(context);
+        return settings == null || (settings.enabled()
+                && HomeFilterPolicy.inspectVpn(settings, Build.VERSION.SDK_INT, gateway(context))
+                    != HomeFilterPolicy.State.CONFIRMED);
+    }
+
+    static HomeFilterPolicy.Settings readStored(Context context) {
+        return HomeFilterStore.readOrReport(() -> HomeFilterStore.read(context), () -> {
+            if (AllowedAppsStore.getPolicyState(context) != AllowedAppsStore.PolicyState.FAILED
+                    || !CORRUPT_CONFIGURATION.equals(AllowedAppsStore.getPolicyError(context))) {
+                AllowedAppsStore.markApplyFailed(context, CORRUPT_CONFIGURATION,
+                        AllowedAppsStore.isProtectionEnabled(context));
+            }
+        });
+    }
+
+    private static HomeFilterPolicy.Settings requireSettings(Context context) {
+        HomeFilterPolicy.Settings settings = readStored(context);
+        if (settings == null) throw new CorruptConfigurationException();
+        return settings;
     }
 
     public static Runnable watch(Context context, Runnable listener) {
@@ -143,7 +183,8 @@ public final class HomeFilterController {
             implements HomeFilterPolicy.Gateway {
 
         @Override
-        public HomeFilterPolicy.PackageState vpnPackageState(String packageName) {
+        public HomeFilterPolicy.PackageState vpnPackageState(HomeFilterPolicy.Config config) {
+            String packageName = config.vpnPackage();
             PackageManager pm = context.getPackageManager();
             try {
                 // Hidden packages can be absent from ordinary queries but still installed.
@@ -157,15 +198,14 @@ public final class HomeFilterController {
                         || dpm.isApplicationHidden(admin, packageName)) {
                     return HomeFilterPolicy.PackageState.HIDDEN;
                 }
-                for (LockdownPackages.ManagementPackage record : LockdownPackages.managementPackages(
-                        AllowedAppsStore.getManagementCertificatePins(context))) {
-                    if (record.packageName().equals(packageName) && record.hasPinnedCertificate()
-                            && !LockdownPackages.grantsManagementTrust(
-                                    LockdownPolicyController.managementSignerVerdict(context, record))) {
-                        return HomeFilterPolicy.PackageState.UNTRUSTED;
-                    }
-                }
-                return HomeFilterPolicy.PackageState.INSTALLED;
+                Set<String> pins = config.signerPin().isEmpty()
+                        ? AllowedAppsStore.getManagementCertificatePins(context)
+                            .getOrDefault(packageName, Set.of())
+                        : Set.of(config.signerPin());
+                LockdownPackages.ManagementPackage record =
+                        new LockdownPackages.ManagementPackage(packageName, pins);
+                return HomeFilterPolicy.installedVpnState(
+                        LockdownPolicyController.managementSignerVerdict(context, record));
             } catch (PackageManager.NameNotFoundException ignored) {
                 return HomeFilterPolicy.PackageState.MISSING;
             }
@@ -200,6 +240,67 @@ public final class HomeFilterController {
             } catch (PackageManager.NameNotFoundException ignored) {
                 return false;
             }
+        }
+
+        @Override
+        public boolean uninstallBlocked(String packageName) {
+            return dpm.isUninstallBlocked(admin, packageName);
+        }
+
+        @Override
+        public boolean setVpnUninstallBlocked(String packageName, boolean blocked) {
+            dpm.setUninstallBlocked(admin, packageName, blocked);
+            return true;
+        }
+
+        @Override
+        public boolean retainVpnUninstallBlock(String packageName) {
+            if (context.getPackageName().equals(packageName)) return true;
+            return LockdownPackages.managementPackages(AllowedAppsStore.getManagementCertificatePins(context))
+                    .stream().filter(record -> record.packageName().equals(packageName))
+                    .anyMatch(record -> LockdownPackages.grantsManagementTrust(
+                            LockdownPolicyController.managementSignerVerdict(context, record)));
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public Map<String, Object> managedConfig(String packageName) {
+            Bundle readback = dpm.getApplicationRestrictions(admin, packageName);
+            Map<String, Object> values = new java.util.LinkedHashMap<>();
+            for (String key : readback.keySet()) {
+                values.put(key, readback.get(key));
+            }
+            return values;
+        }
+
+        @Override
+        @SuppressWarnings("deprecation")
+        public boolean setManagedConfig(String packageName, Map<String, Object> changes, boolean enabled) {
+            Bundle updated = new Bundle(dpm.getApplicationRestrictions(admin, packageName));
+            changes.forEach((key, value) -> {
+                if (!enabled) {
+                    if (value.equals(updated.get(key))) updated.remove(key);
+                } else if (value instanceof Boolean flag) {
+                    updated.putBoolean(key, flag);
+                } else {
+                    updated.putString(key, (String) value);
+                }
+            });
+            dpm.setApplicationRestrictions(admin, packageName, updated);
+            return true;
+        }
+
+        @Override
+        public boolean privateDnsOpportunistic() {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    && dpm.getGlobalPrivateDnsMode(admin) == DevicePolicyManager.PRIVATE_DNS_MODE_OPPORTUNISTIC;
+        }
+
+        @Override
+        public boolean setPrivateDnsOpportunistic() {
+            return Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                    && dpm.setGlobalPrivateDnsModeOpportunistic(admin)
+                        == DevicePolicyManager.PRIVATE_DNS_SET_NO_ERROR;
         }
 
         @Override
@@ -256,6 +357,26 @@ public final class HomeFilterController {
                     if (restrictions.getBoolean(restriction.key()) != requested) {
                         return false;
                     }
+                }
+            }
+            for (SystemPolicyControl.Restriction restriction :
+                    HomeFilterPolicy.profileRestrictions(Build.VERSION.SDK_INT)) {
+                if (restrictions.getBoolean(restriction.key()) != enabled) return false;
+            }
+            return true;
+        }
+
+        @Override
+        public boolean setProfileRestrictions(boolean enabled) {
+            Bundle restrictions = dpm.getUserRestrictions(admin);
+            for (SystemPolicyControl.Restriction restriction :
+                    HomeFilterPolicy.profileRestrictions(Build.VERSION.SDK_INT)) {
+                String key = restriction.key();
+                if (restrictions.getBoolean(key) == enabled) continue;
+                if (enabled) {
+                    dpm.addUserRestriction(admin, key);
+                } else {
+                    dpm.clearUserRestriction(admin, key);
                 }
             }
             return true;

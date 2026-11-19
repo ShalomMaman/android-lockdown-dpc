@@ -2,11 +2,19 @@
 <resources>
     <string name="home_filter_title">רשת הסינון הביתית</string>
     <string name="home_filter_row">ניהול ה־VPN, שירות התיווך ותעודת הסינון של המשפחה</string>
-    <string name="home_filter_description">Android יכול לאמת את ההגדרות. יש לבדוק בנפרד שהתעבורה מגיעה למסנן הביתי ושגישה ישירה לאינטרנט חסומה.</string>
+    <string name="home_filter_description">יש להשתמש באפליקציית Tailscale ובנתיב יציאה שאושרו. אפשר להגדיר בדיקת HTTPS כדי לוודא שהמכשיר מגיע למסנן הביתי.</string>
     <string name="home_filter_vpn_package">מזהה אפליקציית ה־VPN</string>
+    <string name="home_filter_signer_pin">טביעת החתימה SHA-256 (או שימוש בזהות הניהול)</string>
+    <string name="home_filter_tailnet_id">מזהה רשת Tailscale</string>
+    <string name="home_filter_login_url">שרת התיאום של Tailscale בחיבור HTTPS</string>
+    <string name="home_filter_exit_node">מזהה מכשיר היציאה של Tailscale</string>
+    <string name="home_filter_organization">שם הארגון</string>
+    <string name="home_filter_canary_url">כתובת לבדיקת HTTPS (רשות)</string>
+    <string name="home_filter_canary_body">טקסט התשובה הצפוי בבדיקת HTTPS</string>
     <string name="home_filter_pac_url">כתובת קובץ הגדרות התיווך (PAC)</string>
-    <string name="home_filter_vpn_status">נעילת VPN</string>
+    <string name="home_filter_vpn_status">זהות ה־VPN, הנעילה והגדרות הניהול</string>
     <string name="home_filter_proxy_status">הגדרת שירות התיווך</string>
+    <string name="home_filter_private_dns">מצב אוטומטי של DNS פרטי</string>
     <string name="home_filter_ca_status">תעודת הסינון</string>
     <string name="home_filter_ca_removal_status">הסרת תעודת הסינון</string>
     <string name="home_filter_restrictions">הגבלות המכשיר</string>
@@ -22,12 +30,16 @@
     <string name="home_filter_confirm_disable">הגדרות ה־VPN ושירות התיווך של פרופיל זה יוסרו, והתעודה שנבחרה תוסר מ־Android. יתר ההגבלות של Device Guard ימשיכו לפעול לפי ההגדרות שלהן.</string>
     <string name="home_filter_confirm_ca">יש להתקין רק את התעודה הציבורית של המסנן הביתי שאתם סומכים עליו. המסנן יכול לבדוק תעבורה מוצפנת של אפליקציות שסומכות על התעודה.</string>
     <string name="home_filter_confirm_remove_ca">התעודה שנבחרה תוסר מ־Android. אפליקציות שזקוקות לה כדי להשתמש במסנן עלולות לאבד גישה.</string>
-    <string name="home_filter_invalid_settings">יש להזין מזהה תקין של אפליקציית VPN וכתובת HTTP או HTTPS לקובץ ה־PAC.</string>
+    <string name="home_filter_invalid_settings">יש לבדוק את מזהה האפליקציה, החתימה, הגדרות Tailscale וכתובת ה־PAC. אם מגדירים בדיקת חיבור, יש להזין כתובת HTTPS ואת התשובה הצפויה.</string>
     <string name="home_filter_invalid_ca">יש לבחור קובץ שמכיל תעודת CA ציבורית אחת בפורמט PEM או DER.</string>
     <string name="home_filter_picker_unavailable">לא ניתן לפתוח את בורר הקבצים של Android.</string>
     <string name="home_filter_operation_failed">לא ניתן להשלים את פעולת הסינון הביתי.</string>
+    <string name="home_filter_corrupt_settings">לא ניתן לקרוא את ההגדרות השמורות של הסינון הביתי. יש לפנות למנהל המכשיר לשחזור ההגדרות.</string>
+    <string name="home_filter_requires_android_10">הסינון הביתי זמין מגרסת Android 10 ‏(API 29) ומעלה.</string>
+    <string name="home_filter_routing_missing">חסרות הגדרות ניתוב של Tailscale. יש לכבות את הסינון ולהגדיר אותו מחדש עם פרטי הניתוב שאושרו.</string>
     <string name="home_filter_checking">הגדרות הסינון הביתי בבדיקה</string>
-    <string name="home_filter_confirmed">הגדרות הסינון הביתי אומתו</string>
+    <string name="home_filter_confirmed">הגדרות Android אומתו</string>
+    <string name="home_filter_active">הסינון הביתי פעיל</string>
     <string name="home_filter_inactive">הגנת הסינון הביתי אינה פעילה</string>
     <string name="home_filter_removal_pending">הסרת הסינון הביתי טרם הושלמה</string>
     <string name="home_filter_off">הסינון הביתי כבוי</string>
@@ -39,6 +51,11 @@
     <string name="home_filter_vpn_hidden">אפליקציית ה־VPN מוסתרת או מושבתת</string>
     <string name="home_filter_vpn_unverified">Android לא אישר שנעילת ה־VPN של הסינון הביתי פעילה.</string>
     <string name="home_filter_control_required">הגבלה זו נדרשת כל עוד הסינון הביתי מופעל.</string>
-    <string name="home_filter_vpn_untrusted">החתימה של אפליקציית ה־VPN אינה תואמת לחתימה שאושרה</string>
+    <string name="home_filter_vpn_untrusted">חסרה חתימה מאושרת לאפליקציית ה־VPN או שהחתימה שלה שונה מהחתימה שאושרה</string>
     <string name="home_filter_restrictions_removal">החזרת הגבלות המכשיר</string>
+    <string name="home_filter_probe_status">בדיקת חיבור ב־HTTPS</string>
+    <string name="home_filter_probe_checking">החיבור בבדיקה</string>
+    <string name="home_filter_probe_passed">התקבלה התשובה הצפויה</string>
+    <string name="home_filter_probe_failed">לא ניתן לאמת את התשובה הצפויה</string>
+    <string name="home_filter_probe_not_run">בהמתנה לאימות הגדרות Android</string>
 </resources>

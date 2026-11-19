@@ -42,6 +42,14 @@ public class HomeFilterCertificateTest {
                 () -> HomeFilterCertificate.read(new ByteArrayInputStream(new byte[65537])));
     }
 
+    @Test(timeout = 2000)
+    public void acceptsOuterWhitespaceAndRejectsLongMalformedPem() throws Exception {
+        assertEquals(HomeFilterCertificate.read(asInput(TEST_CA)),
+                HomeFilterCertificate.read(asInput(" \r\n" + TEST_CA + "\t ")));
+        assertThrows(CertificateException.class, () -> HomeFilterCertificate.read(asInput(
+                "-----BEGIN CERTIFICATE-----" + " ".repeat(64000) + "missing footer")));
+    }
+
     private static ByteArrayInputStream asInput(String value) {
         return new ByteArrayInputStream(value.getBytes(StandardCharsets.US_ASCII));
     }

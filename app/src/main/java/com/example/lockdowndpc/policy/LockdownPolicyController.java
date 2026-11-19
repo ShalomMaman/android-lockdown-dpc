@@ -46,6 +46,8 @@ public final class LockdownPolicyController {
     private LockdownPolicyController() {}
 
     public static synchronized PolicyResult apply(Context context) {
+        HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
+        if (homeFilter == null) return corruptHomeFilter();
         AllowedAppsStore.markApplyStarted(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -76,11 +78,14 @@ public final class LockdownPolicyController {
         configureBlockedBrowser(context, dpm, admin, errors);
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         int[] packageCounts = applyPackagePolicy(
-                context, dpm, admin, trustedManagement, playCompatibility, errors);
-        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
+                context, dpm, admin, trustedManagement, playCompatibility, homeFilter, errors);
+        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
         HomeFilterController.reconcile(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
+            if (homeFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
+                clearMaintenanceWindow(context, "home-filter");
+            }
             AllowedAppsStore.markApplySucceeded(context);
             Log.i(TAG, "Policy apply verified; blocked=" + packageCounts[0]
                     + ", allowed=" + packageCounts[1]);
@@ -94,6 +99,8 @@ public final class LockdownPolicyController {
     }
 
     public static synchronized PolicyResult pause(Context context) {
+        HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
+        if (homeFilter == null) return corruptHomeFilter();
         AllowedAppsStore.markPauseStarted(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -109,7 +116,7 @@ public final class LockdownPolicyController {
         // after: if this pass dies midway, the next maintenance refresh must not
         // find a window and "restore" the base policy onto a device an
         // administrator has just paused.
-        closeMaintenanceForPause(context);
+        clearMaintenanceWindow(context, "pause");
         releaseSystemPolicy(context, dpm, admin, errors);
         try {
             dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
@@ -127,6 +134,7 @@ public final class LockdownPolicyController {
         packagesToShow.addAll(LockdownPackages.ALWAYS_BLOCKED);
         packagesToShow.addAll(LockdownPackages.KNOWN_BROWSER_AND_SOCIAL);
         packagesToShow.addAll(AllowedAppsStore.getManagedPackages(context));
+        if (homeFilter.enabled()) packagesToShow.add(homeFilter.config().vpnPackage());
         // A device that never enabled kiosk skips this entirely; one that did must
         // get its escape surfaces back even though they are hidden from bulk
         // queries. An active kiosk keeps them hidden: pausing managed filtering is
@@ -182,6 +190,11 @@ public final class LockdownPolicyController {
             Log.e(TAG, "Policy pause failed verification: " + summary);
         }
         return new PolicyResult(true, verified, 0, visibleCount, errors);
+    }
+
+    private static PolicyResult corruptHomeFilter() {
+        return new PolicyResult(false, false, 0, 0,
+                List.of(HomeFilterController.CORRUPT_CONFIGURATION));
     }
 
     /**
@@ -264,6 +277,9 @@ public final class LockdownPolicyController {
         if (window == null) {
             return null;
         }
+        if (HomeFilterController.isEnabled(context) && conflictsWithHomeFilter(window)) {
+            return null;
+        }
         // The full liveness evaluation, not a bare expiry check. An expiry-only
         // test reads a pre-reboot window as live — after a restart the monotonic
         // clock is near zero, comfortably below the old deadline — so a boot-time
@@ -285,16 +301,12 @@ public final class LockdownPolicyController {
         return MaintenanceStore.liveWindow(context);
     }
 
-    /**
-     * Ends any maintenance window because protection is being paused.
-     *
-     * <p>No restore is performed and none is owed: {@code releaseSystemPolicy}
-     * withdraws every control a moment later, which is a superset of whatever the
-     * window had relaxed. Leaving the record in place is what would be unsafe —
-     * the maintenance timers would later fire on a paused device and re-assert
-     * restrictions the console says are off.
-     */
-    private static void closeMaintenanceForPause(Context context) {
+    private static boolean conflictsWithHomeFilter(MaintenanceWindow window) {
+        return window != null && !HomeFilterPolicy.permitsRelaxing(window.relaxableControls());
+    }
+
+    /** Clears a maintenance record whose policy is handled by the enclosing pass. */
+    private static void clearMaintenanceWindow(Context context, String reason) {
         try {
             boolean hadWindow = MaintenanceStore.readWindow(context) != null
                     || MaintenanceStore.restorePending(context);
@@ -302,12 +314,11 @@ public final class LockdownPolicyController {
             MaintenanceStore.clearRestorePending(context);
             MaintenanceGuard.arm(context, null);
             if (hadWindow) {
-                AuditLog.append(context, "maintenance:closed-by-pause");
+                AuditLog.append(context, "maintenance:closed-by-" + reason);
             }
         } catch (RuntimeException exception) {
-            // Pausing must not fail because the maintenance record misbehaved;
-            // the release below is what actually frees the device.
-            Log.e(TAG, "Could not clear the maintenance record while pausing", exception);
+            // The enclosing policy pass still enforces its own restrictions.
+            Log.e(TAG, "Could not clear the maintenance record", exception);
         }
     }
 
@@ -619,6 +630,7 @@ public final class LockdownPolicyController {
             ComponentName admin,
             Set<String> trustedManagement,
             PlayStoreCompatibility.State playCompatibility,
+            HomeFilterPolicy.Settings homeFilter,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -629,8 +641,9 @@ public final class LockdownPolicyController {
         // package name, and acting on the old acceptance would hide a component
         // nobody reviewed during an automatic reconciliation pass.
         Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
-        boolean appStoreMaintenanceOpen = MaintenanceAppPolicy.opensApplicationStores(
-                liveMaintenanceWindow(context));
+        MaintenanceWindow window = liveMaintenanceWindow(context);
+        boolean appStoreMaintenanceOpen = MaintenanceAppPolicy.opensApplicationStores(window)
+                && !(homeFilter.enabled() && conflictsWithHomeFilter(window));
         boolean playStoreAvailable = playCompatibility.keepsPlayStoreAvailable();
         boolean allowlistConfigured = AllowedAppsStore.isAllowlistConfigured(context);
         AllowedAppsStore.ProtectionMode mode = AllowedAppsStore.getProtectionMode(context);
@@ -689,6 +702,9 @@ public final class LockdownPolicyController {
         }
         if (webViewProvider != null) {
             packageNames.add(webViewProvider);
+        }
+        if (homeFilter.enabled()) {
+            packageNames.add(homeFilter.config().vpnPackage());
         }
 
         for (String packageName : packageNames) {
@@ -763,8 +779,11 @@ public final class LockdownPolicyController {
             if (packageName.equals(kioskTarget)) {
                 shouldBlock = false;
             }
+            boolean homeFilterVpn = homeFilter.keepsVpnVisible(packageName);
+            shouldBlock = homeFilter.packageShouldBeHidden(packageName, shouldBlock);
 
             boolean criticalPackage = shouldBlock
+                    || homeFilterVpn
                     || managed.contains(packageName)
                     || allowed.contains(packageName)
                     || packageName.equals(kioskTarget)
@@ -862,17 +881,19 @@ public final class LockdownPolicyController {
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            HomeFilterPolicy.Settings homeFilter,
             List<String> errors
     ) {
         String provider = resolveWebViewProvider(context.getPackageManager());
         if (provider == null || !LockdownPackages.ALWAYS_BLOCKED.contains(provider)) {
             return;
         }
+        boolean suspend = !homeFilter.keepsVpnVisible(provider);
         try {
-            String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, true);
+            String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, suspend);
             if (failed.length > 0) {
                 errors.add("browser-suspension-failed");
-            } else if (!dpm.isPackageSuspended(admin, provider)) {
+            } else if (dpm.isPackageSuspended(admin, provider) != suspend) {
                 errors.add("browser-suspension-unverified");
             }
         } catch (PackageManager.NameNotFoundException exception) {

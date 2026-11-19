@@ -15,10 +15,10 @@ import java.util.regex.Pattern;
 
 /** Reads one bounded public CA certificate. Stores its canonical DER encoding. */
 public final class HomeFilterCertificate {
-    private static final int MAX_BYTES = 64 * 1024;
+    static final int MAX_BYTES = 64 * 1024;
     private static final Pattern PEM = Pattern.compile(
-            "\\s*-----BEGIN CERTIFICATE-----\\s+([A-Za-z0-9+/=\\s]+)"
-                    + "-----END CERTIFICATE-----\\s*");
+            "-----BEGIN CERTIFICATE-----\\s++([A-Za-z0-9+/=\\s]++)"
+                    + "-----END CERTIFICATE-----");
 
     private HomeFilterCertificate() {}
 
@@ -37,7 +37,7 @@ public final class HomeFilterCertificate {
             throw new CertificateException("Empty certificate file");
         }
         if (certificate[0] != 0x30) {
-            Matcher pem = PEM.matcher(new String(certificate, StandardCharsets.US_ASCII));
+            Matcher pem = PEM.matcher(new String(certificate, StandardCharsets.US_ASCII).trim());
             if (!pem.matches()) {
                 throw new CertificateException("Expected a single PEM or DER certificate");
             }
