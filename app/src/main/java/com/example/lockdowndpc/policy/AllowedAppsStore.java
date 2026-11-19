@@ -315,6 +315,17 @@ public final class AllowedAppsStore {
         }
     }
 
+    public static Runnable watchPolicyState(Context context, Runnable listener) {
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.OnSharedPreferenceChangeListener attached = (ignored, key) -> {
+            if (KEY_POLICY_STATE.equals(key)) {
+                listener.run();
+            }
+        };
+        preferences.registerOnSharedPreferenceChangeListener(attached);
+        return () -> preferences.unregisterOnSharedPreferenceChangeListener(attached);
+    }
+
     public static String getPolicyError(Context context) {
         return prefs(context).getString(KEY_POLICY_ERROR, "");
     }
@@ -349,8 +360,12 @@ public final class AllowedAppsStore {
     }
 
     public static void markApplyFailed(Context context, String error) {
+        markApplyFailed(context, error, true);
+    }
+
+    static void markApplyFailed(Context context, String error, boolean protectionEnabled) {
         prefs(context).edit()
-                .putBoolean(KEY_ENABLED, true)
+                .putBoolean(KEY_ENABLED, protectionEnabled)
                 .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())
                 .putString(KEY_POLICY_ERROR, error)
                 .commit();

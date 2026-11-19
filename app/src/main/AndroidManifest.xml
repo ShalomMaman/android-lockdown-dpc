@@ -45,6 +45,10 @@
             android:name=".ui.SystemPolicyActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ui.HomeFilterActivity"
+            android:exported="false" />
+
         <!--
             Management identity console. Not exported for the same reason: it
             writes the signing-certificate pins that decide which package is

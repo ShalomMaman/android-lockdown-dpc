@@ -8,6 +8,7 @@ import android.content.IntentFilter;
 import android.os.Build;
 import android.util.Log;
 
+import com.example.lockdowndpc.policy.HomeFilterController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.updates.UpdateScheduler;
 
@@ -24,14 +25,19 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
     private final BroadcastReceiver packageReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
-            if (!Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())
-                    || intent.getData() == null) {
+            if (intent.getData() == null) {
                 return;
             }
             String packageName = intent.getData().getSchemeSpecificPart();
+            if (!Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())
+                    && (!Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction())
+                        || intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
+                        || !HomeFilterController.isConfiguredVpn(context, packageName))) {
+                return;
+            }
             PolicyReconciliationCoordinator.reconcileAsync(
                     context,
-                    "package-added:" + packageName,
+                    intent.getAction() + ":" + packageName,
                     null
             );
         }
@@ -43,6 +49,7 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
     public void onCreate() {
         super.onCreate();
         IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
+        filter.addAction(Intent.ACTION_PACKAGE_REMOVED);
         filter.addDataScheme("package");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(packageReceiver, filter, Context.RECEIVER_NOT_EXPORTED);

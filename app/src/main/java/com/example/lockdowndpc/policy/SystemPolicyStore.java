@@ -92,10 +92,10 @@ public final class SystemPolicyStore {
      * would restore a device to a policy weaker than the one it is running.
      */
     public static Map<SystemPolicyControl, Boolean> baseChoices(Context context) {
-        return PlayStoreCompatibility.baseChoices(
-                PlayStoreCompatibilityStore.isEnabled(context),
-                explicitChoices(context)
-        );
+        Map<SystemPolicyControl, Boolean> choices = PlayStoreCompatibility.baseChoices(
+                PlayStoreCompatibilityStore.isEnabled(context), explicitChoices(context));
+        return HomeFilterController.isEnabled(context)
+                ? HomeFilterPolicy.requireControls(choices) : choices;
     }
 
     /** What a control resolves to right now: the base choice, or the profile default. */
