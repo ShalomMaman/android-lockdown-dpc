@@ -80,6 +80,8 @@ public final class HomeFilterPolicy {
                     "LoginURL", loginUrl,
                     "ExitNodeID", exitNodeId,
                     "ExitNodesPicker", "hide",
+                    // Local-network routes would skip the exit node (e.g. a proxy on another LAN device).
+                    "ExitNodeAllowLANAccess", "never",
                     "ManagedByOrganizationName", organizationName);
         }
     }

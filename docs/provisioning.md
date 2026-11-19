@@ -244,7 +244,7 @@ with lockdown and no exemptions, managed configuration, opportunistic
 (automatic) Private DNS, recommended PAC URL, selected CA when configured, and
 device restrictions. The [Tailscale Android managed configuration schema] and
 [Tailscale system policies] specify `ForceEnabled=true`, `Tailnet=required:<ID>`,
-`LoginURL`, `ExitNodeID`, `ExitNodesPicker=hide`, and
+`LoginURL`, `ExitNodeID`, `ExitNodesPicker=hide`, `ExitNodeAllowLANAccess=never`, and
 `ManagedByOrganizationName`. Android confirms it stored these values. Verify
 that the installed client applies them. The Android schema currently has no
 published sign-out or account-switching restriction. Check these paths with the

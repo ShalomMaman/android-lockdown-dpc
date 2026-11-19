@@ -223,8 +223,11 @@ public class HomeFilterPolicyTest {
         assertTrue(HomeFilterPolicy.reconcile(REQUEST, 35, device).androidSettingsConfirmed(REQUEST));
         assertEquals(Map.of("ForceEnabled", true, "Tailnet", "required:T123456CNTRL",
                 "LoginURL", HomeFilterPolicy.DEFAULT_LOGIN_URL, "ExitNodeID", "n123456CNTRL",
-                "ExitNodesPicker", "hide", "ManagedByOrganizationName", "Family", "OtherPolicy",
-                "untouched"), device.managed);
+                "ExitNodesPicker", "hide", "ExitNodeAllowLANAccess", "never",
+                "ManagedByOrganizationName", "Family", "OtherPolicy", "untouched"), device.managed);
+        device.managed.put("ExitNodeAllowLANAccess", "user-decides");
+        assertEquals(UNCONFIRMED, HomeFilterPolicy.inspect(REQUEST, 35, device).vpn());
+        assertTrue(HomeFilterPolicy.reconcile(REQUEST, 35, device).androidSettingsConfirmed(REQUEST));
         device.managed.put("ForceEnabled", "true");
         assertEquals(UNCONFIRMED, HomeFilterPolicy.inspect(REQUEST, 35, device).vpn());
         device.ignoreManagedConfig = true;
