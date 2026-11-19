@@ -315,6 +315,17 @@ public final class AllowedAppsStore {
         }
     }
 
+    public static Runnable watchPolicyState(Context context, Runnable listener) {
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.OnSharedPreferenceChangeListener attached = (ignored, key) -> {
+            if (KEY_POLICY_STATE.equals(key)) {
+                listener.run();
+            }
+        };
+        preferences.registerOnSharedPreferenceChangeListener(attached);
+        return () -> preferences.unregisterOnSharedPreferenceChangeListener(attached);
+    }
+
     public static String getPolicyError(Context context) {
         return prefs(context).getString(KEY_POLICY_ERROR, "");
     }

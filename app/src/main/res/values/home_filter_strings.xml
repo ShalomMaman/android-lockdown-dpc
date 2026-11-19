@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="home_filter_title">Home filter network</string>
+    <string name="home_filter_row">Manage the family VPN, proxy and certificate</string>
+    <string name="home_filter_description">Android can confirm these settings. Test separately that traffic reaches the home filter and that direct internet access is blocked.</string>
+    <string name="home_filter_vpn_package">VPN app package</string>
+    <string name="home_filter_pac_url">Proxy configuration URL (PAC)</string>
+    <string name="home_filter_vpn_status">VPN lockdown</string>
+    <string name="home_filter_proxy_status">Recommended proxy</string>
+    <string name="home_filter_ca_status">Filter certificate</string>
+    <string name="home_filter_ca_removal_status">Certificate removal</string>
+    <string name="home_filter_restrictions">Device restrictions</string>
+    <string name="home_filter_choose_ca">Choose a certificate file</string>
+    <string name="home_filter_ca_selected">Certificate selected</string>
+    <string name="home_filter_clear_selection">Clear selection</string>
+    <string name="home_filter_enable">Enable home filter</string>
+    <string name="home_filter_disable">Turn off home filter</string>
+    <string name="home_filter_install_ca">Install certificate</string>
+    <string name="home_filter_remove_ca">Remove certificate</string>
+    <string name="home_filter_retry">Reapply and check</string>
+    <string name="home_filter_confirm_enable">Set the VPN to always on and block traffic when it disconnects. Keep the PIN available. Internet access may stop until the VPN works. Install only a certificate from the family filter you trust.</string>
+    <string name="home_filter_confirm_disable">Remove the VPN and proxy settings from this profile, and remove the selected certificate from Android. Other Device Guard controls still follow their own settings.</string>
+    <string name="home_filter_confirm_ca">Install only the public CA certificate from the family filter you trust. Apps that trust this certificate can have their encrypted traffic inspected by that filter.</string>
+    <string name="home_filter_confirm_remove_ca">Remove the selected certificate from Android. Apps that need it to use the filter may lose access.</string>
+    <string name="home_filter_invalid_settings">Enter a valid VPN package and an HTTP or HTTPS address for the PAC file.</string>
+    <string name="home_filter_invalid_ca">Choose a file with one public CA certificate in PEM or DER format.</string>
+    <string name="home_filter_picker_unavailable">Android could not open the file picker.</string>
+    <string name="home_filter_operation_failed">Could not complete the home filter operation.</string>
+    <string name="home_filter_checking">Checking home filter settings</string>
+    <string name="home_filter_confirmed">Home filter settings confirmed</string>
+    <string name="home_filter_inactive">Home filter protection is not active</string>
+    <string name="home_filter_removal_pending">Home filter removal is pending</string>
+    <string name="home_filter_off">Home filter is off</string>
+    <string name="home_filter_readback_confirmed">Confirmed</string>
+    <string name="home_filter_readback_unconfirmed">Unconfirmed</string>
+    <string name="home_filter_readback_not_requested">Not requested</string>
+    <string name="home_filter_readback_refused">Android refused the change</string>
+    <string name="home_filter_vpn_missing">VPN app is missing</string>
+    <string name="home_filter_vpn_hidden">VPN app is hidden or disabled</string>
+    <string name="home_filter_vpn_unverified">Android did not confirm home filter VPN lockdown.</string>
+    <string name="home_filter_control_required">Required while the home filter is enabled.</string>
+    <string name="home_filter_vpn_untrusted">The VPN app signature does not match the approved signer</string>
+    <string name="home_filter_restrictions_removal">Restore device restrictions</string>
+</resources>

@@ -78,6 +78,7 @@ public final class LockdownPolicyController {
         int[] packageCounts = applyPackagePolicy(
                 context, dpm, admin, trustedManagement, playCompatibility, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
+        HomeFilterController.reconcile(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             AllowedAppsStore.markApplySucceeded(context);
@@ -169,6 +170,7 @@ public final class LockdownPolicyController {
         // keeps its lock task allowlist and re-registers the HOME preference that
         // clearPackagePersistentPreferredActivities() above removed.
         KioskController.reconcile(context, dpm, admin, errors);
+        HomeFilterController.reconcile(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             AllowedAppsStore.markPauseSucceeded(context);
@@ -325,7 +327,8 @@ public final class LockdownPolicyController {
     ) {
         SystemPolicyReport report = SystemPolicyEnforcer.release(
                 Build.VERSION.SDK_INT,
-                new SystemPolicyDeviceGateway(dpm, admin)
+                new SystemPolicyDeviceGateway(dpm, admin),
+                HomeFilterController.isEnabled(context) ? HomeFilterPolicy.REQUIRED_CONTROLS : Set.of()
         );
         recordSystemPolicy(context, report);
         for (SystemPolicyControlStatus failure : report.failures()) {
@@ -454,10 +457,7 @@ public final class LockdownPolicyController {
             if (!isInstalled(context.getPackageManager(), record.packageName())) {
                 continue;
             }
-            LockdownPackages.SignerVerdict verdict = LockdownPackages.verifySigner(
-                    record,
-                    signingCertificateDigests(context, record.packageName())
-            );
+            LockdownPackages.SignerVerdict verdict = managementSignerVerdict(context, record);
             if (LockdownPackages.grantsManagementTrust(verdict)) {
                 trusted.add(record.packageName());
             } else {
@@ -467,6 +467,12 @@ public final class LockdownPolicyController {
             }
         }
         return trusted;
+    }
+
+    static LockdownPackages.SignerVerdict managementSignerVerdict(
+            Context context, LockdownPackages.ManagementPackage record) {
+        return LockdownPackages.verifySigner(
+                record, signingCertificateDigests(context, record.packageName()));
     }
 
     private static Set<String> signingCertificateDigests(Context context, String packageName) {

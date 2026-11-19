@@ -207,6 +207,64 @@ passphrase, the administrator PIN or a recovery code.
 > rehearsal as the test that decides it. The ADB path in Runbook B does not use
 > those intents and is unaffected.
 
+## Home filter
+
+1. Factory reset the managed device and complete **Runbook A** to enrol Device
+   Guard as Device Owner. Verify the enrolled device has only the intended user
+   and set the Device Guard administrator PIN. The QR hardware validation gap
+   noted in Runbook A still applies.
+2. Before enabling the filter, install the official Tailscale app
+   (`com.tailscale.ipn`), sign in to the family tailnet, and verify the device
+   can reach the family proxy over it. Do this before enforcing the app and
+   account restrictions. Use **Management identity** to verify and pin the
+   Tailscale signer from a trusted source when using Device Guard app
+   protection. If you use a different VPN package, ensure the existing app
+   allowlist and kiosk configuration let the VPN run.
+3. In Device Guard, unlock with the PIN and open **Home filter network**. Keep
+   the default VPN package or enter the approved package. Enter the HTTP or
+   HTTPS URL of the PAC file that points to the family mitmproxy service. Use
+   HTTPS with a certificate the device already trusts to protect the PAC in
+   transit. Choose the filter's **public** CA certificate as a single PEM or
+   DER file. Never transfer the proxy's private key to the device. Select
+   **Enable home filter**.
+4. Verify Android confirms the intended VPN package, lockdown with no app
+   exemptions, the recommended PAC URL, the selected CA when requested, and
+   the device restrictions. On Android 8 and 9 the VPN lockdown remains
+   unconfirmed because Android cannot read it back. A missing or hidden VPN
+   app cannot produce an active result. Reboot the device and check again.
+5. Verify traffic reaches the family filter, including from mobile data and
+   another Wi-Fi network. Disconnect the VPN and confirm ordinary apps lose
+   network access. With the VPN running, test a direct connection from an app
+   that ignores the proxy. Verify the family gateway denies unauthorized
+   direct traffic, including alternate DNS and IPv6 routes, before relying on
+   the setup.
+
+The profile keeps its six device restrictions in force when Device Guard's
+app blocking is paused. **Remove certificate** removes only the selected CA
+from the Android user trust store. **Turn off home filter** withdraws that
+profile's VPN and proxy settings and removes its selected CA. Android keeps
+any restrictions still requested by the ordinary system policy. Keep the PIN
+available for local recovery if the VPN or proxy cannot be reached.
+
+Android supplies a *recommended* proxy. Apps may ignore it, so a reachable
+PAC and a confirmed lockdown setting alone do not prove traffic goes through
+mitmproxy. For bypass resistance, use a full-tunnel family gateway that limits
+device egress to the approved proxy and other explicitly required services.
+Keep app split tunneling and direct LAN access disabled, avoid `DIRECT` in the
+PAC, and prevent users from changing the VPN application's routing settings.
+The Device Guard screen confirms Android settings and does not test that
+network configuration. Android may exempt system traffic from lockdown.
+
+Apps that pin certificates or ignore user CAs cannot have their encrypted
+traffic inspected. Apps targeting Android 7 or later ignore user-added CAs by
+default unless they opt in. For those apps, the family filter can only allow
+or deny their domains when traffic passes through the family gateway and the
+domain is identifiable.
+
+See [Android VPN management](https://developer.android.com/work/dpc/network-telephony.html),
+[Android CA trust defaults](https://developer.android.com/privacy-and-security/security-config),
+and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
+
 ## Runbook B — ADB fallback
 
 Use when there is no camera path, when the OEM wizard has no QR entry point, or

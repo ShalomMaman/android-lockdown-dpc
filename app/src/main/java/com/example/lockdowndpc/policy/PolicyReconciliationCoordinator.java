@@ -104,6 +104,9 @@ public final class PolicyReconciliationCoordinator {
         submit(() -> runGuardedVerified(
                 () -> {
                     if (!AllowedAppsStore.isProtectionEnabled(appContext)) {
+                        if (HomeFilterController.needsReconciliation(appContext)) {
+                            LockdownPolicyController.pause(appContext);
+                        }
                         Log.i(TAG, "Skipping reconciliation while protection is paused: " + reason);
                         return false;
                     }

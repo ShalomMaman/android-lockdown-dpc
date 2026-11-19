@@ -3,6 +3,7 @@ package com.example.lockdowndpc.policy;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Sends the requested system policy controls and reports what the platform
@@ -63,9 +64,15 @@ public final class SystemPolicyEnforcer {
      * would leave a restriction in force that no screen admits to.
      */
     public static SystemPolicyReport release(int sdkInt, SystemPolicyGateway gateway) {
+        return release(sdkInt, gateway, Set.of());
+    }
+
+    /** Releases the ordinary app policy while keeping independently requested controls. */
+    static SystemPolicyReport release(int sdkInt, SystemPolicyGateway gateway,
+                                      Set<SystemPolicyControl> retained) {
         List<SystemPolicyControlStatus> statuses = new ArrayList<>();
         for (SystemPolicyControl control : SystemPolicyControl.values()) {
-            statuses.add(applyOne(control, sdkInt, false, gateway));
+            statuses.add(applyOne(control, sdkInt, retained.contains(control), gateway));
         }
         return new SystemPolicyReport(statuses);
     }

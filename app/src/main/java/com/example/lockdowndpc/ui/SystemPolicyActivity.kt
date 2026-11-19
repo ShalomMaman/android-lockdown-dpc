@@ -42,6 +42,8 @@ import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
+import com.example.lockdowndpc.policy.HomeFilterController
+import com.example.lockdowndpc.policy.HomeFilterPolicy
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PlayStoreCompatibility
 import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore
@@ -175,6 +177,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
 
     val profile = remember(revision) { SystemPolicyStore.effectiveProfile(context) }
     val protectionEnabled = remember(revision) { AllowedAppsStore.isProtectionEnabled(context) }
+    val homeFilterEnabled = remember(revision) { HomeFilterController.isEnabled(context) }
     val playCompatibilityRequested =
         remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
     val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
@@ -337,6 +340,8 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                                 control,
                                 playCompatibilityRequested,
                             ),
+                            lockedByHomeFilter = homeFilterEnabled &&
+                                control in HomeFilterPolicy.REQUIRED_CONTROLS,
                             showDivider = index > 0,
                             onToggle = { requested ->
                                 pending = PendingChange(control, requested)
@@ -510,6 +515,7 @@ private fun SystemPolicyControlRow(
     supported: Boolean,
     enabled: Boolean,
     lockedByPlayCompatibility: Boolean,
+    lockedByHomeFilter: Boolean,
     showDivider: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
@@ -553,9 +559,12 @@ private fun SystemPolicyControlRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            if (lockedByPlayCompatibility) {
+            if (lockedByPlayCompatibility || lockedByHomeFilter) {
                 Text(
-                    text = stringResource(R.string.system_policy_play_compat_locked_control),
+                    text = stringResource(
+                        if (lockedByHomeFilter) R.string.home_filter_control_required
+                        else R.string.system_policy_play_compat_locked_control,
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -571,7 +580,7 @@ private fun SystemPolicyControlRow(
             // Play compatibility opt-in pins on is different: the next pass would
             // put it straight back, so the switch is disabled and says why rather
             // than accepting a change that cannot survive.
-            enabled = enabled && !lockedByPlayCompatibility,
+            enabled = enabled && !lockedByPlayCompatibility && !lockedByHomeFilter,
         )
     }
     if (!supported) {

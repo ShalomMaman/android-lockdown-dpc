@@ -51,6 +51,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -81,6 +82,7 @@ import com.example.lockdowndpc.kiosk.KioskLabels
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
+import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.security.AdminPinStore
@@ -138,6 +140,9 @@ class MainActivity : AppCompatActivity() {
                     // is the first of two rather than the only one.
                     onOpenSystemPolicy = {
                         startActivity(Intent(this, SystemPolicyActivity::class.java))
+                    },
+                    onOpenHomeFilter = {
+                        startActivity(Intent(this, HomeFilterActivity::class.java))
                     },
                     onOpenMaintenance = {
                         startActivity(Intent(this, MaintenanceActivity::class.java))
@@ -257,6 +262,7 @@ private fun AdminConsole(
     onSecureScreen: (Boolean) -> Unit,
     onOpenAppList: () -> Unit,
     onOpenSystemPolicy: () -> Unit,
+    onOpenHomeFilter: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenManagementIdentity: () -> Unit,
     onOpenHealth: () -> Unit,
@@ -280,7 +286,26 @@ private fun AdminConsole(
     var managementEntries by remember { mutableStateOf(emptyList<ManagementEntry>()) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
-    val status = remember(screen, statusRevision) { readStatus(context) }
+    val status = remember(screen, statusRevision) {
+        val status = readStatus(context)
+        if (screen == ConsoleScreen.ADMIN && status.policyState == AllowedAppsStore.PolicyState.ACTIVE
+            && HomeFilterController.vpnBlocksActiveStatus(context)) {
+            status.copy(
+                policyState = AllowedAppsStore.PolicyState.FAILED,
+                policyError = context.getString(R.string.home_filter_vpn_unverified),
+            )
+        } else {
+            status
+        }
+    }
+    DisposableEffect(context) {
+        val detachFilter = HomeFilterController.watch(context) { statusRevision++ }
+        val detachPolicy = AllowedAppsStore.watchPolicyState(context) { statusRevision++ }
+        onDispose {
+            detachFilter.run()
+            detachPolicy.run()
+        }
+    }
 
     fun showLocked() {
         AdminSession.lock()
@@ -656,6 +681,7 @@ private fun AdminConsole(
                     onOpenSystemPolicy()
                 }
             },
+            onOpenHomeFilter = { if (requireSession()) onOpenHomeFilter() },
             onOpenMaintenance = {
                 if (requireSession()) {
                     AdminSession.extend()
@@ -999,6 +1025,7 @@ private fun AdminScreen(
     onPickMode: () -> Unit,
     onChooseApps: () -> Unit,
     onOpenSystemPolicy: () -> Unit,
+    onOpenHomeFilter: () -> Unit,
     onOpenMaintenance: () -> Unit,
     onOpenManagementIdentity: () -> Unit,
     onOpenHealth: () -> Unit,
@@ -1066,6 +1093,13 @@ private fun AdminScreen(
                 title = stringResource(R.string.admin_system_policy_row),
                 supporting = stringResource(R.string.admin_system_policy_supporting),
                 onClick = onOpenSystemPolicy,
+                showDivider = true,
+            )
+            ActionRow(
+                icon = Icons.Rounded.VpnKey,
+                title = stringResource(R.string.home_filter_title),
+                supporting = stringResource(R.string.home_filter_row),
+                onClick = onOpenHomeFilter,
                 showDivider = true,
             )
             ActionRow(
