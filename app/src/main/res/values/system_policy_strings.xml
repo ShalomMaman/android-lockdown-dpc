@@ -139,7 +139,36 @@
     <string name="system_policy_play_compat_confirm_disable_title">Hide application stores again?</string>
     <string name="system_policy_play_compat_confirm_disable_body">The Google Play Store package is hidden again the next time policy is applied, and applications that need it may stop starting. The installation controls this mode kept on go back to your own saved choices.</string>
 
+
+    <!-- Built-in block exemptions -->
+    <string name="system_policy_section_exemptions">Exemptions from the built-in block</string>
+    <string name="system_policy_exempt_browser_row">Browser through the home filter</string>
+    <string name="system_policy_exempt_browser_choice">Chosen: %1$s</string>
+    <string name="system_policy_exempt_browser_none">No browser. Every browser stays blocked</string>
+    <string name="system_policy_exempt_browser_choose">Choose browser</string>
+    <string name="system_policy_exempt_browser_no_candidates">No supported browser is installed on this device.</string>
+    <string name="system_policy_exempt_browser_body">You can keep one browser available, but only while the home filter is in force. It is available only while Android confirms the home filter settings and, when a filter check is configured, that check has passed. If the home filter is turned off or is not confirmed, the browser is blocked again automatically. While it is available, links and web apps open in it instead of the blocked page. The filter sees only traffic that goes through the home connection. A browser that uses its own secure DNS or ignores the proxy must be restricted at the home gateway. Application stores can never be exempted.</string>
+    <string name="system_policy_exempt_browser_state_off">Off. Every browser stays blocked</string>
+    <string name="system_policy_exempt_browser_state_active">On. The home filter is confirmed and Android confirmed the browser is available</string>
+    <string name="system_policy_exempt_browser_state_unconfirmed">On, but Android has not confirmed the browser is available yet</string>
+    <string name="system_policy_exempt_browser_state_filter_unverified">Chosen, but the home filter settings are not confirmed, so the browser stays blocked</string>
+    <string name="system_policy_exempt_browser_state_canary_unverified">Chosen, but the home filter check has not passed, so the browser stays blocked</string>
+    <string name="system_policy_exempt_browser_state_not_installed">Chosen, but this browser is not installed on this device</string>
+    <string name="system_policy_exempt_browser_state_route_unverified">Chosen, but links could not be routed to this browser, so it stays blocked</string>
+    <string name="system_policy_exempt_state_pending">Saved, not applied yet</string>
+    <string name="system_policy_exempt_social_title">Approved social and messaging applications</string>
+    <string name="system_policy_exempt_social_body">These applications are blocked by the built-in list. Turn one on to keep it available while protection is on. Turning it off blocks it again immediately.</string>
+    <string name="system_policy_exempt_social_none_installed">No built-in social or messaging application is installed on this device.</string>
+    <string name="system_policy_exempt_social_blocked">Blocked by the built-in list</string>
+    <string name="system_policy_exempt_social_confirmed">Allowed. Android confirmed it is available</string>
+    <string name="system_policy_exempt_social_unconfirmed">Allowed, but Android has not confirmed it is available yet</string>
+    <string name="system_policy_exempt_confirm_browser_title">Allow this browser through the home filter?</string>
+    <string name="system_policy_exempt_confirm_browser_body">%1$s will be available only while Android confirms the home filter and, when a filter check is configured, that check has passed. If the home filter is turned off or is not confirmed, the browser is blocked again automatically. Links and web apps open in this browser instead of the blocked page. Every other browser stays blocked.</string>
+    <string name="system_policy_exempt_confirm_social_title">Allow this application?</string>
+    <string name="system_policy_exempt_confirm_social_body">%1$s will no longer be blocked by the built-in social and messaging list and stays available while protection is on. Turning it off later blocks it again immediately.</string>
+
     <!-- Audit -->
+    <string name="audit_builtin_exemption_changed">Built-in block exemption changed: %1$s</string>
     <string name="audit_play_compatibility_changed">Google Play compatibility changed: %1$s</string>
     <string name="audit_system_policy_unverified">System policy not verified: %1$s</string>
     <string name="audit_system_policy_changed">System policy control changed: %1$s</string>

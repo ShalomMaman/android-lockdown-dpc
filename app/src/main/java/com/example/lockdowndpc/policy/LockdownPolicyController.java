@@ -70,17 +70,59 @@ public final class LockdownPolicyController {
             errors.add(PlayStoreCompatibility.INSTALL_LOCK_UNVERIFIED_ERROR);
         }
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
+        // The administrator's exemptions from the built-in catalogues. The
+        // browser half is decided here from a read-only check of the home
+        // filter, so a pass that keeps an exempt browser available never hides
+        // and re-shows it; the filter's own reconcile below has the final word.
+        BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
+        ExemptBrowserGate browserGate = ExemptBrowserGate.of(context, exemptions, homeFilter);
+        String exemptBrowser = browserGate.exemptBrowser(exemptions.browserPackage() != null
+                && HomeFilterController.androidSettingsConfirmedNow(context, dpm, admin, homeFilter));
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
-        // configureBlockedBrowser below re-registers the managed-filtering ones.
+        // routeLinks below re-registers the managed-filtering ones.
         KioskController.reconcile(context, dpm, admin, errors);
-        setBlockedBrowserComponentEnabled(context, true, errors);
-        configureBlockedBrowser(context, dpm, admin, errors);
+        if (exemptBrowser == null) {
+            routeLinks(context, dpm, admin, null, errors);
+        }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
-        int[] packageCounts = applyPackagePolicy(
-                context, dpm, admin, trustedManagement, playCompatibility, homeFilter, errors);
-        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
-        HomeFilterController.reconcile(context, dpm, admin, errors);
+        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
+                playCompatibility, homeFilter, exemptions, exemptBrowser, errors);
+        if (exemptBrowser != null) {
+            // Routed only after the package pass: a hidden browser has no
+            // activity to resolve. A browser that cannot take links is not kept.
+            String routed = routeLinks(context, dpm, admin, exemptBrowser, errors);
+            if (routed == null) {
+                blockBrowserAgain(context, dpm, admin, exemptBrowser, errors);
+                exemptBrowser = null;
+                browserGate = browserGate.withRouteFailed();
+            }
+        }
+        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, exemptBrowser, errors);
+        boolean filterConfirmed = HomeFilterController.reconcile(context, dpm, admin, errors);
+        String finalExemptBrowser = browserGate.exemptBrowser(filterConfirmed);
+        if (exemptBrowser != null && finalExemptBrowser == null) {
+            // The filter read-back disagreed with the earlier check: fail closed.
+            blockBrowserAgain(context, dpm, admin, exemptBrowser, errors);
+            routeLinks(context, dpm, admin, null, errors);
+            suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, null, errors);
+            errors.add(BuiltInBlockExemptions.BROWSER_FILTER_UNVERIFIED_ERROR);
+        } else if (exemptBrowser == null && finalExemptBrowser != null) {
+            // The filter was confirmed by this pass's own reconcile, for example
+            // right after it was enabled. Make the browser available now rather
+            // than waiting for the next pass.
+            setPackageHidden(dpm, admin, finalExemptBrowser, false, errors);
+            if (routeLinks(context, dpm, admin, finalExemptBrowser, errors) == null) {
+                blockBrowserAgain(context, dpm, admin, finalExemptBrowser, errors);
+                finalExemptBrowser = null;
+                browserGate = browserGate.withRouteFailed();
+            } else {
+                suspendBrowserBackedWebViewIfNeeded(
+                        context, dpm, admin, homeFilter, finalExemptBrowser, errors);
+            }
+        }
+        recordExemptionReadback(context, dpm, admin, exemptions,
+                browserGate.state(filterConfirmed), finalExemptBrowser);
         boolean verified = errors.isEmpty();
         if (verified) {
             if (homeFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
@@ -123,6 +165,8 @@ public final class LockdownPolicyController {
         } catch (RuntimeException exception) {
             errors.add("link-block-clear:" + exception.getClass().getSimpleName());
         }
+        // An exempt browser's link routing is released with everything else.
+        clearBrowserRouting(dpm, admin, null, errors);
         setBlockedBrowserComponentEnabled(context, false, errors);
 
         Set<String> packagesToShow = new LinkedHashSet<>();
@@ -373,13 +417,102 @@ public final class LockdownPolicyController {
         SystemPolicyStore.saveReport(context, report);
     }
 
-    private static void configureBlockedBrowser(
+    /**
+     * Routes {@code http} and {@code https} links and reads the routing back.
+     *
+     * <p>With no exempt browser, links go to {@link BlockedBrowserActivity}, as
+     * they always have. With one, they go to that browser's view activity and
+     * the blocked-browser component is disabled, so Android's persistent
+     * preference resolves to the browser deterministically and a Trusted Web
+     * Activity backed by it opens in it. Routing to any other catalogue browser
+     * that an earlier exemption left behind is always cleared.
+     *
+     * @return the browser links were verified to reach, or {@code null} when
+     *         they go to the blocked-browser screen
+     */
+    private static String routeLinks(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            String exemptBrowser,
             List<String> errors
     ) {
-        ComponentName blockedActivity = new ComponentName(admin.getPackageName(), BlockedBrowserActivity.class.getName());
+        clearBrowserRouting(dpm, admin, exemptBrowser, errors);
+        if (BuiltInBlockExemptions.route(null, exemptBrowser)
+                == BuiltInBlockExemptions.LinkRoute.EXEMPT_BROWSER) {
+            ComponentName target = resolveBrowserViewActivity(context.getPackageManager(), exemptBrowser);
+            if (target != null) {
+                setBlockedBrowserComponentEnabled(context, false, errors);
+                ArrayList<String> routeErrors = new ArrayList<>();
+                configureLinkHandler(context, dpm, admin, target, routeErrors);
+                if (routeErrors.isEmpty()) {
+                    return exemptBrowser;
+                }
+                errors.addAll(routeErrors);
+            }
+            errors.add(BuiltInBlockExemptions.BROWSER_ROUTE_UNRESOLVED_ERROR + ":" + exemptBrowser);
+            clearBrowserRouting(dpm, admin, null, errors);
+        }
+        setBlockedBrowserComponentEnabled(context, true, errors);
+        configureLinkHandler(context, dpm, admin,
+                new ComponentName(admin.getPackageName(), BlockedBrowserActivity.class.getName()),
+                errors);
+        return null;
+    }
+
+    /** Removes link routing to every catalogue browser except {@code keep}. */
+    private static void clearBrowserRouting(
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            String keep,
+            List<String> errors
+    ) {
+        for (String browser : BuiltInBlockExemptions.FILTERABLE_BROWSERS) {
+            if (browser.equals(keep)) {
+                continue;
+            }
+            try {
+                dpm.clearPackagePersistentPreferredActivities(admin, browser);
+            } catch (RuntimeException exception) {
+                errors.add("browser-route-clear:" + browser + ":"
+                        + exception.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /** The browser's own activity for an https link, or {@code null}. */
+    private static ComponentName resolveBrowserViewActivity(PackageManager pm, String browser) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://policy-check.invalid"));
+        intent.addCategory(Intent.CATEGORY_BROWSABLE);
+        intent.setPackage(browser);
+        List<android.content.pm.ResolveInfo> matches;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                matches = pm.queryIntentActivities(
+                        intent,
+                        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY));
+            } else {
+                //noinspection deprecation
+                matches = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            }
+        } catch (RuntimeException exception) {
+            return null;
+        }
+        for (android.content.pm.ResolveInfo match : matches) {
+            if (match.activityInfo != null && browser.equals(match.activityInfo.packageName)) {
+                return new ComponentName(match.activityInfo.packageName, match.activityInfo.name);
+            }
+        }
+        return null;
+    }
+
+    private static void configureLinkHandler(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            ComponentName target,
+            List<String> errors
+    ) {
         // Android can apply this policy asynchronously. Register both filters
         // first, then verify their effective resolution with a short bounded
         // retry. A physical Android 13 OEM build also delayed resolver state
@@ -393,7 +526,7 @@ public final class LockdownPolicyController {
                 filter.addCategory(Intent.CATEGORY_DEFAULT);
                 filter.addCategory(Intent.CATEGORY_BROWSABLE);
                 filter.addDataScheme(scheme);
-                dpm.addPersistentPreferredActivity(admin, filter, blockedActivity);
+                dpm.addPersistentPreferredActivity(admin, filter, target);
             } catch (RuntimeException exception) {
                 errors.add("link-filter:" + scheme + ":" + exception.getClass().getSimpleName());
             }
@@ -402,7 +535,7 @@ public final class LockdownPolicyController {
             try {
                 Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse(scheme + "://policy-check.invalid"));
                 probe.addCategory(Intent.CATEGORY_BROWSABLE);
-                if (!eventuallyResolvesTo(context.getPackageManager(), probe, blockedActivity)) {
+                if (!eventuallyResolvesTo(context.getPackageManager(), probe, target)) {
                     errors.add("link-filter-target-unverified:" + scheme);
                 }
             } catch (RuntimeException exception) {
@@ -631,6 +764,8 @@ public final class LockdownPolicyController {
             Set<String> trustedManagement,
             PlayStoreCompatibility.State playCompatibility,
             HomeFilterPolicy.Settings homeFilter,
+            BuiltInBlockExemptions.Settings exemptions,
+            String exemptBrowser,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -706,6 +841,10 @@ public final class LockdownPolicyController {
         if (homeFilter.enabled()) {
             packageNames.add(homeFilter.config().vpnPackage());
         }
+        packageNames.addAll(exemptions.socialExemptions());
+        if (exemptBrowser != null) {
+            packageNames.add(exemptBrowser);
+        }
 
         for (String packageName : packageNames) {
             if (packageName.equals(context.getPackageName())) {
@@ -743,6 +882,16 @@ public final class LockdownPolicyController {
             // both, so an available Store is available to dependent applications
             // rather than added to a contained device's surface.
             if (PlayStoreCompatibility.keepsAvailable(packageName, playStoreAvailable)) {
+                shouldBlock = false;
+            }
+
+            // Administrator exemptions from the built-in catalogues: one browser,
+            // only while the home filter is verified, and listed social or
+            // messaging applications. Never an application store. Kiosk
+            // containment below and the lock-task allowlist are unaffected.
+            boolean exempted = BuiltInBlockExemptions.keepsAvailable(
+                    packageName, exemptions, exemptBrowser);
+            if (exempted) {
                 shouldBlock = false;
             }
 
@@ -796,7 +945,8 @@ public final class LockdownPolicyController {
                     // Without this the exception would be inert: a package whose
                     // only reason to be touched is that it must be *unhidden*
                     // fails every other criticality test and is skipped.
-                    || PlayStoreCompatibility.keepsAvailable(packageName, playStoreAvailable);
+                    || PlayStoreCompatibility.keepsAvailable(packageName, playStoreAvailable)
+                    || exempted;
             if (!criticalPackage || !isInstalled(pm, packageName)) {
                 continue;
             }
@@ -882,13 +1032,16 @@ public final class LockdownPolicyController {
             DevicePolicyManager dpm,
             ComponentName admin,
             HomeFilterPolicy.Settings homeFilter,
+            String exemptBrowser,
             List<String> errors
     ) {
         String provider = resolveWebViewProvider(context.getPackageManager());
         if (provider == null || !LockdownPackages.ALWAYS_BLOCKED.contains(provider)) {
             return;
         }
-        boolean suspend = !homeFilter.keepsVpnVisible(provider);
+        // The exempt browser is the browser this device uses, so it must run.
+        boolean suspend = !homeFilter.keepsVpnVisible(provider)
+                && !BuiltInBlockExemptions.keepsWebViewProviderUnsuspended(provider, exemptBrowser);
         try {
             String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, suspend);
             if (failed.length > 0) {
@@ -929,6 +1082,127 @@ public final class LockdownPolicyController {
             } catch (RuntimeException exception) {
                 errors.add("webview-release:" + exception.getClass().getSimpleName());
             }
+        }
+    }
+
+    /**
+     * Hides a browser that had been left available in this pass. The active
+     * WebView provider is never hidden — the suspension pass handles it — for
+     * the same reason the package pass never hides it.
+     */
+    private static void blockBrowserAgain(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            String browser,
+            List<String> errors
+    ) {
+        if (browser.equals(resolveWebViewProvider(context.getPackageManager()))) {
+            return;
+        }
+        setPackageHidden(dpm, admin, browser, true, errors);
+    }
+
+    private static void setPackageHidden(
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            String packageName,
+            boolean hide,
+            List<String> errors
+    ) {
+        try {
+            boolean wasHidden = dpm.isApplicationHidden(admin, packageName);
+            boolean updated = dpm.setApplicationHidden(admin, packageName, hide);
+            boolean hidden = dpm.isApplicationHidden(admin, packageName);
+            if (!updated && wasHidden != hide) {
+                errors.add("package-policy-update-rejected:" + packageName);
+            } else if (hidden != hide) {
+                errors.add("package-policy-state-mismatch:" + packageName);
+            }
+        } catch (RuntimeException exception) {
+            errors.add("package-policy:" + packageName + ":" + exception.getClass().getSimpleName());
+        }
+    }
+
+    /**
+     * Reads back from Android whether each exempt package is actually available
+     * — neither hidden nor suspended — and stores it as the console's evidence.
+     */
+    private static void recordExemptionReadback(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            BuiltInBlockExemptions.Settings exemptions,
+            BuiltInBlockExemptions.BrowserState browserState,
+            String exemptBrowser
+    ) {
+        PackageManager pm = context.getPackageManager();
+        boolean browserAvailable = exemptBrowser != null && isAvailable(pm, dpm, admin, exemptBrowser);
+        LinkedHashSet<String> socialAvailable = new LinkedHashSet<>();
+        for (String packageName : exemptions.socialExemptions()) {
+            if (isAvailable(pm, dpm, admin, packageName)) {
+                socialAvailable.add(packageName);
+            }
+        }
+        BuiltInBlockExemptionsStore.saveReadback(context, browserState, browserAvailable, socialAvailable);
+    }
+
+    private static boolean isAvailable(
+            PackageManager pm,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            String packageName
+    ) {
+        if (!isInstalled(pm, packageName)) {
+            return false;
+        }
+        try {
+            return !dpm.isApplicationHidden(admin, packageName)
+                    && !dpm.isPackageSuspended(admin, packageName);
+        } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /** The browser half of the exemptions, resolved against this pass's evidence. */
+    private record ExemptBrowserGate(
+            BuiltInBlockExemptions.Settings settings,
+            boolean browserInstalled,
+            boolean canaryConfigured,
+            boolean canaryPassed,
+            boolean routeFailed
+    ) {
+        static ExemptBrowserGate of(
+                Context context,
+                BuiltInBlockExemptions.Settings settings,
+                HomeFilterPolicy.Settings homeFilter
+        ) {
+            String browser = settings.browserPackage();
+            HomeFilterPolicy.Canary canary = homeFilter.configured() ? homeFilter.config().canary() : null;
+            return new ExemptBrowserGate(
+                    settings,
+                    browser != null && isInstalled(context.getPackageManager(), browser),
+                    canary != null,
+                    BuiltInBlockExemptionsStore.canaryPassed(context, canary),
+                    false);
+        }
+
+        ExemptBrowserGate withRouteFailed() {
+            return new ExemptBrowserGate(settings, browserInstalled, canaryConfigured, canaryPassed, true);
+        }
+
+        BuiltInBlockExemptions.BrowserState state(boolean androidSettingsConfirmed) {
+            BuiltInBlockExemptions.BrowserState state = BuiltInBlockExemptions.browserState(
+                    settings, browserInstalled,
+                    new BuiltInBlockExemptions.FilterEvidence(
+                            androidSettingsConfirmed, canaryConfigured, canaryPassed));
+            return routeFailed && state.browserAvailable()
+                    ? BuiltInBlockExemptions.BrowserState.LINK_ROUTE_UNVERIFIED
+                    : state;
+        }
+
+        String exemptBrowser(boolean androidSettingsConfirmed) {
+            return BuiltInBlockExemptions.exemptBrowser(settings, state(androidSettingsConfirmed));
         }
     }
 

@@ -38,7 +38,11 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.BuiltInBlockExemptionsStore
 import com.example.lockdowndpc.policy.HomeFilterCertificate
+import com.example.lockdowndpc.policy.LockdownPolicyController
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
 import com.example.lockdowndpc.policy.HomeFilterProbe
@@ -191,7 +195,12 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                     val result = withContext(Dispatchers.IO) { HomeFilterProbe.check(canary) }
                     val fresh = withContext(Dispatchers.IO) { HomeFilterController.read(context) }
                     snapshot = fresh
-                    if (fresh.settings() == android.settings()) probe = result
+                    if (fresh.settings() == android.settings()) {
+                        probe = result
+                        withContext(Dispatchers.IO) {
+                            recordCanaryForBrowserExemption(context, canary, result)
+                        }
+                    }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -404,4 +413,29 @@ private fun homeFilterState(state: HomeFilterPolicy.State): Int = when (state) {
     HomeFilterPolicy.State.HIDDEN_VPN -> R.string.home_filter_vpn_hidden
     HomeFilterPolicy.State.UNTRUSTED_VPN -> R.string.home_filter_vpn_untrusted
     HomeFilterPolicy.State.REFUSED -> R.string.home_filter_readback_refused
+}
+
+/**
+ * Records a canary result as the evidence the browser exemption depends on.
+ *
+ * When the result flips the exemption's eligibility, policy is applied straight
+ * away: a failing check blocks an exempt browser again without waiting for the
+ * next reconciliation, and a passing one makes it available.
+ */
+private fun recordCanaryForBrowserExemption(
+    context: android.content.Context,
+    canary: HomeFilterPolicy.Canary,
+    result: HomeFilterPolicy.ProbeState,
+) {
+    val passed = result == HomeFilterPolicy.ProbeState.PASSED
+    val before = BuiltInBlockExemptionsStore.canaryPassed(context, canary)
+    BuiltInBlockExemptionsStore.recordCanary(context, canary, passed)
+    if (before != passed &&
+        BuiltInBlockExemptionsStore.read(context).browserPackage() != null &&
+        AllowedAppsStore.isProtectionEnabled(context)
+    ) {
+        PolicyReconciliationCoordinator.callOnPolicyThread {
+            LockdownPolicyController.apply(context.applicationContext)
+        }
+    }
 }

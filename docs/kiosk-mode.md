@@ -222,7 +222,7 @@ Android can only clear persistent preferred activities per package, so removing
 the kiosk HOME preference also removes the `http`/`https` link handlers that
 managed filtering installs. `KioskConfigStore` tracks whether a kiosk HOME
 preference is installed; `LockdownPolicyController.apply()` calls
-`KioskController.reconcile` **before** `configureBlockedBrowser`, so the link
+`KioskController.reconcile` **before** `routeLinks`, so the link
 handlers are re-registered in the same pass. `pause()` calls it afterwards, so an
 active kiosk keeps its HOME preference even while managed filtering is paused.
 
@@ -537,7 +537,7 @@ be installed.
 | 28+ (9) | `setLockTaskFeatures` — `LOCK_TASK_FEATURE_NONE`, or `LOCK_TASK_FEATURE_HOME` for single-app — verified via `getLockTaskFeatures`, with a fall back to the minimal set if HOME is refused. `ActivityOptions.setLockTaskEnabled(true)` for single-app launch. Signer digests read from `SigningInfo`. |
 | < 28 | Signer digests read from the deprecated `PackageInfo.signatures`. |
 | 33+ (13) | `PackageManager` queries use the `…Flags.of` overloads, matching the rest of the policy engine. |
-| 34+ (14) | Policy application is asynchronous; the existing bounded-retry verification in `configureBlockedBrowser` and `PolicyUpdateAuditReceiver` still apply. Kiosk adds no new assumption here. |
+| 34+ (14) | Policy application is asynchronous; the existing bounded-retry verification in `configureLinkHandler` and `PolicyUpdateAuditReceiver` still apply. Kiosk adds no new assumption here. |
 
 ## Recovery
 

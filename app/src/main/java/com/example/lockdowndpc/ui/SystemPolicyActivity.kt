@@ -42,6 +42,8 @@ import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions
+import com.example.lockdowndpc.policy.BuiltInBlockExemptionsStore
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -181,6 +183,15 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     val playCompatibilityRequested =
         remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
     val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
+    val exemptions = remember(revision) { BuiltInBlockExemptionsStore.read(context) }
+    val exemptionReadback = remember(revision) { BuiltInBlockExemptionsStore.readback(context) }
+    val exemptBrowsers = remember(revision) {
+        installedExemptionCandidates(context, BuiltInBlockExemptions.FILTERABLE_BROWSERS)
+    }
+    val exemptSocial = remember(revision) {
+        installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL)
+    }
+    var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
 
     fun requireSession(): Boolean {
         if (AdminSession.isUnlocked()) {
@@ -299,6 +310,43 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         }
     }
 
+    /**
+     * Records a change to the built-in block exemptions.
+     *
+     * Adding anything is loosening: it needs the live administrator session and
+     * takes effect on the next apply, like every other loosening change here.
+     * Removing is tightening: it is written and applied at once, so an
+     * administrator who withdraws an approval never has to remember a second
+     * step for the application to be blocked again.
+     */
+    fun commitExemption(next: BuiltInBlockExemptions.Settings, auditDetail: String) {
+        val current = BuiltInBlockExemptionsStore.read(context)
+        val loosening = current.loosensTo(next)
+        if (loosening && !requireSession()) {
+            return
+        }
+        BuiltInBlockExemptionsStore.write(context, next)
+        AuditLog.append(
+            context,
+            context.getString(R.string.audit_builtin_exemption_changed, auditDetail.bidiIsolated()),
+        )
+        revision++
+        if (loosening || !protectionEnabled) {
+            message = UiMessage(
+                context.getString(
+                    if (protectionEnabled) {
+                        R.string.system_policy_pending_note
+                    } else {
+                        R.string.system_policy_paused_note
+                    }
+                ),
+                isError = false,
+            )
+        } else {
+            applyNow()
+        }
+    }
+
     LockdownScreen(
         title = stringResource(R.string.system_policy_title),
         subtitle = stringResource(R.string.system_policy_subtitle),
@@ -364,6 +412,36 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             }
         }
 
+        Spacer(Modifier.height(20.dp))
+        key(revision) {
+            BuiltInExemptionsSection(
+                settings = exemptions,
+                readback = exemptionReadback,
+                browsers = exemptBrowsers,
+                social = exemptSocial,
+                enabled = !working,
+                onRequestBrowser = { candidate ->
+                    pendingExemption = PendingExemption.Browser(candidate)
+                },
+                onRemoveBrowser = {
+                    commitExemption(
+                        BuiltInBlockExemptionsStore.read(context).withBrowser(null),
+                        "browser=none",
+                    )
+                },
+                onRequestSocial = { candidate ->
+                    pendingExemption = PendingExemption.Social(candidate)
+                },
+                onRemoveSocial = { candidate ->
+                    commitExemption(
+                        BuiltInBlockExemptionsStore.read(context)
+                            .withSocial(candidate.packageName, false),
+                        "social:${candidate.packageName}=false",
+                    )
+                },
+            )
+        }
+
         Spacer(Modifier.height(28.dp))
         PrimaryAction(
             text = stringResource(
@@ -384,6 +462,27 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 commit(change)
             },
             onDismiss = { pending = null },
+        )
+    }
+
+    pendingExemption?.let { change ->
+        ExemptionConfirmDialog(
+            pending = change,
+            onConfirm = {
+                pendingExemption = null
+                val latest = BuiltInBlockExemptionsStore.read(context)
+                when (change) {
+                    is PendingExemption.Browser -> commitExemption(
+                        latest.withBrowser(change.candidate.packageName),
+                        "browser=${change.candidate.packageName}",
+                    )
+                    is PendingExemption.Social -> commitExemption(
+                        latest.withSocial(change.candidate.packageName, true),
+                        "social:${change.candidate.packageName}=true",
+                    )
+                }
+            },
+            onDismiss = { pendingExemption = null },
         )
     }
 

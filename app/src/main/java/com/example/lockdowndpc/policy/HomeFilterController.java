@@ -91,6 +91,9 @@ public final class HomeFilterController {
             HomeFilterPolicy.Settings after = operation.apply(before);
             if (!before.equals(after)) {
                 HomeFilterStore.write(context, after);
+                // A canary result describes the configuration it ran against.
+                // The browser exemption must not outlive that configuration.
+                BuiltInBlockExemptionsStore.clearCanary(context);
                 AuditLog.append(context, "Home filter settings changed by administrator");
             }
             if (AllowedAppsStore.isProtectionEnabled(context)) {
@@ -102,16 +105,21 @@ public final class HomeFilterController {
         });
     }
 
-    /** Device-owner lifecycle entry point. It only reasserts saved administrator intent. */
-    static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
-                          List<String> errors) {
+    /**
+     * Device-owner lifecycle entry point. It only reasserts saved administrator intent.
+     *
+     * @return whether the filter is enabled and this pass read its Android
+     *         settings back as confirmed; the browser exemption consumes it
+     */
+    static boolean reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
+                             List<String> errors) {
         HomeFilterPolicy.Settings settings = readStored(context);
         if (settings == null) {
             errors.add(CORRUPT_CONFIGURATION);
-            return;
+            return false;
         }
         if (!settings.configured()) {
-            return;
+            return false;
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
@@ -128,6 +136,31 @@ public final class HomeFilterController {
         }
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
+        }
+        return settings.enabled() && verified;
+    }
+
+    /**
+     * A read-only check, made before the package pass, of whether the filter's
+     * Android settings are confirmed right now. It lets a pass keep an exempt
+     * browser available without hiding and re-showing it; {@link #reconcile}
+     * remains the final word, and a pass re-blocks the browser when the two
+     * disagree.
+     */
+    static boolean androidSettingsConfirmedNow(Context context, DevicePolicyManager dpm,
+                                               ComponentName admin,
+                                               HomeFilterPolicy.Settings settings) {
+        if (settings == null || !settings.enabled() || !settings.configured()
+                || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
+            return false;
+        }
+        try {
+            HomeFilterPolicy.Report report = HomeFilterStore.includeApplyEvidence(context, true,
+                    HomeFilterPolicy.inspect(settings, Build.VERSION.SDK_INT,
+                            new AndroidGateway(context, dpm, admin)));
+            return report.androidSettingsConfirmed(settings);
+        } catch (RuntimeException exception) {
+            return false;
         }
     }
 
