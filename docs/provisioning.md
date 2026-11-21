@@ -304,8 +304,11 @@ With protection on, every browser, application store and well-known social or
 messaging app is hidden. **System policy → Exemptions from the built-in block**
 offers two narrow, default-off exceptions. Adding either needs the
 administrator PIN session; removing either is accepted without it. Each change
-is committed, written to the audit log (before → after) and applied at once. A
-change that fails to persist is not applied and the console reports it.
+is committed, written to the audit log (before → after) and, while protection
+is on, applied at once; while protection is paused it is stored only and the
+next protected pass enforces it. A change that fails to persist is not applied
+and the console reports it; until a later save succeeds, every pass treats all
+exemptions as absent.
 
 **Chrome.** Only `com.android.chrome`, and only when its single current signer
 is Google's release certificate. Each protected pass shows Chrome only when:
@@ -330,9 +333,14 @@ The configuration makes Chrome fail closed on its own:
   support it on Android; older ones ignore it),
   `BrowserSignin=0`.
 
-When any condition is false, or any call throws, Chrome is hidden first, before
-the rest of the pass. If Chrome is the WebView provider it keeps the existing
-behaviour (never hidden; suspended while not shown). While Chrome is shown,
+Unless Chrome is already allowed, it is contained first, at the very start of
+the pass and before any early return (unreadable home filter settings count as
+a disabled filter): hidden, or suspended when it is the WebView provider, which
+is never hidden. Only then is its configuration written and read back, and only
+the step that replaces the package sweep for Chrome shows it again. A refused
+hide or suspension is an error, so the pass is reported unverified rather than
+contained. The console's "confirmed" label needs a pass with no error. While
+Chrome is shown,
 `http`/`https` links route to it; Custom Tabs and Trusted Web Activities that
 open in Chrome run inside the Chrome package and follow its managed
 configuration. Network enforcement for every app stays the home filter's

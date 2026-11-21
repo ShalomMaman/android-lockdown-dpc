@@ -145,7 +145,7 @@
     <string name="system_policy_exempt_chrome_row">Chrome through the home filter</string>
     <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed, and only while the home filter is on and protection is active. Before Chrome is shown, Device Guard sets and checks Chrome\'s managed settings: the home filter\'s proxy script is mandatory, so Chrome never connects directly when the script is unavailable; secure DNS, incognito mode, sign-in and developer tools are turned off. These settings also cover Custom Tabs and web apps that open in Chrome. If any condition is not met, Chrome is hidden before anything else changes. Every app\'s traffic still goes through the home filter\'s always-on VPN. Web pages shown inside other apps are not covered by Chrome\'s settings; they are filtered only by the home network. Pausing protection shows every app, Chrome included. Application stores can never be allowed.</string>
     <string name="system_policy_exempt_chrome_state_off">Off. Every browser stays blocked</string>
-    <string name="system_policy_exempt_chrome_state_active">On. Every protection is confirmed and Android confirmed Chrome is available</string>
+    <string name="system_policy_exempt_chrome_state_active">On. Chrome\'s managed settings are confirmed and Android reports Chrome available</string>
     <string name="system_policy_exempt_chrome_state_unconfirmed">On, but Android has not confirmed Chrome is available yet</string>
     <string name="system_policy_exempt_chrome_state_not_installed">On, but Chrome is not installed on this device</string>
     <string name="system_policy_exempt_chrome_state_signer_unverified">On, but the installed Chrome is not signed by Google, so it stays blocked</string>
@@ -154,7 +154,7 @@
     <string name="system_policy_exempt_chrome_state_revocation_pending">Turned off. Waiting for Android to confirm Chrome is blocked</string>
     <string name="system_policy_exempt_chrome_state_paused">On, but protection is paused, so every app is shown</string>
     <string name="system_policy_exempt_chrome_state_filter_off">On, but the home filter is off, so Chrome stays hidden</string>
-    <string name="system_policy_exempt_audit_not_saved">The change was saved and applied, but its audit entry could not be written.</string>
+    <string name="system_policy_exempt_audit_not_saved">The change was saved, but its audit entry could not be written.</string>
     <string name="system_policy_exempt_state_pending">Saved, not applied yet</string>
     <string name="system_policy_exempt_social_title">Approved social and messaging applications</string>
     <string name="system_policy_exempt_social_body">These applications are blocked by the built-in list. Turn one on to keep it available while protection is on. Each approval is tied to the developer signature the app has now; an app with a different signature stays blocked. Turning it off blocks it again at once.</string>

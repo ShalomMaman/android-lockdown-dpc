@@ -357,16 +357,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     context.getString(R.string.system_policy_exempt_change_refused),
                     isError = true,
                 )
-                changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_audit_not_saved),
-                    isError = true,
-                )
-                result == null -> null
-                !protectionEnabled -> UiMessage(
-                    context.getString(R.string.system_policy_paused_note),
-                    isError = false,
-                )
-                !result.applied() -> UiMessage(
+                result != null && !result.applied() -> UiMessage(
                     context.getString(
                         R.string.system_policy_applied_failed,
                         (result.errors().firstOrNull()
@@ -374,6 +365,15 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     ),
                     isError = true,
                 )
+                changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_audit_not_saved),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_paused_note),
+                    isError = false,
+                )
+                result == null -> null
                 else -> UiMessage(
                     context.getString(R.string.system_policy_applied_ok),
                     isError = false,

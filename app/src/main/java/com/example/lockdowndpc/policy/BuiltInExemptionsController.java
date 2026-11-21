@@ -16,13 +16,24 @@ import java.util.function.UnaryOperator;
  * the device and is accepted without one. The decision is committed, then its
  * audit entry is committed, and only then does a policy pass run. A write that
  * does not persist changes nothing: no pass runs and the caller shows an error.
+ * While protection is paused the decision is stored only; the next protected
+ * pass enforces it.
  */
 public final class BuiltInExemptionsController {
 
     private BuiltInExemptionsController() {}
 
     /** The result of one change request. */
-    public enum Status { UNCHANGED, APPLIED, NOT_SAVED, AUDIT_NOT_SAVED }
+    public enum Status {
+        UNCHANGED,
+        /** Stored and a protected pass ran; see the result. */
+        APPLIED,
+        /** Stored while protection is paused; nothing was applied. */
+        SAVED,
+        NOT_SAVED,
+        /** Stored and, when protection is on, applied; the audit entry did not persist. */
+        AUDIT_NOT_SAVED
+    }
 
     public record Outcome(Status status, LockdownPolicyController.PolicyResult result) {}
 
@@ -31,6 +42,8 @@ public final class BuiltInExemptionsController {
         boolean write(BuiltInBlockExemptions.Settings settings);
 
         boolean audit(String entry);
+
+        boolean protectionActive();
 
         LockdownPolicyController.PolicyResult applyPass();
     }
@@ -57,10 +70,13 @@ public final class BuiltInExemptionsController {
                     }
 
                     @Override
+                    public boolean protectionActive() {
+                        return AllowedAppsStore.isProtectionEnabled(context);
+                    }
+
+                    @Override
                     public LockdownPolicyController.PolicyResult applyPass() {
-                        return AllowedAppsStore.isProtectionEnabled(context)
-                                ? LockdownPolicyController.apply(context)
-                                : LockdownPolicyController.pause(context);
+                        return LockdownPolicyController.apply(context);
                     }
                 }));
     }
@@ -103,6 +119,9 @@ public final class BuiltInExemptionsController {
         String entry = "builtin-exemption: administrator " + trigger + ": "
                 + before.auditText() + " -> " + after.auditText();
         boolean audited = sink.audit(entry);
+        if (!sink.protectionActive()) {
+            return new Outcome(audited ? Status.SAVED : Status.AUDIT_NOT_SAVED, null);
+        }
         // The decision is already persisted, so the pass runs either way: a
         // stored removal must take effect even if its audit line did not.
         LockdownPolicyController.PolicyResult result = sink.applyPass();

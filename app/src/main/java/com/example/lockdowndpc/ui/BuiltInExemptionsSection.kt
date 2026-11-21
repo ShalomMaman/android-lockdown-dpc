@@ -94,26 +94,30 @@ internal fun loadExemptionsView(context: Context): ExemptionsView {
 }
 
 /**
- * The status line for Chrome, from the read-back taken for the current
- * decision only. "Available" is shown only when Android reported Chrome neither
- * hidden nor suspended; a withdrawn exemption reads as pending until Android
- * reports it blocked.
+ * The status line for Chrome, from the read-back taken for the current decision
+ * only. "Confirmed" needs a SHOWN decision, Android reporting Chrome visible,
+ * and a pass that finished without any error. A withdrawn exemption reads as
+ * pending until Android reports Chrome hidden or suspended.
  */
 internal fun chromeStatusRes(view: ExemptionsView): Int {
     val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
+    val observed = readback.chromeObserved()
+    val maybeVisible = observed == ChromeFilterExemption.Observed.VISIBLE ||
+        observed == ChromeFilterExemption.Observed.UNKNOWN
     if (!view.settings.chrome()) {
-        return if (readback.chromeVisible()) {
+        return if (maybeVisible) {
             R.string.system_policy_exempt_chrome_state_revocation_pending
         } else {
             R.string.system_policy_exempt_chrome_state_off
         }
     }
     return when (readback.chromeDecision()) {
-        ChromeFilterExemption.Decision.SHOWN -> if (readback.chromeVisible()) {
-            R.string.system_policy_exempt_chrome_state_active
-        } else {
-            R.string.system_policy_exempt_chrome_state_unconfirmed
-        }
+        ChromeFilterExemption.Decision.SHOWN ->
+            if (observed == ChromeFilterExemption.Observed.VISIBLE && readback.passVerified()) {
+                R.string.system_policy_exempt_chrome_state_active
+            } else {
+                R.string.system_policy_exempt_chrome_state_unconfirmed
+            }
         ChromeFilterExemption.Decision.NOT_EXEMPTED -> R.string.system_policy_exempt_state_pending
         ChromeFilterExemption.Decision.PROTECTION_PAUSED ->
             R.string.system_policy_exempt_chrome_state_paused
@@ -133,12 +137,13 @@ internal fun socialStatusRes(packageName: String, view: ExemptionsView): Int {
     val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
     val approved = packageName in view.settings.socialPins()
     val visible = packageName in readback.socialVisible()
+    val unknown = packageName in readback.socialUnknown()
     return when {
-        !approved && visible -> R.string.system_policy_exempt_social_revocation_pending
+        !approved && (visible || unknown) -> R.string.system_policy_exempt_social_revocation_pending
         !approved -> R.string.system_policy_exempt_social_blocked
         packageName in readback.socialSignerMismatch() ->
             R.string.system_policy_exempt_social_signer_mismatch
-        visible -> R.string.system_policy_exempt_social_confirmed
+        visible && readback.passVerified() -> R.string.system_policy_exempt_social_confirmed
         else -> R.string.system_policy_exempt_social_unconfirmed
     }
 }

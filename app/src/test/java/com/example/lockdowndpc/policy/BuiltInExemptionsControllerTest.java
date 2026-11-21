@@ -22,6 +22,7 @@ public final class BuiltInExemptionsControllerTest {
         final List<String> calls = new ArrayList<>();
         boolean writeSucceeds = true;
         boolean auditSucceeds = true;
+        boolean protectionActive = true;
         Settings written;
 
         @Override
@@ -37,6 +38,11 @@ public final class BuiltInExemptionsControllerTest {
         public boolean audit(String entry) {
             calls.add("audit:" + entry);
             return auditSucceeds;
+        }
+
+        @Override
+        public boolean protectionActive() {
+            return protectionActive;
         }
 
         @Override
@@ -90,6 +96,18 @@ public final class BuiltInExemptionsControllerTest {
                 "remove:chrome", sink);
         assertEquals(Status.AUDIT_NOT_SAVED, outcome.status());
         assertEquals("pass", sink.calls.get(sink.calls.size() - 1));
+    }
+
+    @Test
+    public void anApprovalWhileProtectionIsPausedIsStoredOnly() {
+        RecordingSink sink = new RecordingSink();
+        sink.protectionActive = false;
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink);
+        assertEquals(Status.SAVED, outcome.status());
+        assertNull(outcome.result());
+        assertEquals(Settings.NONE.withChrome(true), sink.written);
+        assertTrue("no pass runs while paused", sink.calls.stream().noneMatch("pass"::equals));
     }
 
     @Test

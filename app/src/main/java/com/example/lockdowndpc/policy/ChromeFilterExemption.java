@@ -4,27 +4,32 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The Chrome half of the exemptions, run at the start of every protected pass.
+ * Chrome's visibility, owned end to end by this class on every protected pass.
+ * The generic package sweep and the WebView suspension pass leave Chrome alone.
  *
- * <p>Order is the whole point:
- * <ul>
- *   <li>When Chrome may be shown, its managed configuration is written and read
- *       back <em>here</em>, before the package pass can unhide it.</li>
- *   <li>When it may not, it is hidden <em>here</em>, before anything else in the
- *       pass. The one exception is Chrome acting as the WebView provider: it
- *       keeps the existing behaviour (never hidden, suspended by the pass).</li>
- *   <li>Any exception is a "not shown" decision.</li>
- * </ul>
+ * <p>Two calls, in this order:
+ * <ol>
+ *   <li>{@link #prepare} at the very start of the pass (and before any early
+ *       return). Unless Chrome is already allowed — every precondition holds
+ *       and its managed configuration already reads back as required — Chrome
+ *       is contained <em>first</em>: hidden, or suspended when it is the WebView
+ *       provider (which is never hidden). Only then is the configuration
+ *       written and read back. A refused containment is an error, so the pass
+ *       is reported unverified rather than contained.</li>
+ *   <li>{@link #applyVisibility} in the package sweep's place: shows Chrome only
+ *       for a {@link Decision#SHOWN} decision, otherwise checks it is still
+ *       contained. It never shows Chrome on any other decision.</li>
+ * </ol>
  *
- * <p>No state is kept between passes: each pass decides from the stored
- * administrator choice and what Android reads back now.
+ * <p>No state is kept between passes. Any exception is a "not shown" decision.
  */
 public final class ChromeFilterExemption {
 
     private ChromeFilterExemption() {}
 
     public static final String CONFIG_UNVERIFIED_ERROR = "chrome-exemption-config-unverified";
-    public static final String HIDE_UNVERIFIED_ERROR = "chrome-exemption-hide-unverified";
+    public static final String CONTAIN_UNVERIFIED_ERROR = "chrome-exemption-contain-unverified";
+    public static final String SHOW_UNVERIFIED_ERROR = "chrome-exemption-show-unverified";
 
     /** Why Chrome is, or is not, shown on this pass. */
     public enum Decision {
@@ -48,7 +53,10 @@ public final class ChromeFilterExemption {
         }
     }
 
-    /** Android, as seen by this decision. Any call may throw. */
+    /** What Android reports for Chrome. {@link #UNKNOWN} when a read threw. */
+    public enum Observed { VISIBLE, HIDDEN, SUSPENDED, NOT_INSTALLED, UNKNOWN }
+
+    /** Android, as seen by this class. Any call may throw. */
     public interface Gateway {
         boolean installed();
 
@@ -64,14 +72,19 @@ public final class ChromeFilterExemption {
         void setHidden(boolean hidden);
 
         boolean hidden();
+
+        /** Throws when Android refuses. */
+        void setSuspended(boolean suspended);
+
+        boolean suspended();
     }
 
     /**
-     * Decides, and performs the step that must come first.
+     * Decides, containing Chrome first unless it is already allowed.
      *
      * @param exempted         the administrator exempted Chrome
      * @param protectionActive protection is on (not paused)
-     * @param filterEnabled    the home filter is enabled in its store
+     * @param filterEnabled    the home filter is enabled and its settings are readable
      * @param pacUrl           the home filter's PAC URL, or {@code null}
      */
     public static Decision prepare(
@@ -84,21 +97,73 @@ public final class ChromeFilterExemption {
     ) {
         Decision decision;
         try {
-            decision = decide(exempted, protectionActive, filterEnabled, pacUrl, gateway);
+            decision = preconditions(exempted, protectionActive, filterEnabled, pacUrl, gateway);
+            boolean alreadyAllowed = decision == null
+                    && BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl);
+            if (!alreadyAllowed) {
+                contain(gateway, errors);
+            }
+            if (decision == null) {
+                Map<String, Object> current = gateway.restrictions();
+                if (!BuiltInBlockExemptions.restrictionsSatisfied(current, pacUrl)) {
+                    gateway.setRestrictions(BuiltInBlockExemptions.mergeRestrictions(current, pacUrl));
+                }
+                decision = BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl)
+                        ? Decision.SHOWN
+                        : Decision.CONFIG_UNVERIFIED;
+            }
         } catch (RuntimeException exception) {
             errors.add("chrome-exemption:" + exception.getClass().getSimpleName());
             decision = Decision.ERROR;
+            contain(gateway, errors);
         }
         if (decision == Decision.CONFIG_UNVERIFIED) {
             errors.add(CONFIG_UNVERIFIED_ERROR);
         }
-        if (!decision.shown()) {
-            hideFirst(gateway, errors);
-        }
         return decision;
     }
 
-    private static Decision decide(
+    /**
+     * Chrome's part of the package sweep: show it only on {@link Decision#SHOWN},
+     * reading the result back; otherwise confirm it is still contained.
+     */
+    public static void applyVisibility(Decision decision, Gateway gateway, List<String> errors) {
+        if (!decision.shown()) {
+            Observed observed = observe(gateway);
+            if (observed == Observed.VISIBLE || observed == Observed.UNKNOWN) {
+                errors.add(CONTAIN_UNVERIFIED_ERROR);
+            }
+            return;
+        }
+        try {
+            gateway.setHidden(false);
+            gateway.setSuspended(false);
+        } catch (RuntimeException exception) {
+            errors.add(SHOW_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
+            return;
+        }
+        if (observe(gateway) != Observed.VISIBLE) {
+            errors.add(SHOW_UNVERIFIED_ERROR);
+        }
+    }
+
+    /** What Android reports now, never guessed: a failed read is {@link Observed#UNKNOWN}. */
+    public static Observed observe(Gateway gateway) {
+        try {
+            if (!gateway.installed()) {
+                return Observed.NOT_INSTALLED;
+            }
+            if (gateway.hidden()) {
+                return Observed.HIDDEN;
+            }
+            return gateway.suspended() ? Observed.SUSPENDED : Observed.VISIBLE;
+        } catch (RuntimeException exception) {
+            return Observed.UNKNOWN;
+        }
+    }
+
+    /** {@code null} when every precondition holds; otherwise the reason. */
+    private static Decision preconditions(
             boolean exempted,
             boolean protectionActive,
             boolean filterEnabled,
@@ -120,26 +185,28 @@ public final class ChromeFilterExemption {
         if (!BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())) {
             return Decision.SIGNER_UNVERIFIED;
         }
-        Map<String, Object> current = gateway.restrictions();
-        if (!BuiltInBlockExemptions.restrictionsSatisfied(current, pacUrl)) {
-            gateway.setRestrictions(BuiltInBlockExemptions.mergeRestrictions(current, pacUrl));
-        }
-        return BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl)
-                ? Decision.SHOWN
-                : Decision.CONFIG_UNVERIFIED;
+        return null;
     }
 
-    private static void hideFirst(Gateway gateway, List<String> errors) {
+    /** Hidden, or suspended when Chrome is the WebView provider; read back. */
+    private static void contain(Gateway gateway, List<String> errors) {
         try {
-            if (!gateway.installed() || gateway.webViewProvider()) {
+            if (!gateway.installed()) {
                 return;
             }
-            gateway.setHidden(true);
-            if (!gateway.hidden()) {
-                errors.add(HIDE_UNVERIFIED_ERROR);
+            if (gateway.webViewProvider()) {
+                gateway.setSuspended(true);
+                if (!gateway.suspended()) {
+                    errors.add(CONTAIN_UNVERIFIED_ERROR);
+                }
+            } else {
+                gateway.setHidden(true);
+                if (!gateway.hidden()) {
+                    errors.add(CONTAIN_UNVERIFIED_ERROR);
+                }
             }
         } catch (RuntimeException exception) {
-            errors.add(HIDE_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
+            errors.add(CONTAIN_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
         }
     }
 }

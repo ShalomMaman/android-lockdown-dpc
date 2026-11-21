@@ -137,7 +137,7 @@
     <string name="system_policy_exempt_chrome_row">Chrome דרך סינון הבית</string>
     <string name="system_policy_exempt_chrome_body">אפשר לאשר רק את Google Chrome החתום על ידי Google, ורק כל עוד סינון הבית פועל וההגנה פעילה. לפני ש-Chrome מוצג, Device Guard מגדיר ובודק את ההגדרות המנוהלות שלו: סקריפט שירות התיווך של סינון הבית הוא חובה, כך ש-Chrome לעולם לא מתחבר ישירות כשהסקריפט אינו זמין, ו-DNS מאובטח, גלישה בסתר, כניסה לחשבון וכלי הפיתוח כבויים. ההגדרות האלה חלות גם על כרטיסיות מותאמות ועל יישומי אינטרנט שנפתחים ב-Chrome. אם תנאי כלשהו לא מתקיים, Chrome מוסתר לפני שמשהו אחר משתנה. התעבורה של כל היישומים ממשיכה לעבור דרך ה-VPN הקבוע של סינון הבית. דפי אינטרנט שמוצגים בתוך יישומים אחרים אינם מכוסים בהגדרות של Chrome, והם מסוננים רק ברשת הבית. השהיית ההגנה מציגה את כל היישומים, כולל Chrome. אי אפשר לאשר חנויות יישומים.</string>
     <string name="system_policy_exempt_chrome_state_off">כבוי. כל הדפדפנים נשארים חסומים</string>
-    <string name="system_policy_exempt_chrome_state_active">פועל. כל ההגנות מאושרות ו-Android אישר ש-Chrome זמין</string>
+    <string name="system_policy_exempt_chrome_state_active">פועל. ההגדרות המנוהלות של Chrome מאושרות ו-Android מדווח ש-Chrome זמין</string>
     <string name="system_policy_exempt_chrome_state_unconfirmed">פועל, אך Android עדיין לא אישר ש-Chrome זמין</string>
     <string name="system_policy_exempt_chrome_state_not_installed">פועל, אך Chrome אינו מותקן במכשיר</string>
     <string name="system_policy_exempt_chrome_state_signer_unverified">פועל, אך Chrome המותקן אינו חתום על ידי Google, ולכן הוא נשאר חסום</string>
@@ -146,7 +146,7 @@
     <string name="system_policy_exempt_chrome_state_revocation_pending">כובה. ממתין לאישור של Android ש-Chrome חסום</string>
     <string name="system_policy_exempt_chrome_state_paused">פועל, אך ההגנה מושהית, ולכן כל היישומים מוצגים</string>
     <string name="system_policy_exempt_chrome_state_filter_off">פועל, אך סינון הבית כבוי, ולכן Chrome נשאר מוסתר</string>
-    <string name="system_policy_exempt_audit_not_saved">השינוי נשמר והוחל, אך לא ניתן היה לרשום אותו ביומן הביקורת.</string>
+    <string name="system_policy_exempt_audit_not_saved">השינוי נשמר, אך לא ניתן היה לרשום אותו ביומן הביקורת.</string>
     <string name="system_policy_exempt_state_pending">נשמר, עדיין לא הוחל</string>
     <string name="system_policy_exempt_social_title">יישומי רשתות חברתיות והודעות שאושרו</string>
     <string name="system_policy_exempt_social_body">היישומים האלה חסומים ברשימה המובנית. הפעלה של יישום משאירה אותו זמין כל עוד ההגנה פועלת. כל אישור קשור לחתימת המפתח שיש ליישום עכשיו, ויישום עם חתימה אחרת נשאר חסום. כיבוי חוסם אותו שוב מיד.</string>
