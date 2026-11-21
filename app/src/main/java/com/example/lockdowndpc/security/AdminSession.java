@@ -21,7 +21,8 @@ public final class AdminSession {
     }
 
     public static boolean isUnlocked() {
-        return unlockedUntilElapsed > SystemClock.elapsedRealtime();
+        long deadline = unlockedUntilElapsed;
+        return deadline != 0L && deadline > SystemClock.elapsedRealtime();
     }
 
     public static void lock() {
