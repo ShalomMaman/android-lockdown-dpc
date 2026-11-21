@@ -358,7 +358,15 @@ private fun AdminConsole(
             return
         }
         try {
-            AdminPinStore.setNewPin(context, first)
+            val saved = if (replacingPin) {
+                AdminPinStore.replacePin(context, first)
+            } else {
+                AdminPinStore.setInitialPin(context, first)
+            }
+            if (!saved) {
+                showLocked()
+                return
+            }
             val code = AdminPinStore.rotateRecoveryCode(context)
             AuditLog.append(
                 context,

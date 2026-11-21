@@ -50,26 +50,56 @@ public final class AdminPinStore {
     private AdminPinStore() {}
 
     public static boolean hasPin(Context context) {
-        SharedPreferences prefs = prefs(context);
+        return hasPin(prefs(context));
+    }
+
+    private static boolean hasPin(SharedPreferences prefs) {
         return prefs.contains(KEY_SALT) && prefs.contains(KEY_VERIFIER);
     }
 
-    public static void setNewPin(Context context, String pin) throws SecurityException {
+    /** Returns false if another setup has already stored a PIN. */
+    public static boolean setInitialPin(Context context, String pin) {
+        SharedPreferences prefs = prefs(context);
+        return setInitialPin(prefs, () -> writePin(prefs, pin));
+    }
+
+    static synchronized boolean setInitialPin(SharedPreferences prefs, Runnable save) {
+        if (hasPin(prefs)) {
+            return false;
+        }
+        save.run();
+        return true;
+    }
+
+    /** Returns false when there is no live administrator session. */
+    public static synchronized boolean replacePin(Context context, String pin) {
+        if (!AdminSession.isUnlocked()) {
+            return false;
+        }
+        writePin(prefs(context), pin);
+        return true;
+    }
+
+    private static void writePin(SharedPreferences prefs, String pin) {
         if (!isValidPin(pin)) {
             throw new IllegalArgumentException("pin-must-contain-6-to-12-digits");
         }
+        boolean saved;
         try {
             byte[] salt = new byte[16];
             new SecureRandom().nextBytes(salt);
             byte[] verifier = createVerifier(pin, salt, getOrCreateHmacKey());
-            putLockout(
-                    prefs(context).edit()
+            saved = putLockout(
+                    prefs.edit()
                             .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                             .putString(KEY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP)),
                     PinLockoutPolicy.LockoutState.CLEARED
             ).commit();
         } catch (Exception exception) {
             throw new SecurityException("admin-pin-save-failed", exception);
+        }
+        if (!saved) {
+            throw new SecurityException("admin-pin-save-failed");
         }
     }
 
