@@ -55,7 +55,7 @@ public final class ScheduleController {
 
                 @Override
                 public void audit(String line) {
-                    AuditLog.append(app, line);
+                    AuditLog.append(app, AuditEvent.SCHEDULE_CHANGED, line);
                 }
             });
             if (outcome.status() != ScheduleChange.Status.SAVED) {

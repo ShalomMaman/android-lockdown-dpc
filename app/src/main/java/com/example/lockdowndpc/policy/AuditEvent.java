@@ -21,6 +21,7 @@ public enum AuditEvent {
     SYSTEM_POLICY_APPLIED("policy.system.control.applied"),
     SYSTEM_POLICY_UNVERIFIED("policy.system.control.unverified"),
     PLAY_COMPATIBILITY_CHANGED("policy.play.compatibility.changed"),
+    SCHEDULE_CHANGED("policy.schedule.changed"),
     POLICY_RESULT_FAILED("policy.result.failed"),
     RECONCILIATION_CRASHED("policy.reconciliation.crashed"),
     PAUSE_RECONCILIATION_CRASHED("policy.pause.reconciliation.crashed"),

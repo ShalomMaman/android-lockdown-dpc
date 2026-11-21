@@ -28,6 +28,7 @@ public final class AuditEventTest {
             entry(AuditEvent.SYSTEM_POLICY_APPLIED, "policy.system.control.applied"),
             entry(AuditEvent.SYSTEM_POLICY_UNVERIFIED, "policy.system.control.unverified"),
             entry(AuditEvent.PLAY_COMPATIBILITY_CHANGED, "policy.play.compatibility.changed"),
+            entry(AuditEvent.SCHEDULE_CHANGED, "policy.schedule.changed"),
             entry(AuditEvent.POLICY_RESULT_FAILED, "policy.result.failed"),
             entry(AuditEvent.RECONCILIATION_CRASHED, "policy.reconciliation.crashed"),
             entry(AuditEvent.PAUSE_RECONCILIATION_CRASHED, "policy.pause.reconciliation.crashed"),
