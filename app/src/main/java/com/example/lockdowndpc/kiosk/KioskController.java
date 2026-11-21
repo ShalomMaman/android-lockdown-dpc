@@ -15,6 +15,7 @@ import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskAction;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
+import com.example.lockdowndpc.policy.BuiltInExemptionsController;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.security.AdminSession;
@@ -305,7 +306,8 @@ public final class KioskController {
         }
         PackageManager pm = context.getPackageManager();
         boolean deviceGuardItself = packageName.equals(context.getPackageName());
-        boolean protectedPackage = KioskAppCatalog.isProtectedFromKiosk(packageName);
+        boolean protectedPackage = KioskAppCatalog.isProtectedFromKiosk(
+                packageName, BuiltInExemptionsController.verifiedSocial(context));
         ApplicationInfo info;
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -493,7 +495,8 @@ public final class KioskController {
                 && settings.config().mode() == KioskMode.SINGLE_APP
                 && !settings.config().targetPackage().isEmpty()
                 && !KioskAppCatalog.isProtectedFromKiosk(
-                        settings.config().targetPackage())) {
+                        settings.config().targetPackage(),
+                        BuiltInExemptionsController.verifiedSocial(context))) {
             packages.add(settings.config().targetPackage());
         }
         String[] allowlist = packages.toArray(new String[0]);

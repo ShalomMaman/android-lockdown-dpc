@@ -134,7 +134,10 @@ public final class HomeFilterPolicy {
         }
 
         boolean keepsVpnVisible(String packageName) {
-            return enabled && configured() && config.vpnPackage().equals(packageName);
+            // A built-in blocked browser, store or social application never
+            // inherits the VPN's visibility, whatever was entered as the VPN.
+            return enabled && configured() && config.vpnPackage().equals(packageName)
+                    && !BuiltInBlockExemptions.isBuiltInBlocked(packageName);
         }
 
         boolean packageShouldBeHidden(String packageName, boolean blockedByPackagePolicy) {
@@ -227,6 +230,12 @@ public final class HomeFilterPolicy {
     static PackageState installedVpnState(LockdownPackages.SignerVerdict signer) {
         return signer == LockdownPackages.SignerVerdict.MATCH
                 ? PackageState.INSTALLED : PackageState.UNTRUSTED;
+    }
+
+    /** The base choices a pass enforces for a home filter in this (effective) state. */
+    public static Map<SystemPolicyControl, Boolean> choicesFor(
+            Map<SystemPolicyControl, Boolean> base, boolean filterEnabled) {
+        return filterEnabled ? requireControls(base) : base;
     }
 
     static Map<SystemPolicyControl, Boolean> requireControls(Map<SystemPolicyControl, Boolean> base) {

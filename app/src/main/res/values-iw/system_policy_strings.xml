@@ -131,6 +131,57 @@
     <string name="system_policy_play_compat_confirm_disable_title">להסתיר שוב את חנויות היישומים?</string>
     <string name="system_policy_play_compat_confirm_disable_body">חבילת חנות Google Play תוסתר שוב בפעם הבאה שהמדיניות תוחל, ויישומים שזקוקים לה עלולים להפסיק להיפתח. בקרות ההתקנה שהמצב הזה השאיר פעילות יחזרו לבחירות השמורות שלכם.</string>
 
+
+    <!-- החרגות מהחסימה המובנית -->
+    <string name="system_policy_section_exemptions">החרגות מהחסימה המובנית</string>
+    <string name="system_policy_exempt_chrome_row">Chrome דרך סינון הבית</string>
+    <string name="system_policy_exempt_chrome_body">אפשר לאשר רק את Google Chrome החתום על ידי Google, ורק כל עוד סינון הבית פועל וההגנה פעילה. לפני ש-Chrome מוצג, Device Guard מגדיר ובודק את ההגדרות המנוהלות שלו: סקריפט שירות התיווך של סינון הבית הוא חובה, כך ש-Chrome לעולם לא מתחבר ישירות כשהסקריפט אינו זמין, ו-DNS מאובטח, גלישה בסתר, כניסה לחשבון וכלי הפיתוח כבויים. ההגדרות האלה חלות גם על כרטיסיות מותאמות ועל יישומי אינטרנט שנפתחים ב-Chrome. אם תנאי כלשהו לא מתקיים, Chrome מוסתר לפני שמשהו אחר משתנה. התעבורה של כל היישומים ממשיכה לעבור דרך ה-VPN הקבוע של סינון הבית. דפי אינטרנט שמוצגים בתוך יישומים אחרים אינם מכוסים בהגדרות של Chrome, והם מסוננים רק ברשת הבית. השהיית ההגנה מציגה את כל היישומים, כולל Chrome. אי אפשר לאשר חנויות יישומים.</string>
+    <string name="system_policy_exempt_audit_not_saved">השינוי נשמר, אך לא ניתן היה לרשום אותו ביומן הביקורת.</string>
+    <string name="system_policy_exempt_android_state">‏Android מדווח: %1$s</string>
+    <string name="system_policy_exempt_observed_visible">זמין</string>
+    <string name="system_policy_exempt_observed_hidden">מוסתר</string>
+    <string name="system_policy_exempt_observed_suspended">מושעה</string>
+    <string name="system_policy_exempt_observed_not_installed">לא מותקן</string>
+    <string name="system_policy_exempt_observed_unknown">לא ניתן היה לקרוא את המצב</string>
+    <string name="system_policy_exempt_chrome_reason_shown">אושר במעבר האחרון</string>
+    <string name="system_policy_exempt_chrome_reason_not_exempted">לא מאושר</string>
+    <string name="system_policy_exempt_chrome_reason_paused">ההגנה מושהית</string>
+    <string name="system_policy_exempt_chrome_reason_filter_off">סינון הבית כבוי או שלא ניתן היה לקרוא את ההגדרות שלו</string>
+    <string name="system_policy_exempt_chrome_reason_not_installed">‏Chrome אינו מותקן</string>
+    <string name="system_policy_exempt_chrome_reason_signer">‏Chrome המותקן אינו חתום על ידי Google</string>
+    <string name="system_policy_exempt_chrome_reason_contain_unverified">‏Android לא אישר את הסתרת Chrome, ולכן ההגדרות שלו לא שונו</string>
+    <string name="system_policy_exempt_chrome_reason_config_unverified">‏Android לא אישר ששמר את ההגדרות המנוהלות של Chrome</string>
+    <string name="system_policy_exempt_chrome_reason_filter_unconfirmed">סינון הבית לא אישר את ההגדרות שלו במעבר האחרון</string>
+    <string name="system_policy_exempt_chrome_reason_show_unverified">‏Android לא אישר את הצגת Chrome, ולכן הוא הוסתר שוב</string>
+    <string name="system_policy_exempt_observed_disabled">מושבת</string>
+    <string name="system_policy_exempt_chrome_reason_hide_refused">היה צריך להסתיר את Chrome, אך Android לא אישר את ההסתרה</string>
+    <string name="system_policy_exempt_chrome_reason_disabled">‏Chrome מושבת ב-Android</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview">לא זמין במכשיר הזה: Android מדווח ש-Chrome הוא רכיב WebView של המערכת</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">לא זמין במכשיר הזה: ייתכן ש-Chrome משמש כאן כרכיב WebView של המערכת</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_android_version">לא זמין בגרסת Android הזו</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">לא ניתן היה לקרוא את חתימת האפליקציה, ולכן היא אינה מוצגת כמאושרת. המצב הנוכחי שלה מופיע למטה.</string>
+    <string name="system_policy_exempt_record_unreadable">לא ניתן היה לקרוא את ההחרגות השמורות. עד שהן ינוקו, אף החרגה לא חלה ושינויים רגילים נדחים.</string>
+    <string name="system_policy_exempt_clear_approvals">ניקוי כל האישורים</string>
+    <string name="system_policy_exempt_paused_refused">יש לחדש את ההגנה כדי לשנות אישורים.</string>
+    <string name="system_policy_exempt_active_admin_refused">האפליקציה לא אושרה: היא מנהלת מכשיר פעילה, ו-Android לא יאפשר לחסום אותה שוב. יש להסיר קודם את הרשאת הניהול שלה בהגדרות.</string>
+    <string name="system_policy_exempt_admins_unreadable">האפליקציה לא אושרה: Device Guard לא הצליח לבדוק את מנהלי המכשיר. יש לנסות שוב.</string>
+    <string name="system_policy_exempt_containment_refused">האישור הוסר. לפני שמירת השינוי, Android סירב לחסום אפליקציה. בדיקת ההגנה מנסה לחסום אותה שוב. המצב הנוכחי מופיע בשורה של האפליקציה.</string>
+    <string name="system_policy_exempt_failed_and_audit_not_saved">השינוי נשמר, אך המדיניות לא אומתה (%1$s), ולא ניתן היה לרשום את השינוי ביומן הביקורת.</string>
+    <string name="system_policy_exempt_chrome_reason_signer_unreadable">לא ניתן היה לקרוא את חתימת Chrome</string>
+    <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>
+    <string name="system_policy_exempt_social_approved">מאושר</string>
+    <string name="system_policy_exempt_social_not_approved">לא מאושר</string>
+    <string name="system_policy_exempt_filter_not_ready">‏Chrome לא אושר: יש להפעיל קודם את סינון הבית ולתת לשינויים הממתינים שלו להסתיים. אם הפרופיל כולל תעודת סינון, היא חייבת להיות מותקנת.</string>
+    <string name="system_policy_exempt_social_title">יישומי רשתות חברתיות והודעות שאושרו</string>
+    <string name="system_policy_exempt_social_body">היישומים האלה חסומים ברשימה המובנית. הפעלה של יישום משאירה אותו זמין כל עוד ההגנה פועלת. כל אישור קשור לחתימת המפתח שיש ליישום עכשיו, ויישום עם חתימה אחרת נשאר חסום. כיבוי חוסם אותו שוב מיד.</string>
+    <string name="system_policy_exempt_social_none_installed">לא מותקן במכשיר הזה יישום רשת חברתית או הודעות מהרשימה המובנית.</string>
+    <string name="system_policy_exempt_social_signer_mismatch">מאושר, אך ליישום המותקן יש חתימה אחרת</string>
+    <string name="system_policy_exempt_social_signer_unreadable">לא ניתן היה לקרוא את חתימת היישום, ולכן אי אפשר לאשר אותו.</string>
+    <string name="system_policy_exempt_change_refused">השינוי לא נשמר. בדקו את הפרטים ונסו שוב.</string>
+    <string name="system_policy_exempt_confirm_chrome_title">לאפשר את Chrome דרך סינון הבית?</string>
+    <string name="system_policy_exempt_confirm_chrome_body">‏Chrome יוצג רק כל עוד סינון הבית פועל וההגדרות שלו אושרו באותה בדיקה, ההגנה פעילה, ו-Android מאשר ששמר את ההגדרות המנוהלות של Chrome, כולל שירות התיווך המחייב של הסינון. אם תנאי כלשהו לא מתקיים, Chrome מוסתר שוב באופן אוטומטי. כל שאר הדפדפנים נשארים חסומים.</string>
+    <string name="system_policy_exempt_confirm_social_title">לאפשר את היישום הזה?</string>
+    <string name="system_policy_exempt_confirm_social_body">%1$s לא ייחסם עוד ברשימה המובנית של רשתות חברתיות והודעות כל עוד ההגנה פועלת. האישור קשור לחתימה הנוכחית של היישום. כיבוי שלו בהמשך יחסום אותו שוב מיד.</string>
     <!-- יומן ביקורת -->
     <string name="audit_play_compatibility_changed">תאימות ל-Google Play שונתה: %1$s</string>
     <string name="audit_system_policy_unverified">מדיניות מערכת לא אומתה: %1$s</string>

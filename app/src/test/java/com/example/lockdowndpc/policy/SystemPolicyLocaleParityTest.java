@@ -39,6 +39,38 @@ public final class SystemPolicyLocaleParityTest {
     private final Map<String, String> english = read("values");
     private final Map<String, String> hebrew = read("values-iw");
 
+    /**
+     * A key defined twice in one file breaks the resource merge, and a parity
+     * check over key sets cannot see it: the second definition collapses into
+     * the first. Covers the files the exemption console writes to.
+     */
+    @Test
+    public void noKeyIsDefinedTwiceInOneFile() {
+        for (String folder : List.of("values", "values-iw")) {
+            for (String fileName : List.of(FILE_NAME, "home_filter_strings.xml")) {
+                File file = new File(moduleDir(), "src/main/res/" + folder + "/" + fileName);
+                assertTrue("missing resource file: " + file, file.isFile());
+                try {
+                    NodeList nodes = DocumentBuilderFactory.newInstance()
+                            .newDocumentBuilder()
+                            .parse(file)
+                            .getElementsByTagName("string");
+                    TreeSet<String> seen = new TreeSet<>();
+                    List<String> duplicates = new ArrayList<>();
+                    for (int index = 0; index < nodes.getLength(); index++) {
+                        String name = ((Element) nodes.item(index)).getAttribute("name");
+                        if (!seen.add(name)) {
+                            duplicates.add(name);
+                        }
+                    }
+                    assertEquals(folder + "/" + fileName + " defines keys twice", List.of(), duplicates);
+                } catch (Exception exception) {
+                    throw new AssertionError("could not read " + file, exception);
+                }
+            }
+        }
+    }
+
     @Test
     public void everyKeyExistsInBothLocales() {
         assertEquals(
@@ -123,6 +155,21 @@ public final class SystemPolicyLocaleParityTest {
         assertTrue(
                 "the ADB consequence must warn about recovery",
                 consequence.toLowerCase(java.util.Locale.ROOT).contains("recover"));
+    }
+
+    @Test
+    public void exemptionWarningsReferToLiveStateInBothLocales() {
+        String refused = "system_policy_exempt_containment_refused";
+        assertTrue(english.get(refused).contains("protection pass retries"));
+        assertTrue(english.get(refused).contains("row for its current state"));
+        assertTrue(hebrew.get(refused).contains("בדיקת ההגנה מנסה לחסום אותה שוב"));
+        assertTrue(hebrew.get(refused).contains("המצב הנוכחי מופיע בשורה"));
+
+        String unreadable = "system_policy_exempt_social_signer_unreadable_row";
+        assertTrue(english.get(unreadable).contains("not shown as approved"));
+        assertTrue(english.get(unreadable).contains("current state below"));
+        assertTrue(hebrew.get(unreadable).contains("אינה מוצגת כמאושרת"));
+        assertTrue(hebrew.get(unreadable).contains("המצב הנוכחי שלה מופיע למטה"));
     }
 
     @Test

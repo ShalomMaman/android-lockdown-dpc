@@ -37,11 +37,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions
+import com.example.lockdowndpc.policy.BuiltInExemptionsController
+import com.example.lockdowndpc.policy.PackageIdentity
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -181,6 +186,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     val playCompatibilityRequested =
         remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
     val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
+    val exemptionsView = remember(revision) { loadExemptionsView(context) }
+    // A background pass can change what Android reports; re-read on return.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++ }
+    var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
 
     fun requireSession(): Boolean {
         if (AdminSession.isUnlocked()) {
@@ -299,6 +308,124 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         }
     }
 
+    /**
+     * Submits a change to the built-in block exemptions at the policy boundary.
+     *
+     * The policy controller checks authorization again before saving. The
+     * console refreshes the live Android state after the protection pass.
+     */
+    fun submitExemption(
+        trigger: String,
+        clearApprovals: Boolean = false,
+        operation: (BuiltInBlockExemptions.Settings) -> BuiltInBlockExemptions.Settings = { it },
+    ) {
+        if (working) {
+            return
+        }
+        if (AdminSession.isUnlocked()) {
+            AdminSession.extend()
+        }
+        working = true
+        message = null
+        coroutineScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    Result.success(
+                        if (clearApprovals) {
+                            BuiltInExemptionsController.clearApprovals(context.applicationContext)
+                        } else {
+                            BuiltInExemptionsController.change(
+                                context.applicationContext,
+                                { settings -> operation(settings) },
+                                trigger,
+                            )
+                        }
+                    )
+                } catch (exception: SecurityException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                } catch (exception: IllegalArgumentException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                } catch (exception: IllegalStateException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                }
+            }
+            working = false
+            revision++
+            val changed = outcome.getOrNull()
+            val result = changed?.result()
+            message = when {
+                outcome.exceptionOrNull() is SecurityException -> UiMessage(
+                    context.getString(R.string.system_policy_error_auth),
+                    isError = true,
+                )
+                outcome.isFailure ||
+                    changed?.status() == BuiltInExemptionsController.Status.NOT_SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_change_refused),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.CONTAINMENT_REFUSED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_containment_refused),
+                    isError = true,
+                )
+                result != null && !result.applied() -> UiMessage(
+                    context.getString(
+                        if (changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED) {
+                            R.string.system_policy_exempt_failed_and_audit_not_saved
+                        } else {
+                            R.string.system_policy_applied_failed
+                        },
+                        (result.errors().firstOrNull()
+                            ?: context.getString(R.string.error_unknown)).bidiIsolated(),
+                    ),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.FILTER_NOT_READY -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_filter_not_ready),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_audit_not_saved),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.PAUSED_REFUSED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_paused_refused),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.ACTIVE_ADMIN_REFUSED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_active_admin_refused),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.ADMINS_UNREADABLE -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_admins_unreadable),
+                    isError = true,
+                )
+                result == null -> null
+                else -> UiMessage(
+                    context.getString(R.string.system_policy_applied_ok),
+                    isError = false,
+                )
+            }
+        }
+    }
+
+    /** Pins the application to the signer it has right now, then submits. */
+    fun approveSocial(candidate: ExemptionCandidate) {
+        val signer = PackageIdentity.currentSignerSha256IncludingHidden(
+            context.packageManager,
+            candidate.packageName,
+        )
+        if (signer.isEmpty()) {
+            message = UiMessage(
+                context.getString(R.string.system_policy_exempt_social_signer_unreadable),
+                isError = true,
+            )
+            return
+        }
+        submitExemption("approve:${candidate.packageName}") { settings ->
+            settings.withSocial(candidate.packageName, signer)
+        }
+    }
+
     LockdownScreen(
         title = stringResource(R.string.system_policy_title),
         subtitle = stringResource(R.string.system_policy_subtitle),
@@ -364,6 +491,27 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             }
         }
 
+        Spacer(Modifier.height(20.dp))
+        key(revision) {
+            BuiltInExemptionsSection(
+                view = exemptionsView,
+                enabled = !working,
+                onRequestChrome = { pendingExemption = PendingExemption.Chrome },
+                onRemoveChrome = {
+                    submitExemption("remove:chrome") { settings -> settings.withChrome(false) }
+                },
+                onRequestSocial = { candidate ->
+                    pendingExemption = PendingExemption.Social(candidate)
+                },
+                onRemoveSocial = { candidate ->
+                    submitExemption("remove:${candidate.packageName}") { settings ->
+                        settings.withoutSocial(candidate.packageName)
+                    }
+                },
+                onClearApprovals = { submitExemption("clear-approvals", clearApprovals = true) },
+            )
+        }
+
         Spacer(Modifier.height(28.dp))
         PrimaryAction(
             text = stringResource(
@@ -384,6 +532,22 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 commit(change)
             },
             onDismiss = { pending = null },
+        )
+    }
+
+    pendingExemption?.let { change ->
+        ExemptionConfirmDialog(
+            pending = change,
+            onConfirm = {
+                pendingExemption = null
+                when (change) {
+                    PendingExemption.Chrome -> submitExemption("approve:chrome") { settings ->
+                        settings.withChrome(true)
+                    }
+                    is PendingExemption.Social -> approveSocial(change.candidate)
+                }
+            },
+            onDismiss = { pendingExemption = null },
         )
     }
 

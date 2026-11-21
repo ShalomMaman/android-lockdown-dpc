@@ -92,10 +92,17 @@ public final class SystemPolicyStore {
      * would restore a device to a policy weaker than the one it is running.
      */
     public static Map<SystemPolicyControl, Boolean> baseChoices(Context context) {
+        return baseChoices(context, HomeFilterController.isEnabled(context));
+    }
+
+    /**
+     * The same, for a home filter state a policy pass has already settled —
+     * including a pending teardown the pass holds, which must look enabled.
+     */
+    public static Map<SystemPolicyControl, Boolean> baseChoices(Context context, boolean homeFilterEnabled) {
         Map<SystemPolicyControl, Boolean> choices = PlayStoreCompatibility.baseChoices(
                 PlayStoreCompatibilityStore.isEnabled(context), explicitChoices(context));
-        return HomeFilterController.isEnabled(context)
-                ? HomeFilterPolicy.requireControls(choices) : choices;
+        return HomeFilterPolicy.choicesFor(choices, homeFilterEnabled);
     }
 
     /** What a control resolves to right now: the base choice, or the profile default. */

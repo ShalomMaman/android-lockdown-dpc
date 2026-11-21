@@ -71,11 +71,23 @@ public final class PackageIdentity {
      * {@code ""} when it has no single current signer.
      */
     public static String currentSignerSha256(PackageManager pm, String packageName) {
+        return currentSignerSha256(pm, packageName, 0);
+    }
+
+    /**
+     * The same reading for a package this device owner may have hidden: hidden
+     * packages answer only queries that include uninstalled packages.
+     */
+    public static String currentSignerSha256IncludingHidden(PackageManager pm, String packageName) {
+        return currentSignerSha256(pm, packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES);
+    }
+
+    private static String currentSignerSha256(PackageManager pm, String packageName, int extraFlags) {
         try {
             Signature current = null;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 PackageInfo info = pm.getPackageInfo(
-                        packageName, PackageManager.GET_SIGNING_CERTIFICATES);
+                        packageName, PackageManager.GET_SIGNING_CERTIFICATES | extraFlags);
                 SigningInfo signingInfo = info.signingInfo;
                 if (signingInfo == null || signingInfo.hasMultipleSigners()) {
                     return "";
@@ -88,7 +100,7 @@ public final class PackageIdentity {
             } else {
                 @SuppressWarnings("deprecation")
                 PackageInfo info = pm.getPackageInfo(
-                        packageName, PackageManager.GET_SIGNATURES);
+                        packageName, PackageManager.GET_SIGNATURES | extraFlags);
                 @SuppressWarnings("deprecation")
                 Signature[] signatures = info.signatures;
                 if (signatures == null || signatures.length != 1 || signatures[0] == null) {

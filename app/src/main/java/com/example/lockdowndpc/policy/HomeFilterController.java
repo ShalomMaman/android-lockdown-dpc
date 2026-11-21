@@ -28,6 +28,23 @@ public final class HomeFilterController {
 
     public record Snapshot(HomeFilterPolicy.Settings settings, HomeFilterPolicy.Report report) {}
 
+    /**
+     * Turning the filter off or removing its CA was refused: a Chrome approval
+     * is saved or unreadable, or Android does not report Chrome contained now.
+     */
+    public static final class FilterTeardownRefusedException extends IllegalStateException {
+        private final BuiltInBlockExemptions.TeardownVerdict verdict;
+
+        private FilterTeardownRefusedException(BuiltInBlockExemptions.TeardownVerdict verdict) {
+            super("Home filter teardown refused: " + verdict);
+            this.verdict = verdict;
+        }
+
+        public BuiltInBlockExemptions.TeardownVerdict verdict() {
+            return verdict;
+        }
+    }
+
     public static final class CorruptConfigurationException extends IllegalStateException {
         private CorruptConfigurationException() {
             super(CORRUPT_CONFIGURATION);
@@ -54,6 +71,11 @@ public final class HomeFilterController {
             }
             if (settings.configured()) {
                 throw new IllegalStateException("Home filter configuration is already present");
+            }
+            if (BuiltInBlockExemptions.isBuiltInBlocked(config.vpnPackage())) {
+                // A blocked browser, store or social application entered as the
+                // VPN would inherit the VPN's visibility override.
+                throw new IllegalArgumentException("A built-in blocked package cannot be the VPN");
             }
             return new HomeFilterPolicy.Settings(config, true, ca, false);
         });
@@ -89,17 +111,37 @@ public final class HomeFilterController {
             }
             HomeFilterPolicy.Settings before = requireSettings(context);
             HomeFilterPolicy.Settings after = operation.apply(before);
+            // Enforced here, before any side effect, from live facts only: no
+            // saved (or unreadable) Chrome approval, and Chrome observed
+            // contained right now.
+            if (BuiltInBlockExemptions.isFilterTeardown(before, after)) {
+                BuiltInBlockExemptions.TeardownVerdict verdict = teardownVerdict(context);
+                if (verdict != BuiltInBlockExemptions.TeardownVerdict.ALLOWED) {
+                    throw new FilterTeardownRefusedException(verdict);
+                }
+            }
             if (!before.equals(after)) {
-                HomeFilterStore.write(context, after);
+                try {
+                    HomeFilterStore.write(context, after);
+                } catch (IllegalStateException failedWrite) {
+                    // The previous settings were restored in memory; a pass
+                    // still runs so every package is contained against them.
+                    runPass(context);
+                    throw failedWrite;
+                }
                 AuditLog.append(context, "Home filter settings changed by administrator");
             }
-            if (AllowedAppsStore.isProtectionEnabled(context)) {
-                LockdownPolicyController.apply(context);
-            } else {
-                LockdownPolicyController.pause(context);
-            }
+            runPass(context);
             return read(context);
         });
+    }
+
+    private static void runPass(Context context) {
+        if (AllowedAppsStore.isProtectionEnabled(context)) {
+            LockdownPolicyController.apply(context);
+        } else {
+            LockdownPolicyController.pause(context);
+        }
     }
 
     /** Device-owner lifecycle entry point. It only reasserts saved administrator intent. */
@@ -110,11 +152,43 @@ public final class HomeFilterController {
             errors.add(CORRUPT_CONFIGURATION);
             return;
         }
+        reconcile(context, dpm, admin, errors, settledFilter(context, settings));
+    }
+
+    /**
+     * Reconciles the settings a policy pass already settled. A pending teardown
+     * (turn off, or CA removal) never finishes while a Chrome approval is saved
+     * or Chrome is not observed contained: the filter is kept on with its CA,
+     * the request stays pending, and the pass reports why. Boot and retry
+     * passes come through here too. The same settled value went to the pass's
+     * system policy and package steps.
+     */
+    static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
+                          List<String> errors, BuiltInBlockExemptions.PassFilter pass) {
+        HomeFilterPolicy.Settings settings = pass.stored();
+        if (settings == null) {
+            errors.add(CORRUPT_CONFIGURATION);
+            return;
+        }
         if (!settings.configured()) {
             return;
         }
-        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
+        boolean held = pass.held();
+        HomeFilterPolicy.Settings enforced = pass.effective();
+        if (held) {
+            errors.add("home-filter:teardown-held:" + pass.hold());
+        }
+        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
+        if (held) {
+            if (!report.androidSettingsConfirmed(enforced)) {
+                errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
+                        + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
+                        + ",private-dns=" + report.privateDns());
+            }
+            HomeFilterStore.saveReadback(context, report);
+            return;
+        }
         boolean verified = settings.enabled()
                 ? report.androidSettingsConfirmed(settings) : report.removed();
         if (!verified) {
@@ -129,6 +203,37 @@ public final class HomeFilterController {
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
         }
+    }
+
+    /**
+     * The single place that settles which home filter settings policy writers
+     * enforce: the stored settings, with a pending teardown held while the
+     * teardown guard refuses it. A policy pass (through ExemptionPassStart),
+     * maintenance open and restore, and pause all come through here.
+     *
+     * @return {@code null} when the stored settings cannot be read
+     */
+    public static BuiltInBlockExemptions.PassFilter settledFilter(
+            Context context, HomeFilterPolicy.Settings stored) {
+        return stored == null ? null
+                : BuiltInBlockExemptions.PassFilter.forPass(stored, () -> teardownVerdict(context));
+    }
+
+    public static BuiltInBlockExemptions.PassFilter settledFilter(Context context) {
+        return settledFilter(context, readStored(context));
+    }
+
+    /** Whether system policy must treat the home filter as on right now; see {@link #settledFilter}. */
+    public static boolean enforcedEnabled(Context context) {
+        return BuiltInBlockExemptions.PassFilter.enforcedEnabled(settledFilter(context));
+    }
+
+    /** The teardown guard's verdict from the raw approval flag and a live observation. */
+    static BuiltInBlockExemptions.TeardownVerdict teardownVerdict(Context context) {
+        return BuiltInBlockExemptions.teardownVerdict(
+                BuiltInBlockExemptionsStore.chromeFlag(context),
+                ExemptionObserver.observe(context, BuiltInBlockExemptions.CHROME),
+                AllowedAppsStore.isProtectionEnabled(context));
     }
 
     public static boolean isEnabled(Context context) {

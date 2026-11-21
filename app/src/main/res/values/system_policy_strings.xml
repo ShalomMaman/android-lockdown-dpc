@@ -139,6 +139,57 @@
     <string name="system_policy_play_compat_confirm_disable_title">Hide application stores again?</string>
     <string name="system_policy_play_compat_confirm_disable_body">The Google Play Store package is hidden again the next time policy is applied, and applications that need it may stop starting. The installation controls this mode kept on go back to your own saved choices.</string>
 
+
+    <!-- Built-in block exemptions -->
+    <string name="system_policy_section_exemptions">Exemptions from the built-in block</string>
+    <string name="system_policy_exempt_chrome_row">Chrome through the home filter</string>
+    <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed, and only while the home filter is on and protection is active. Before Chrome is shown, Device Guard sets and checks Chrome\'s managed settings: the home filter\'s proxy script is mandatory, so Chrome never connects directly when the script is unavailable; secure DNS, incognito mode, sign-in and developer tools are turned off. These settings also cover Custom Tabs and web apps that open in Chrome. If any condition is not met, Chrome is hidden before anything else changes. Every app\'s traffic still goes through the home filter\'s always-on VPN. Web pages shown inside other apps are not covered by Chrome\'s settings; they are filtered only by the home network. Pausing protection shows every app, Chrome included. Application stores can never be allowed.</string>
+    <string name="system_policy_exempt_audit_not_saved">The change was saved, but its audit entry could not be written.</string>
+    <string name="system_policy_exempt_android_state">Android reports: %1$s</string>
+    <string name="system_policy_exempt_observed_visible">available</string>
+    <string name="system_policy_exempt_observed_hidden">hidden</string>
+    <string name="system_policy_exempt_observed_suspended">suspended</string>
+    <string name="system_policy_exempt_observed_not_installed">not installed</string>
+    <string name="system_policy_exempt_observed_unknown">state could not be read</string>
+    <string name="system_policy_exempt_chrome_reason_shown">Allowed on the last pass</string>
+    <string name="system_policy_exempt_chrome_reason_not_exempted">Not allowed</string>
+    <string name="system_policy_exempt_chrome_reason_paused">Protection is paused</string>
+    <string name="system_policy_exempt_chrome_reason_filter_off">The home filter is off or its settings could not be read</string>
+    <string name="system_policy_exempt_chrome_reason_not_installed">Chrome is not installed</string>
+    <string name="system_policy_exempt_chrome_reason_signer">The installed Chrome is not signed by Google</string>
+    <string name="system_policy_exempt_chrome_reason_contain_unverified">Android did not confirm hiding Chrome, so its settings were not changed</string>
+    <string name="system_policy_exempt_chrome_reason_config_unverified">Android did not confirm it stored Chrome\'s managed settings</string>
+    <string name="system_policy_exempt_chrome_reason_filter_unconfirmed">The home filter did not confirm its settings on the last pass</string>
+    <string name="system_policy_exempt_chrome_reason_show_unverified">Android did not confirm showing Chrome, so it was hidden again</string>
+    <string name="system_policy_exempt_observed_disabled">disabled</string>
+    <string name="system_policy_exempt_chrome_reason_hide_refused">Chrome had to be hidden, but Android did not confirm the hide</string>
+    <string name="system_policy_exempt_chrome_reason_disabled">Chrome is disabled in Android</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview">Not available on this device: Android reports Chrome as the system WebView</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">Not available on this device: Chrome may serve as the system WebView here</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_android_version">Not available on this Android version</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">The app is not shown as approved because its signer could not be read. See its current state below.</string>
+    <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
+    <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
+    <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
+    <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Device Guard block it again. Remove its administrator access in Android Settings first.</string>
+    <string name="system_policy_exempt_admins_unreadable">The app was not approved: Device Guard could not check the device administrators. Try again.</string>
+    <string name="system_policy_exempt_containment_refused">The approval was removed. Android refused to block an app before the removal was saved. The protection pass retries the block. Check the app\'s row for its current state.</string>
+    <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
+    <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
+    <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
+    <string name="system_policy_exempt_social_approved">Approved</string>
+    <string name="system_policy_exempt_social_not_approved">Not approved</string>
+    <string name="system_policy_exempt_filter_not_ready">Chrome was not allowed: turn on the home filter and let its pending changes finish first. If the profile has a filter certificate, it must be installed.</string>
+    <string name="system_policy_exempt_social_title">Approved social and messaging applications</string>
+    <string name="system_policy_exempt_social_body">These applications are blocked by the built-in list. Turn one on to keep it available while protection is on. Each approval is tied to the developer signature the app has now; an app with a different signature stays blocked. Turning it off blocks it again at once.</string>
+    <string name="system_policy_exempt_social_none_installed">No built-in social or messaging application is installed on this device.</string>
+    <string name="system_policy_exempt_social_signer_mismatch">Approved, but the installed app has a different signature</string>
+    <string name="system_policy_exempt_social_signer_unreadable">The app\'s signature could not be read, so it cannot be approved.</string>
+    <string name="system_policy_exempt_change_refused">The change was not saved. Check the details and try again.</string>
+    <string name="system_policy_exempt_confirm_chrome_title">Allow Chrome through the home filter?</string>
+    <string name="system_policy_exempt_confirm_chrome_body">Chrome will be shown only while the home filter is on and its settings were confirmed in the same check, protection is active, and Android confirms it stored Chrome\'s managed settings, including the mandatory filter proxy. If any condition is not met, Chrome is hidden again automatically. Every other browser stays blocked.</string>
+    <string name="system_policy_exempt_confirm_social_title">Allow this application?</string>
+    <string name="system_policy_exempt_confirm_social_body">%1$s will no longer be blocked by the built-in social and messaging list while protection is on. The approval is tied to the app\'s current signature. Turning it off later blocks it again at once.</string>
     <!-- Audit -->
     <string name="audit_play_compatibility_changed">Google Play compatibility changed: %1$s</string>
     <string name="audit_system_policy_unverified">System policy not verified: %1$s</string>

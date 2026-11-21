@@ -298,6 +298,152 @@ and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
 [Tailscale Android managed configuration schema]: https://github.com/tailscale/tailscale-android/blob/main/android/src/main/res/xml/app_restrictions.xml
 [Tailscale system policies]: https://tailscale.com/kb/1315/mdm-keys
 
+### Chrome and approved apps through the home filter
+
+With protection on, every browser, application store and well-known social or
+messaging app is hidden. **System policy → Exemptions from the built-in block**
+offers two narrow, default-off exceptions. Adding either needs the
+administrator PIN session, as does clearing all approvals. An ordinary removal
+can start without a session. If a session ends while a change is in progress,
+the change is refused before saving. Edits require protection to be on
+("Resume protection to change approvals" otherwise). Each save is written to
+the audit log (before → after) and followed by a protected pass. If a save
+fails, the console reports the failure and the running process ignores all
+exemptions on subsequent passes until a save succeeds. The next edit still
+starts from the last saved decision. Any save while the failure is unresolved,
+including a removal, requires an administrator session. The audit log records
+when a removal was saved without a session.
+
+**Chrome.** Only `com.android.chrome`, only on Android 10 or later, and only
+while Chrome is not the system WebView provider; otherwise the exemption is
+inert (shown as not available) and Chrome is handled exactly as without it. Its
+single current signer must be Google's release certificate. Each protected pass
+shows Chrome only when:
+
+- an administrator exempted Chrome;
+- the home filter is enabled and protection is active (not paused);
+- Chrome's managed configuration was written with
+  `setApplicationRestrictions` and read back before Chrome is unhidden.
+
+The configuration makes Chrome fail closed on its own:
+
+- `ProxySettings` (a JSON string, the form Chrome's Android schema uses for
+  dictionary policies) set to
+  `{"ProxyMode":"pac_script","ProxyPacUrl":"<filter PAC>","ProxyPacMandatory":true}`.
+  `ProxyPacMandatory` exists only inside `ProxySettings`
+  ([`ProxySettings.yaml`](https://source.chromium.org/chromium/chromium/src/+/main:components/policy/resources/templates/policy_definitions/Miscellaneous/ProxySettings.yaml),
+  supported on Android from Chrome 30), so the separate, deprecated
+  `ProxyMode`, `ProxyPacUrl`, `ProxyServer`, `ProxyServerMode` and
+  `ProxyBypassList` keys are removed rather than written.
+- `IncognitoModeAvailability=1`, `DnsOverHttpsMode=off`,
+  `DeveloperToolsAvailability=2` (honoured only by Chrome versions that
+  support it on Android; older ones ignore it),
+  `BrowserSignin=0`.
+
+A pass that does not continue the last verified one — resuming from pause,
+the first pass after boot, a pass after a failed or interrupted one, or any
+change to the home filter settings since — hides Chrome in its opening step
+before protection is marked active, whatever stored state says, and shows it
+again only at the end of that same pass once the filter's own reconciliation
+confirms the VPN, PAC and CA. Every protected pass starts with one containment step, before any early return
+(unreadable home filter settings included): each installed catalogue social app
+without a verified exemption is hidden, a browser-backed WebView provider is
+suspended by the existing routine, and Chrome, unless it is already allowed, is
+hidden; each is read back, and a pass that stops on unreadable settings records
+what Android reports before it returns. Chrome's configuration is written only
+after Android confirmed that hide. Chrome is shown again only after the home
+filter's own reconciliation in the same pass reported no error (so enabling the
+filter with a missing VPN app keeps it hidden); a show Android does not confirm
+is undone, and links follow that final result. The home filter can be turned off, or its CA
+removed, only when no Chrome approval is saved (an unreadable approval record
+counts as saved) and, while protection is on, Android reports Chrome hidden,
+suspended or not installed right now. `HomeFilterController` checks this live,
+before any change; the home filter screen explains a refusal. A teardown that
+was requested earlier and is still pending is held the same way on every pass,
+including boot: each pass settles once, after containment, which filter
+settings it enforces, and a held teardown is "on" to every step — system
+policy (its required restrictions stay), packages and the filter's own
+reconciliation — while the pass reports why. Maintenance windows (open and
+restore) and pausing protection use the same settled state, from one helper
+(`HomeFilterController.settledFilter`), so no policy writer treats a held
+turn-off as off.
+Chrome can be approved only while the filter is on, nothing is pending, and its
+CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
+restricts CA removal in Android Settings during the approval, subject to the
+confirmation limit below. Device Guard sets and reads it back before saving a
+Chrome approval. Each pass confirms the restriction before checking the CA
+for Chrome's release. The teardown guard must allow teardown before Device
+Guard lifts the restriction, so a refused hide keeps it in force. Every save
+writes a format marker, and one parser reads the record for every use
+(enforcement, kiosk eligibility, the teardown guard, the console and edits): a
+file that exists without the marker — zero bytes, damaged, or an older format —
+is unreadable, enforces no approval and refuses filter teardown. Pausing first
+removes the evidence a later pass would use to continue a verified one, and is
+refused if Android does not persist that. If the
+stored exemption record cannot be read, no exemption applies, ordinary edits
+are refused, and only an explicit "Clear all approvals" replaces it. A failed
+save restores the exact stored record. A Chrome that is
+disabled in Android is never shown. A home filter save that
+fails to persist restores the previous settings in memory and still runs a
+pass. Every Android state the console shows is read live when the screen opens
+or returns, never from a stored result: a disabled app reads as disabled, an
+uninstalled one as not installed, and every saved social approval is listed
+(installed or not) so it can still be removed. A refused hide is an error, so the pass is
+reported unverified. The console shows, per app, only what Android last
+reported for the current decision. While Chrome is shown, `http`/`https`
+links route to it; Custom Tabs and Trusted Web Activities that
+open in Chrome run inside the Chrome package and follow its managed
+configuration. Network enforcement for every app stays the home filter's
+always-on VPN in lockdown; Chrome does not re-prove it.
+
+**Approved social and messaging apps.** Only packages in a fixed, reviewed
+list (`BuiltInBlockExemptions.EXEMPTABLE_SOCIAL`). Each approval pins the
+app's single current signer digest. Every pass (package changes trigger one)
+re-reads it with the hidden-package query and shows the app only on an exact
+match. A different or unreadable signer requires containment. Such an app can
+be a single-app kiosk target only while its exemption verifies. Application stores
+and browsers can never be approved this way, and a built-in blocked package
+cannot be configured as the home filter's VPN.
+
+**Known limits.**
+
+- After a reboot, a Chrome that was shown before it may stay visible until
+  the first protected pass runs (Device Guard does no direct-boot work). Its
+  managed configuration — the mandatory filter proxy — and the always-on VPN
+  lockdown still apply in that window, and the first pass hides it unless it
+  continues the last verified pass.
+- A CA-removal confirmation already open in Android Settings when a Chrome
+  approval is saved can still complete because the confirmation handler does
+  not recheck `DISALLOW_CONFIG_CREDENTIALS`. The next protection pass detects
+  the missing CA and tries to reinstall it. If the pass cannot verify the CA,
+  it hides Chrome. Chrome may stay visible if reinstallation succeeds and
+  the pass verifies the filter. Chrome's managed PAC and the always-on VPN
+  lockdown stay in force.
+  [AOSP confirmation handler](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/TrustedCredentialsDialogBuilder.java#163)
+- A failed link-routing step does not hide Chrome or fail the pass: links
+  fall back to the blocked page and the failure is logged on every pass and
+  audited once, when it starts and again when it recovers.
+- Android refuses to hide an active device administrator. Such an app cannot
+  be approved, and an approved app that becomes one loses its approval on the
+  next pass. A catalogue app whose hide is refused is suspended instead; if
+  Android refuses that too, the app stays launchable and every pass reports
+  `CONTAINMENT_REFUSED` for it (audited when the set of such apps changes).
+  Remove the app's administrator access in Android Settings.
+- Removing an approval, or clearing all approvals, first hides (or suspends)
+  the affected apps, including Chrome when its exemption is in scope, and
+  only then saves the removal. For an unreadable record, this includes every
+  installed social app in the approval catalogue. If Android refuses, the
+  removal is still saved, the console reports it, and every pass keeps trying.
+  After a failed save, the running process keeps enforcing containment on
+  later protection passes until a save succeeds. Pausing protection lifts a
+  containment suspension too.
+
+- Web content that another app renders itself (its own WebView or in-app
+  browser) does not follow Chrome's policies; it is filtered only at the
+  network boundary. Constrain it at the gateway, as above.
+- Pausing protection is an administrator action that lifts it: every hidden
+  app, Chrome included, becomes visible until protection is resumed.
+
 ## Runbook B — ADB fallback
 
 Use when there is no camera path, when the OEM wizard has no QR entry point, or

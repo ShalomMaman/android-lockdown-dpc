@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions
 import com.example.lockdowndpc.policy.HomeFilterCertificate
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
@@ -125,6 +126,14 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 selectedCa = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (refused: HomeFilterController.FilterTeardownRefusedException) {
+                error = when (refused.verdict()) {
+                    BuiltInBlockExemptions.TeardownVerdict.APPROVAL_UNREADABLE ->
+                        R.string.home_filter_chrome_approval_unreadable
+                    BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED ->
+                        R.string.home_filter_chrome_not_contained
+                    else -> R.string.home_filter_chrome_approval_blocks_change
+                }
             } catch (_: HomeFilterController.CorruptConfigurationException) {
                 snapshot = null
                 error = R.string.home_filter_corrupt_settings

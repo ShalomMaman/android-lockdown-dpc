@@ -18,11 +18,25 @@ public final class AuditLog {
     private AuditLog() {}
 
     public static synchronized void append(Context context, String event) {
+        edit(context, event).apply();
+    }
+
+    /**
+     * Appends and persists before returning. For entries that must be on disk
+     * together with the change they record.
+     *
+     * @return whether the entry was persisted
+     */
+    public static synchronized boolean appendCommitted(Context context, String event) {
+        return edit(context, event).commit();
+    }
+
+    private static SharedPreferences.Editor edit(Context context, String event) {
         SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         ArrayList<String> entries = new ArrayList<>(rawEntries(prefs));
         entries.add(System.currentTimeMillis() + "|" + event.replace('\n', ' '));
         int first = Math.max(0, entries.size() - MAX_ENTRIES);
-        prefs.edit().putString(KEY_ENTRIES, String.join("\n", entries.subList(first, entries.size()))).apply();
+        return prefs.edit().putString(KEY_ENTRIES, String.join("\n", entries.subList(first, entries.size())));
     }
 
     public static synchronized String formatted(Context context) {
