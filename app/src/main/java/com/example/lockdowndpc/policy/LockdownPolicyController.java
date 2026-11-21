@@ -75,13 +75,8 @@ public final class LockdownPolicyController {
             }
 
             @Override
-            public HomeFilterPolicy.Settings storedFilter() {
-                return homeFilter;
-            }
-
-            @Override
-            public BuiltInBlockExemptions.TeardownVerdict teardownVerdict() {
-                return HomeFilterController.teardownVerdict(context);
+            public BuiltInBlockExemptions.PassFilter settleFilter() {
+                return HomeFilterController.settledFilter(context, homeFilter);
             }
 
             @Override
@@ -457,7 +452,7 @@ public final class LockdownPolicyController {
         SystemPolicyReport report = SystemPolicyEnforcer.release(
                 Build.VERSION.SDK_INT,
                 new SystemPolicyDeviceGateway(dpm, admin),
-                HomeFilterController.isEnabled(context) ? HomeFilterPolicy.REQUIRED_CONTROLS : Set.of()
+                HomeFilterController.enforcedEnabled(context) ? HomeFilterPolicy.REQUIRED_CONTROLS : Set.of()
         );
         recordSystemPolicy(context, report);
         for (SystemPolicyControlStatus failure : report.failures()) {

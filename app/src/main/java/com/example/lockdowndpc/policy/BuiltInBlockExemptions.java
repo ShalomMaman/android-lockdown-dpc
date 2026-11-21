@@ -312,6 +312,17 @@ public final class BuiltInBlockExemptions {
             return hold != null;
         }
 
+        /**
+         * Whether the home filter counts as on for system policy — the one
+         * answer every policy writer uses, in a pass or outside one
+         * (maintenance open and restore, pause). A held teardown is on;
+         * settings that could not be read ({@code null}) are on too, failing
+         * closed exactly like {@code HomeFilterController.isEnabled}.
+         */
+        public static boolean enforcedEnabled(PassFilter filter) {
+            return filter == null || filter.stored() == null || filter.effective().enabled();
+        }
+
         /** Holds a pending teardown unless the guard allows it now. */
         public static PassFilter forPass(
                 HomeFilterPolicy.Settings stored,

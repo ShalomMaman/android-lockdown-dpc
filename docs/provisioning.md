@@ -357,7 +357,10 @@ was requested earlier and is still pending is held the same way on every pass,
 including boot: each pass settles once, after containment, which filter
 settings it enforces, and a held teardown is "on" to every step — system
 policy (its required restrictions stay), packages and the filter's own
-reconciliation — while the pass reports why.
+reconciliation — while the pass reports why. Maintenance windows (open and
+restore) and pausing protection use the same settled state, from one helper
+(`HomeFilterController.settledFilter`), so no policy writer treats a held
+turn-off as off.
 Chrome can be approved only while the filter is on, nothing is pending, and its
 CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
 keeps the CA from being removed in Android Settings for the approval's whole

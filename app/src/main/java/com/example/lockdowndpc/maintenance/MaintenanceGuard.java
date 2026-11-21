@@ -142,7 +142,9 @@ public final class MaintenanceGuard {
             OpenRequest request
     ) {
         Context appContext = context.getApplicationContext();
-        if (HomeFilterController.isEnabled(appContext)
+        // The settled filter state, not the stored switch: a turn-off the
+        // teardown guard is holding is still on for every policy writer.
+        if (HomeFilterController.enforcedEnabled(appContext)
                 && !HomeFilterPolicy.permitsRelaxing(
                         MaintenanceCapability.relaxedControls(request.capabilities()))) {
             return refusedBeforeAnySend(current, "home-filter-controls-required");
@@ -436,7 +438,10 @@ public final class MaintenanceGuard {
                 // lock a Google Play compatibility opt-in pins on. Restoring the
                 // raw switches would end a window by leaving the Store available
                 // with installs unlocked.
-                SystemPolicyStore.baseChoices(context),
+                // The settled filter state as well: a restore outside a policy
+                // pass must not drop the home filter's required controls while a
+                // turn-off is held.
+                SystemPolicyStore.baseChoices(context, HomeFilterController.enforcedEnabled(context)),
                 new SystemPolicyDeviceGateway(dpm, LockdownAdminReceiver.componentName(context)),
                 // No compatibility preference is handed in on purpose. The
                 // precondition inside the gateway must fire on the shape of the

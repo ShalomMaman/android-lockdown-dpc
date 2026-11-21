@@ -152,8 +152,7 @@ public final class HomeFilterController {
             errors.add(CORRUPT_CONFIGURATION);
             return;
         }
-        reconcile(context, dpm, admin, errors,
-                BuiltInBlockExemptions.PassFilter.forPass(settings, () -> teardownVerdict(context)));
+        reconcile(context, dpm, admin, errors, settledFilter(context, settings));
     }
 
     /**
@@ -204,6 +203,29 @@ public final class HomeFilterController {
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
         }
+    }
+
+    /**
+     * The single place that settles which home filter settings policy writers
+     * enforce: the stored settings, with a pending teardown held while the
+     * teardown guard refuses it. A policy pass (through ExemptionPassStart),
+     * maintenance open and restore, and pause all come through here.
+     *
+     * @return {@code null} when the stored settings cannot be read
+     */
+    public static BuiltInBlockExemptions.PassFilter settledFilter(
+            Context context, HomeFilterPolicy.Settings stored) {
+        return stored == null ? null
+                : BuiltInBlockExemptions.PassFilter.forPass(stored, () -> teardownVerdict(context));
+    }
+
+    public static BuiltInBlockExemptions.PassFilter settledFilter(Context context) {
+        return settledFilter(context, readStored(context));
+    }
+
+    /** Whether system policy must treat the home filter as on right now; see {@link #settledFilter}. */
+    public static boolean enforcedEnabled(Context context) {
+        return BuiltInBlockExemptions.PassFilter.enforcedEnabled(settledFilter(context));
     }
 
     /** The teardown guard's verdict from the raw approval flag and a live observation. */

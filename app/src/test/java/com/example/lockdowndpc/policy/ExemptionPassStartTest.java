@@ -39,15 +39,14 @@ public final class ExemptionPassStartTest {
                 true, null, false);
         BuiltInBlockExemptions.TeardownVerdict verdict = BuiltInBlockExemptions.TeardownVerdict.ALLOWED;
 
+        /** Same core as HomeFilterController.settledFilter: PassFilter.forPass with the live guard. */
         @Override
-        public HomeFilterPolicy.Settings storedFilter() {
-            return storedFilter;
-        }
-
-        @Override
-        public BuiltInBlockExemptions.TeardownVerdict teardownVerdict() {
-            calls.add("teardown-guard");
-            return verdict;
+        public BuiltInBlockExemptions.PassFilter settleFilter() {
+            calls.add("settle-filter");
+            return BuiltInBlockExemptions.PassFilter.forPass(storedFilter, () -> {
+                calls.add("teardown-guard");
+                return verdict;
+            });
         }
 
         @Override

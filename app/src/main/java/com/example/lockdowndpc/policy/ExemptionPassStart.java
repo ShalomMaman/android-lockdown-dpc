@@ -44,11 +44,12 @@ final class ExemptionPassStart {
 
         boolean homeFilterReadable();
 
-        /** The stored home filter settings; only asked once they are known to be readable. */
-        HomeFilterPolicy.Settings storedFilter();
-
-        /** The live teardown guard. */
-        BuiltInBlockExemptions.TeardownVerdict teardownVerdict();
+        /**
+         * The home filter settings this pass enforces, from the single settling
+         * helper ({@code HomeFilterController.settledFilter}); only asked once
+         * the stored settings are known to be readable.
+         */
+        BuiltInBlockExemptions.PassFilter settleFilter();
 
         /** Why the Chrome exemption cannot act on this device, when it is out of scope. */
         ChromeFilterExemption.Decision unavailableDecision();
@@ -96,8 +97,7 @@ final class ExemptionPassStart {
         ChromeFilterExemption.Decision decision = chrome == null
                 ? steps.unavailableDecision()
                 : steps.decideChrome(chrome, steps.protectionActive(), errors);
-        BuiltInBlockExemptions.PassFilter filter =
-                BuiltInBlockExemptions.PassFilter.forPass(steps.storedFilter(), steps::teardownVerdict);
+        BuiltInBlockExemptions.PassFilter filter = steps.settleFilter();
         return new Start(Stop.NONE, decision, filter);
     }
 }

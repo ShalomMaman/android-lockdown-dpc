@@ -284,6 +284,27 @@ public final class BuiltInBlockExemptionsTest {
     }
 
     @Test
+    public void maintenanceAndPauseSeeTheSameSettledStateAsThePass() {
+        // The one answer every policy writer uses outside a pass too.
+        HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
+        assertTrue("held turn-off is on", BuiltInBlockExemptions.PassFilter.enforcedEnabled(
+                BuiltInBlockExemptions.PassFilter.forPass(pendingDisable,
+                        () -> BuiltInBlockExemptions.TeardownVerdict.CHROME_APPROVED)));
+        assertFalse("allowed turn-off is off", BuiltInBlockExemptions.PassFilter.enforcedEnabled(
+                BuiltInBlockExemptions.PassFilter.forPass(pendingDisable,
+                        () -> BuiltInBlockExemptions.TeardownVerdict.ALLOWED)));
+        assertTrue("unreadable settings fail closed", BuiltInBlockExemptions.PassFilter.enforcedEnabled(null));
+        assertFalse("never configured", BuiltInBlockExemptions.PassFilter.enforcedEnabled(
+                BuiltInBlockExemptions.PassFilter.forPass(HomeFilterPolicy.Settings.OFF,
+                        () -> BuiltInBlockExemptions.TeardownVerdict.ALLOWED)));
+        assertEquals("maintenance restore keeps the install lock while a turn-off is held",
+                Boolean.TRUE, HomeFilterPolicy.choicesFor(Map.of(), BuiltInBlockExemptions.PassFilter.enforcedEnabled(
+                        BuiltInBlockExemptions.PassFilter.forPass(pendingDisable,
+                                () -> BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED)))
+                        .get(SystemPolicyControl.APP_STORES_AND_INSTALLERS));
+    }
+
+    @Test
     public void anAllowedTeardownIsEnforcedAsStored() {
         HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
         BuiltInBlockExemptions.PassFilter pass = BuiltInBlockExemptions.PassFilter.forPass(
