@@ -6,6 +6,9 @@ import java.util.List;
  * The start of a protected pass, in the one order that is allowed:
  *
  * <ol>
+ *   <li>whether this pass continues the last verified one, read before
+ *       anything changes; when it does not (resume, boot, after a failure, a
+ *       changed filter profile), Chrome is contained unconditionally;</li>
  *   <li>the single containment step — every built-in blocked social package
  *       without a verified exemption is hidden, a browser-backed WebView
  *       provider is suspended by the existing routine (an earlier call of the
@@ -60,8 +63,19 @@ final class ExemptionPassStart {
         /** The existing WebView-provider suspension routine, called early. */
         void containWebViewProvider(List<String> errors);
 
-        /** {@code null} when the Chrome exemption is not in scope on this pass. */
-        ChromeFilterExemption.Containment containChrome(List<String> errors);
+        /**
+         * Whether this pass continues the last verified, active pass in the
+         * same boot with the same home filter settings. Read before the pass
+         * marks itself started.
+         */
+        boolean continuesVerifiedPass();
+
+        /**
+         * {@code null} when the Chrome exemption is not in scope on this pass.
+         *
+         * @param mayKeepAllowed {@code false} hides Chrome whatever stored state says
+         */
+        ChromeFilterExemption.Containment containChrome(List<String> errors, boolean mayKeepAllowed);
 
         /** Records what Android reports now, for a pass that stops early. */
         void recordEarlyReadback(List<String> errors);
@@ -80,9 +94,10 @@ final class ExemptionPassStart {
         boolean deviceOwner = steps.deviceOwner();
         ChromeFilterExemption.Containment chrome = null;
         if (deviceOwner) {
+            boolean continuation = steps.continuesVerifiedPass();
             steps.containSocial(errors);
             steps.containWebViewProvider(errors);
-            chrome = steps.containChrome(errors);
+            chrome = steps.containChrome(errors, continuation);
         }
         if (!steps.homeFilterReadable()) {
             if (deviceOwner) {

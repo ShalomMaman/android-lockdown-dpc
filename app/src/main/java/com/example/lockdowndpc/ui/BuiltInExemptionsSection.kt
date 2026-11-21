@@ -157,6 +157,8 @@ internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = wh
     ChromeFilterExemption.Decision.NOT_INSTALLED -> R.string.system_policy_exempt_chrome_reason_not_installed
     ChromeFilterExemption.Decision.DISABLED -> R.string.system_policy_exempt_chrome_reason_disabled
     ChromeFilterExemption.Decision.SIGNER_UNVERIFIED -> R.string.system_policy_exempt_chrome_reason_signer
+    ChromeFilterExemption.Decision.SIGNER_UNREADABLE ->
+        R.string.system_policy_exempt_chrome_reason_signer_unreadable
     ChromeFilterExemption.Decision.CONTAIN_UNVERIFIED ->
         R.string.system_policy_exempt_chrome_reason_contain_unverified
     ChromeFilterExemption.Decision.CONFIG_UNVERIFIED ->

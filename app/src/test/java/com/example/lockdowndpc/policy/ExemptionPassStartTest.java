@@ -69,9 +69,19 @@ public final class ExemptionPassStartTest {
             calls.add("record-readback");
         }
 
+        boolean continuation = true;
+        Boolean mayKeepAllowedSeen;
+
         @Override
-        public Containment containChrome(List<String> errors) {
+        public boolean continuesVerifiedPass() {
+            calls.add("continuation?");
+            return continuation;
+        }
+
+        @Override
+        public Containment containChrome(List<String> errors, boolean mayKeepAllowed) {
             calls.add("contain-chrome");
+            mayKeepAllowedSeen = mayKeepAllowed;
             return chromeInScope ? Containment.CONTAINED : null;
         }
 
@@ -100,7 +110,7 @@ public final class ExemptionPassStartTest {
         steps.homeFilterReadable = false;
         ExemptionPassStart.Start start = ExemptionPassStart.begin(steps, new ArrayList<>());
         assertEquals(Stop.CORRUPT_HOME_FILTER, start.stop());
-        assertEquals(List.of("contain-social", "suspend-webview-provider", "contain-chrome",
+        assertEquals(List.of("continuation?", "contain-social", "suspend-webview-provider", "contain-chrome",
                 "check-home-filter", "record-readback"), steps.calls);
         assertFalse("nothing after the early return runs", steps.calls.contains("decide-chrome"));
     }
@@ -137,6 +147,24 @@ public final class ExemptionPassStartTest {
                 HomeFilterPolicy.choicesFor(java.util.Map.of(), start.filter().effective().enabled());
         assertEquals(Boolean.TRUE, systemPolicy.get(SystemPolicyControl.APP_STORES_AND_INSTALLERS));
         assertFalse(start.filter().stored().enabled());
+    }
+
+    @Test
+    public void aPassThatDoesNotContinueAVerifiedOneContainsChromeUnconditionallyBeforeStarting() {
+        // Resume from pause, boot, after a failure or a changed filter profile.
+        RecordingSteps steps = new RecordingSteps();
+        steps.continuation = false;
+        ExemptionPassStart.begin(steps, new ArrayList<>());
+        assertEquals(Boolean.FALSE, steps.mayKeepAllowedSeen);
+        assertTrue(steps.calls.indexOf("continuation?") < steps.calls.indexOf("contain-chrome"));
+        assertTrue(steps.calls.indexOf("contain-chrome") < steps.calls.indexOf("start"));
+    }
+
+    @Test
+    public void aContinuingPassMayKeepAnAllowedChrome() {
+        RecordingSteps steps = new RecordingSteps();
+        ExemptionPassStart.begin(steps, new ArrayList<>());
+        assertEquals(Boolean.TRUE, steps.mayKeepAllowedSeen);
     }
 
     @Test

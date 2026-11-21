@@ -67,6 +67,11 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
+        public void reconcileCredentialsLock() {
+            calls.add("lock-reconcile");
+        }
+
+        @Override
         public boolean protectionActive() {
             return protectionActive;
         }
@@ -79,16 +84,17 @@ public final class BuiltInExemptionsControllerTest {
     }
 
     @Test
-    public void aFailedCommitMakesNoChange() {
+    public void aFailedFirstGrantLeavesNoLockBehind() {
         RecordingSink sink = new RecordingSink();
         sink.writeSucceeds = false;
         BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
                 Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink);
         assertEquals(Status.NOT_SAVED, outcome.status());
         assertNull(outcome.result());
-        // The credentials lock is set before the write and stays set after a
-        // failed one; a later pass releases it only when the guard allows.
-        assertEquals("no audit and no pass after a failed write", List.of("lock", "write"), sink.calls);
+        // The lock is set before the write; after the failed write the record
+        // is restored and the lock is reconciled against it before returning.
+        assertEquals("no audit and no pass after a failed write",
+                List.of("lock", "write", "lock-reconcile"), sink.calls);
     }
 
     @Test
@@ -128,15 +134,24 @@ public final class BuiltInExemptionsControllerTest {
     }
 
     @Test
-    public void anApprovalWhileProtectionIsPausedIsStoredOnly() {
+    public void everyEditIsRefusedWhileProtectionIsPaused() {
+        Settings saved = Settings.NONE.withChrome(true).withSocial("com.whatsapp", SIGNER);
+        for (java.util.function.UnaryOperator<Settings> edit : List.<java.util.function.UnaryOperator<Settings>>of(
+                settings -> settings.withChrome(true),
+                settings -> settings.withChrome(false),
+                settings -> settings.withoutSocial("com.whatsapp"),
+                settings -> settings.withSocial("com.whatsapp", "bb".repeat(32)))) {
+            RecordingSink sink = new RecordingSink();
+            sink.protectionActive = false;
+            BuiltInExemptionsController.Outcome outcome =
+                    BuiltInExemptionsController.change(saved, edit, true, "edit", sink);
+            assertEquals(Status.PAUSED_REFUSED, outcome.status());
+            assertTrue("nothing written, no lock changed: " + sink.calls, sink.calls.isEmpty());
+        }
         RecordingSink sink = new RecordingSink();
         sink.protectionActive = false;
-        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
-                Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink);
-        assertEquals(Status.SAVED, outcome.status());
-        assertNull(outcome.result());
-        assertEquals(Settings.NONE.withChrome(true), sink.written);
-        assertTrue("no pass runs while paused", sink.calls.stream().noneMatch("pass"::equals));
+        assertEquals(Status.PAUSED_REFUSED, BuiltInExemptionsController.clear(true, sink).status());
+        assertTrue(sink.calls.isEmpty());
     }
 
     @Test
@@ -257,10 +272,9 @@ public final class BuiltInExemptionsControllerTest {
     }
 
     @Test
-    public void theCredentialsLockIsSetBeforeAChromeApprovalIsSavedEvenWhilePaused() {
+    public void theCredentialsLockIsSetBeforeAChromeApprovalIsSaved() {
         RecordingSink sink = new RecordingSink();
-        sink.protectionActive = false;
-        assertEquals(Status.SAVED, BuiltInExemptionsController.change(
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
                 Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink).status());
         assertTrue(sink.calls.toString(), sink.calls.indexOf("lock") >= 0
                 && sink.calls.indexOf("lock") < sink.calls.indexOf("write"));

@@ -106,9 +106,15 @@ public final class LockdownPolicyController {
             }
 
             @Override
-            public ChromeFilterExemption.Containment containChrome(List<String> containErrors) {
+            public boolean continuesVerifiedPass() {
+                return BuiltInBlockExemptionsStore.continuesVerifiedPass(context, homeFilter);
+            }
+
+            @Override
+            public ChromeFilterExemption.Containment containChrome(
+                    List<String> containErrors, boolean mayKeepAllowed) {
                 return chromeGateway == null ? null : ChromeFilterExemption.contain(
-                        exemptions.chrome(), filterEnabled, pacUrl, chromeGateway, containErrors);
+                        exemptions.chrome(), filterEnabled, pacUrl, mayKeepAllowed, chromeGateway, containErrors);
             }
 
             @Override
@@ -192,6 +198,9 @@ public final class LockdownPolicyController {
                 clearMaintenanceWindow(context, "home-filter");
             }
             AllowedAppsStore.markApplySucceeded(context);
+            // The next pass may keep an allowed Chrome as it is only while it
+            // continues this one: same boot, same home filter settings.
+            BuiltInBlockExemptionsStore.recordVerifiedPass(context, homeFilter);
             Log.i(TAG, "Policy apply verified; blocked=" + packageCounts[0]
                     + ", allowed=" + packageCounts[1]);
         } else {
@@ -1257,6 +1266,15 @@ public final class LockdownPolicyController {
                 BuiltInBlockExemptionsStore.chromeFlag(context), HomeFilterController.teardownVerdict(context));
         return target == null
                 || BuiltInBlockExemptions.reconcileCredentialsLock(target, credentialsLock(dpm, admin), errors);
+    }
+
+    /** The same reconciliation outside a pass, after a failed approval save. */
+    static void reconcileCredentialsLock(Context context) {
+        DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+        if (dpm != null && dpm.isDeviceOwnerApp(context.getPackageName())) {
+            reconcileCredentialsLock(context, dpm, LockdownAdminReceiver.componentName(context),
+                    new ArrayList<>());
+        }
     }
 
     /**

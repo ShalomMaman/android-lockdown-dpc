@@ -129,6 +129,36 @@ public final class ChromeFilterExemptionTest {
     }
 
     @Test
+    public void onResumeWithAReplacementProfileAndAMissingVpnChromeIsHiddenThroughoutAndNeverReleased() {
+        // Paused with Chrome visible and approved, its managed configuration
+        // already matching; a replacement profile keeps the same PAC URL but its
+        // VPN package is missing. Resume is not a continuation, so Chrome is
+        // contained before the pass starts, and the filter's reconciliation in
+        // the same pass reports the missing VPN, so it is never released.
+        FakeChrome chrome = visibleChrome();
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        List<String> errors = new ArrayList<>();
+        Containment containment = ChromeFilterExemption.contain(true, true, PAC, false, chrome, errors);
+        assertEquals(Containment.CONTAINED, containment);
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, PAC, chrome, errors);
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+        boolean missingVpnConfirmed = false;
+        Decision released = ChromeFilterExemption.release(decision, missingVpnConfirmed, chrome, errors);
+        assertEquals(Decision.FILTER_UNCONFIRMED, released);
+        assertFalse("never released", chrome.calls.contains("hide=false"));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void anUnreadableChromeSignerIsReportedAsUnreadableNotAsNotGoogles() {
+        FakeChrome chrome = visibleChrome();
+        chrome.signer = "";
+        assertEquals(Decision.SIGNER_UNREADABLE, pass(chrome, true, true, true, new ArrayList<>()));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
     public void theNotAvailableReasonClaimsOnlyWhatTheProviderCheckFound() {
         assertEquals(Decision.NOT_AVAILABLE_WEBVIEW_PROVIDER,
                 ChromeFilterExemption.unavailableReason(28, BuiltInBlockExemptions.CHROME));

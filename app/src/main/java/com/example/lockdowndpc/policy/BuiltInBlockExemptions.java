@@ -182,6 +182,25 @@ public final class BuiltInBlockExemptions {
      * approval. A pass, by contrast, withholds every exemption on such a record.
      */
     public static ChromeFlag chromeFlag(Object rawChrome, Object rawSocialPins) {
+        return chromeFlag(rawChrome, rawSocialPins, FORMAT_VERSION, false);
+    }
+
+    /** The format marker every save writes; its absence in an existing file means damage. */
+    public static final int FORMAT_VERSION = 1;
+
+    /**
+     * The same, also catching a damaged file Android loaded as an empty map:
+     * every save writes {@link #FORMAT_VERSION}, so a file that exists on disk
+     * without the marker is {@link ChromeFlag#UNREADABLE}, never "absent".
+     *
+     * @param rawFormat      the stored format marker, or {@code null}
+     * @param fileHasContent the preference file exists on disk with content
+     */
+    public static ChromeFlag chromeFlag(Object rawChrome, Object rawSocialPins, Object rawFormat,
+                                       boolean fileHasContent) {
+        if (rawFormat == null ? fileHasContent : !Integer.valueOf(FORMAT_VERSION).equals(rawFormat)) {
+            return ChromeFlag.UNREADABLE;
+        }
         if (rawChrome != null && !(rawChrome instanceof Boolean)) {
             return ChromeFlag.UNREADABLE;
         }
@@ -203,6 +222,33 @@ public final class BuiltInBlockExemptions {
             }
         }
         return Boolean.TRUE.equals(rawChrome) ? ChromeFlag.PRESENT : ChromeFlag.ABSENT;
+    }
+
+    /**
+     * Whether a protected pass continues the last verified one: that pass ended
+     * verified with protection on, in this same boot, for these same home filter
+     * settings. Anything else — resume from pause, boot, a pass after a failed
+     * or interrupted one, a changed filter profile — must contain Chrome first,
+     * whatever stored state says, and release it only on the same pass's
+     * filter evidence.
+     */
+    public static boolean continuesVerifiedPass(
+            boolean lastPassVerifiedActive,
+            String verifiedFilterFingerprint,
+            String currentFilterFingerprint,
+            long verifiedBootCount,
+            long currentBootCount
+    ) {
+        return lastPassVerifiedActive
+                && verifiedFilterFingerprint != null
+                && verifiedFilterFingerprint.equals(currentFilterFingerprint)
+                && verifiedBootCount >= 0
+                && verifiedBootCount == currentBootCount;
+    }
+
+    /** A stable fingerprint of home filter settings, for {@link #continuesVerifiedPass}. */
+    public static String filterFingerprint(HomeFilterPolicy.Settings settings) {
+        return settings == null ? "unreadable" : Integer.toHexString(settings.hashCode());
     }
 
     /** Whether a home filter change turns the filter off or removes its CA. */

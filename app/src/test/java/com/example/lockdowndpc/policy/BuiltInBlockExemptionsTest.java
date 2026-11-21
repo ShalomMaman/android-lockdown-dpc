@@ -237,6 +237,39 @@ public final class BuiltInBlockExemptionsTest {
     }
 
     @Test
+    public void aDamagedFileLoadedAsAnEmptyMapIsUnreadableNotAbsent() {
+        int format = BuiltInBlockExemptions.FORMAT_VERSION;
+        assertEquals("empty map, but the file exists on disk",
+                BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
+                BuiltInBlockExemptions.chromeFlag(null, null, null, true));
+        assertEquals("nothing ever saved", BuiltInBlockExemptions.ChromeFlag.ABSENT,
+                BuiltInBlockExemptions.chromeFlag(null, null, null, false));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT,
+                BuiltInBlockExemptions.chromeFlag(false, Set.of(), format, true));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT,
+                BuiltInBlockExemptions.chromeFlag(true, null, format, true));
+        assertEquals("an unknown format is not trusted", BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
+                BuiltInBlockExemptions.chromeFlag(false, null, 99, true));
+    }
+
+    @Test
+    public void onlyAPassContinuingTheLastVerifiedOneInTheSameBootAndProfileContinuesIt() {
+        String profile = BuiltInBlockExemptions.filterFingerprint(enabledFilter(null));
+        assertTrue(BuiltInBlockExemptions.continuesVerifiedPass(true, profile, profile, 7, 7));
+        assertFalse("resume, or after a failed pass", BuiltInBlockExemptions.continuesVerifiedPass(
+                false, profile, profile, 7, 7));
+        assertFalse("boot", BuiltInBlockExemptions.continuesVerifiedPass(true, profile, profile, 7, 8));
+        assertFalse("boot count unreadable", BuiltInBlockExemptions.continuesVerifiedPass(
+                true, profile, profile, -1, -1));
+        assertFalse("never verified", BuiltInBlockExemptions.continuesVerifiedPass(true, null, profile, 7, 7));
+        // A replacement profile with the same PAC URL but another VPN package.
+        HomeFilterPolicy.Settings replacement = new HomeFilterPolicy.Settings(
+                new HomeFilterPolicy.Config("org.example.othervpn", PAC), true, null, false);
+        assertFalse("changed filter profile", BuiltInBlockExemptions.continuesVerifiedPass(
+                true, profile, BuiltInBlockExemptions.filterFingerprint(replacement), 7, 7));
+    }
+
+    @Test
     public void aPendingTeardownIsHeldWithTheFilterOnAndItsCertificateKept() {
         HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
         HomeFilterPolicy.Settings pendingRemoval = enabledFilter("MIIB").requestRemoveCa();

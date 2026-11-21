@@ -303,10 +303,10 @@ and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
 With protection on, every browser, application store and well-known social or
 messaging app is hidden. **System policy → Exemptions from the built-in block**
 offers two narrow, default-off exceptions. Adding either needs the
-administrator PIN session; removing either is accepted without it. Each change
-is committed, written to the audit log (before → after) and, while protection
-is on, applied at once; while protection is paused it is stored only and the
-next protected pass enforces it. A change that fails to persist is not applied
+administrator PIN session; removing either is accepted without it. Approvals
+can only be changed while protection is on ("Resume protection to change
+approvals" otherwise); each change is committed, written to the audit log
+(before → after) and applied at once by a protected pass. A change that fails to persist is not applied
 and the console reports it; until a later save succeeds, every policy pass
 treats all exemptions as absent, while the next edit still starts from the
 last saved decision; any save in that state, a removal included, needs the
@@ -339,7 +339,12 @@ The configuration makes Chrome fail closed on its own:
   support it on Android; older ones ignore it),
   `BrowserSignin=0`.
 
-Every protected pass starts with one containment step, before any early return
+A pass that does not continue the last verified one — resuming from pause,
+the first pass after boot, a pass after a failed or interrupted one, or any
+change to the home filter settings since — hides Chrome in its opening step
+before protection is marked active, whatever stored state says, and shows it
+again only at the end of that same pass once the filter's own reconciliation
+confirms the VPN, PAC and CA. Every protected pass starts with one containment step, before any early return
 (unreadable home filter settings included): each installed catalogue social app
 without a verified exemption is hidden, a browser-backed WebView provider is
 suspended by the existing routine, and Chrome, unless it is already allowed, is
@@ -367,7 +372,9 @@ keeps the CA from being removed in Android Settings for the approval's whole
 life: it is set and read back before a Chrome approval is saved (also while
 protection is paused; no lock, no save), each pass confirms it before the CA
 check that Chrome's release relies on, and it is released only when the
-teardown guard would allow a teardown, so a refused hide keeps it. If the
+teardown guard would allow a teardown, so a refused hide keeps it. Every save
+writes a format marker, so a damaged file Android loads as an empty map is
+recognised. If the
 stored exemption record cannot be read, no exemption applies, ordinary edits
 are refused, and only an explicit "Clear all approvals" replaces it; a failed
 save restores the exact stored record. A Chrome that is

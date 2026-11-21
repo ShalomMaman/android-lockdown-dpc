@@ -16,8 +16,8 @@ import java.util.function.UnaryOperator;
  * the device and is accepted without one. The decision is committed, then its
  * audit entry is committed, and only then does a policy pass run. A write that
  * does not persist changes nothing: no pass runs and the caller shows an error.
- * While protection is paused the decision is stored only; the next protected
- * pass enforces it. While an earlier failed save is unresolved, passes enforce
+ * While protection is paused every exemption edit is refused, so each edit runs
+ * straight through a protected pass (credentials lock, kiosk, hide). While an earlier failed save is unresolved, passes enforce
  * no exemptions at all, so any save — a removal included — would re-enable the
  * others; it therefore needs a live administrator session too.
  */
@@ -30,8 +30,8 @@ public final class BuiltInExemptionsController {
         UNCHANGED,
         /** Stored and a protected pass ran; see the result. */
         APPLIED,
-        /** Stored while protection is paused; nothing was applied. */
-        SAVED,
+        /** Refused because protection is paused; nothing was written, no lock changed. */
+        PAUSED_REFUSED,
         NOT_SAVED,
         /**
          * Chrome was not approved: the home filter is off, has a pending
@@ -64,6 +64,9 @@ public final class BuiltInExemptionsController {
          * Chrome approval is saved, so the lock covers the approval's whole life.
          */
         boolean lockCredentials();
+
+        /** Brings the credentials lock in line with the stored record and the guard, now. */
+        void reconcileCredentialsLock();
 
         boolean protectionActive();
 
@@ -121,6 +124,11 @@ public final class BuiltInExemptionsController {
             }
 
             @Override
+            public void reconcileCredentialsLock() {
+                LockdownPolicyController.reconcileCredentialsLock(context);
+            }
+
+            @Override
             public boolean filterSteadyForChrome() {
                 try {
                     HomeFilterController.Snapshot filter = HomeFilterController.read(context);
@@ -168,6 +176,9 @@ public final class BuiltInExemptionsController {
             String trigger,
             Sink sink
     ) {
+        if (!sink.protectionActive()) {
+            return new Outcome(Status.PAUSED_REFUSED, null);
+        }
         if (sink.chromeFlag() == BuiltInBlockExemptions.ChromeFlag.UNREADABLE) {
             // The edit baseline of an unreadable record is "none", so an ordinary
             // edit would silently drop whatever it holds. Only clearApprovals
@@ -194,6 +205,9 @@ public final class BuiltInExemptionsController {
     }
 
     static Outcome clear(boolean sessionUnlocked, Sink sink) {
+        if (!sink.protectionActive()) {
+            return new Outcome(Status.PAUSED_REFUSED, null);
+        }
         if (!sessionUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
         }
@@ -209,6 +223,9 @@ public final class BuiltInExemptionsController {
             Sink sink
     ) {
         if (!sink.write(after)) {
+            // The record was restored; a lock set for this failed grant must not
+            // outlive it, so the lock is brought in line with what is stored.
+            sink.reconcileCredentialsLock();
             return new Outcome(Status.NOT_SAVED, null);
         }
         String actor = sessionUnlocked
@@ -217,9 +234,6 @@ public final class BuiltInExemptionsController {
         String entry = "builtin-exemption: " + actor + ": "
                 + before.auditText() + " -> " + after.auditText();
         boolean audited = sink.audit(entry);
-        if (!sink.protectionActive()) {
-            return new Outcome(audited ? Status.SAVED : Status.AUDIT_NOT_SAVED, null);
-        }
         // The decision is already persisted, so the pass runs either way: a
         // stored removal must take effect even if its audit line did not.
         LockdownPolicyController.PolicyResult result = sink.applyPass();

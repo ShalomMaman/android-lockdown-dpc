@@ -60,6 +60,8 @@ public final class ChromeFilterExemption {
          */
         DISABLED(false),
         SIGNER_UNVERIFIED(false),
+        /** Chrome's signer could not be read; not a claim that it is not Google's. */
+        SIGNER_UNREADABLE(false),
         CONTAIN_UNVERIFIED(false),
         CONFIG_UNVERIFIED(false),
         /** Everything held, but the home filter's reconciliation in this pass failed. */
@@ -149,11 +151,29 @@ public final class ChromeFilterExemption {
             Gateway gateway,
             List<String> errors
     ) {
+        return contain(exempted, filterEnabled, pacUrl, true, gateway, errors);
+    }
+
+    /**
+     * @param mayKeepAllowed whether Chrome may be left as it is when it is
+     *                       already allowed; {@code false} on any pass that does
+     *                       not continue a verified one (resume, boot, after a
+     *                       failure, a changed filter profile), where Chrome is
+     *                       hidden whatever stored state says
+     */
+    public static Containment contain(
+            boolean exempted,
+            boolean filterEnabled,
+            String pacUrl,
+            boolean mayKeepAllowed,
+            Gateway gateway,
+            List<String> errors
+    ) {
         try {
             if (!gateway.installed()) {
                 return Containment.NOT_INSTALLED;
             }
-            if (exempted && filterEnabled && pacUrl != null && !pacUrl.isBlank()
+            if (mayKeepAllowed && exempted && filterEnabled && pacUrl != null && !pacUrl.isBlank()
                     && gateway.enabled()
                     && BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())
                     && BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl)) {
@@ -301,7 +321,11 @@ public final class ChromeFilterExemption {
         if (!gateway.enabled()) {
             return Decision.DISABLED;
         }
-        if (!BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())) {
+        String signer = gateway.currentSignerSha256();
+        if (signer == null || signer.isEmpty()) {
+            return Decision.SIGNER_UNREADABLE;
+        }
+        if (!BuiltInBlockExemptions.chromeSignerVerified(signer)) {
             return Decision.SIGNER_UNVERIFIED;
         }
         if (containment == Containment.REFUSED) {

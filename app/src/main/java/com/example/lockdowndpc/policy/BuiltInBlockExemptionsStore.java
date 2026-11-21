@@ -23,6 +23,9 @@ public final class BuiltInBlockExemptionsStore {
     private static final String READBACK_PREFS = "builtin_block_exemptions_readback";
     private static final String KEY_CHROME = "chrome";
     private static final String KEY_SOCIAL_PINS = "social_pins";
+    private static final String KEY_FORMAT = "format";
+    private static final String KEY_VERIFIED_FILTER = "verified_filter";
+    private static final String KEY_VERIFIED_BOOT = "verified_boot";
     private static final String KEY_READBACK_FOR = "for";
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
@@ -50,10 +53,22 @@ public final class BuiltInBlockExemptionsStore {
         try {
             java.util.Map<String, ?> raw = context.getApplicationContext()
                     .getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll();
-            return BuiltInBlockExemptions.chromeFlag(raw.get(KEY_CHROME), raw.get(KEY_SOCIAL_PINS));
+            return BuiltInBlockExemptions.chromeFlag(raw.get(KEY_CHROME), raw.get(KEY_SOCIAL_PINS),
+                    raw.get(KEY_FORMAT), fileHasContent(context));
         } catch (RuntimeException exception) {
             return BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
         }
+    }
+
+    /**
+     * Whether the decision's preference file exists on disk with content. A
+     * damaged file Android loads as an empty map still exists, so a missing
+     * format marker then means "unreadable", not "nothing saved".
+     */
+    private static boolean fileHasContent(Context context) {
+        java.io.File file = new java.io.File(context.getApplicationInfo().dataDir,
+                "shared_prefs/" + PREFS + ".xml");
+        return file.isFile() && file.length() > 0;
     }
 
     /** An earlier save failed and passes currently enforce no exemptions. */
@@ -106,7 +121,7 @@ public final class BuiltInBlockExemptionsStore {
         public Object snapshot() {
             java.util.Map<String, ?> all = prefs.getAll();
             java.util.HashMap<String, Object> raw = new java.util.HashMap<>();
-            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS}) {
+            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS, KEY_FORMAT}) {
                 if (all.containsKey(key)) {
                     Object value = all.get(key);
                     raw.put(key, value instanceof Set<?> set ? new LinkedHashSet<>(set) : value);
@@ -118,9 +133,14 @@ public final class BuiltInBlockExemptionsStore {
         @Override
         @SuppressWarnings("unchecked")
         public void restore(Object snapshot) {
-            java.util.Map<String, Object> raw = (java.util.Map<String, Object>) snapshot;
+            java.util.Map<String, Object> raw = new java.util.HashMap<>((java.util.Map<String, Object>) snapshot);
+            if (raw.isEmpty()) {
+                // Nothing was saved before: restore "nothing saved" with the
+                // marker, so the file this restore creates is not read as damage.
+                raw.put(KEY_FORMAT, BuiltInBlockExemptions.FORMAT_VERSION);
+            }
             SharedPreferences.Editor editor = prefs.edit();
-            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS}) {
+            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS, KEY_FORMAT}) {
                 Object value = raw.get(key);
                 if (!raw.containsKey(key)) {
                     editor.remove(key);
@@ -150,6 +170,7 @@ public final class BuiltInBlockExemptionsStore {
             return prefs.edit()
                     .putBoolean(KEY_CHROME, settings.chrome())
                     .putStringSet(KEY_SOCIAL_PINS, pins)
+                    .putInt(KEY_FORMAT, BuiltInBlockExemptions.FORMAT_VERSION)
                     .commit();
         }
     }
@@ -180,6 +201,44 @@ public final class BuiltInBlockExemptionsStore {
                 .putString(KEY_CHROME_DECISION, readback.chromeDecision().name())
                 .putString(KEY_CHROME_OBSERVED, readback.chromeObserved().name())
                 .commit();
+    }
+
+    /**
+     * Records that a protected pass ended verified for these home filter
+     * settings in this boot. A later pass continues it only when all of that
+     * still holds; see {@link BuiltInBlockExemptions#continuesVerifiedPass}.
+     */
+    static void recordVerifiedPass(Context context, HomeFilterPolicy.Settings filter) {
+        readbackPrefs(context).edit()
+                .putString(KEY_VERIFIED_FILTER, BuiltInBlockExemptions.filterFingerprint(filter))
+                .putLong(KEY_VERIFIED_BOOT, bootCount(context))
+                .commit();
+    }
+
+    /** Whether the pass about to start continues the last verified one. Read before it starts. */
+    static boolean continuesVerifiedPass(Context context, HomeFilterPolicy.Settings filter) {
+        try {
+            SharedPreferences prefs = readbackPrefs(context);
+            return BuiltInBlockExemptions.continuesVerifiedPass(
+                    AllowedAppsStore.isProtectionEnabled(context)
+                            && AllowedAppsStore.getPolicyState(context) == AllowedAppsStore.PolicyState.ACTIVE,
+                    prefs.getString(KEY_VERIFIED_FILTER, null),
+                    BuiltInBlockExemptions.filterFingerprint(filter),
+                    prefs.getLong(KEY_VERIFIED_BOOT, -1L),
+                    bootCount(context));
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    /** The device's boot count, or {@code -1} when it cannot be read (never a continuation). */
+    private static long bootCount(Context context) {
+        try {
+            return android.provider.Settings.Global.getInt(
+                    context.getContentResolver(), android.provider.Settings.Global.BOOT_COUNT, -1);
+        } catch (RuntimeException exception) {
+            return -1L;
+        }
     }
 
     /** The last read-back, or {@code null} when none was recorded. */

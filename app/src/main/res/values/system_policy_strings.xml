@@ -170,6 +170,9 @@
     <string name="system_policy_exempt_social_signer_unreadable_row">Approved, but the app\'s signer could not be read, so it stays hidden</string>
     <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
     <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
+    <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
+    <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
+    <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
     <string name="system_policy_exempt_social_approved">Approved</string>
     <string name="system_policy_exempt_social_not_approved">Not approved</string>
@@ -181,7 +184,7 @@
     <string name="system_policy_exempt_social_signer_unreadable">The app\'s signature could not be read, so it cannot be approved.</string>
     <string name="system_policy_exempt_change_refused">The change was not saved. Check the details and try again.</string>
     <string name="system_policy_exempt_confirm_chrome_title">Allow Chrome through the home filter?</string>
-    <string name="system_policy_exempt_confirm_chrome_body">Chrome will be shown only while the home filter is on and its settings were confirmed in the same check, protection is active, and Android confirms it stored Chrome\'s managed settings, including the mandatory filter proxy. If any condition is not met, Chrome is hidden again automatically. Links and web apps will open in Chrome instead of the blocked page. Every other browser stays blocked.</string>
+    <string name="system_policy_exempt_confirm_chrome_body">Chrome will be shown only while the home filter is on and its settings were confirmed in the same check, protection is active, and Android confirms it stored Chrome\'s managed settings, including the mandatory filter proxy. If any condition is not met, Chrome is hidden again automatically. Every other browser stays blocked.</string>
     <string name="system_policy_exempt_confirm_social_title">Allow this application?</string>
     <string name="system_policy_exempt_confirm_social_body">%1$s will no longer be blocked by the built-in social and messaging list while protection is on. The approval is tied to the app\'s current signature. Turning it off later blocks it again at once.</string>
     <!-- Audit -->
