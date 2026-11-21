@@ -239,16 +239,66 @@ public final class BuiltInBlockExemptionsTest {
         assertTrue("old format: no marker", BuiltInBlockExemptions.parseRecord(raw("chrome", true), true).unreadable());
         assertTrue("unknown format", BuiltInBlockExemptions.parseRecord(raw("format", 99), true).unreadable());
         assertTrue("non-boolean flag", BuiltInBlockExemptions.parseRecord(
-                raw("format", format, "chrome", "true"), true).unreadable());
+                raw("format", format, "chrome", "true", "social_pins", Set.of()), true).unreadable());
+        assertTrue("missing Chrome field", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "social_pins", Set.of()), true).unreadable());
+        assertTrue("missing pin set", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", false), true).unreadable());
+        assertTrue("marker only", BuiltInBlockExemptions.parseRecord(raw("format", format), true).unreadable());
         assertTrue("malformed pin", BuiltInBlockExemptions.parseRecord(
                 raw("format", format, "chrome", true, "social_pins", Set.of("not-a-pin")), true).unreadable());
         assertTrue("not in the catalogue", BuiltInBlockExemptions.parseRecord(
-                raw("format", format, "social_pins", Set.of("org.example.reader=" + SIGNER_A)), true).unreadable());
+                raw("format", format, "chrome", false, "social_pins", Set.of("org.example.reader=" + SIGNER_A)),
+                true).unreadable());
+        for (String digest : new String[]{"x", "aa".repeat(31), "aa".repeat(33), "AA".repeat(32),
+                "aa:".repeat(31) + "aa", "gg".repeat(32), " " + "aa".repeat(32)}) {
+            assertTrue("bad digest " + digest, BuiltInBlockExemptions.parseRecord(
+                    raw("format", format, "chrome", true, "social_pins", Set.of(TELEGRAM + "=" + digest)),
+                    true).unreadable());
+        }
+        assertTrue("one package pinned twice", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", false, "social_pins",
+                        Set.of(TELEGRAM + "=" + SIGNER_A, TELEGRAM + "=" + "bb".repeat(32))), true).unreadable());
+        assertFalse("nothing approved, written in full", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", false, "social_pins", Set.of()), true).unreadable());
         BuiltInBlockExemptions.Record good = BuiltInBlockExemptions.parseRecord(
                 raw("format", format, "chrome", true, "social_pins", Set.of(WHATSAPP + "=" + SIGNER_A)), true);
         assertFalse(good.unreadable());
         assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT, good.flag());
         assertEquals(Settings.NONE.withChrome(true).withSocial(WHATSAPP, SIGNER_A), good.enforced());
+    }
+
+    @Test
+    public void anApprovedAppThatBecameAnActiveAdministratorIsNotAllowed() {
+        Settings settings = Settings.NONE.withSocial(TELEGRAM, SIGNER_A);
+        assertTrue(BuiltInBlockExemptions.socialAllowed(TELEGRAM, settings, SIGNER_A, Set.of("com.example.owner")));
+        assertFalse("an active administrator", BuiltInBlockExemptions.socialAllowed(
+                TELEGRAM, settings, SIGNER_A, Set.of(TELEGRAM)));
+        assertFalse("administrators unreadable", BuiltInBlockExemptions.socialAllowed(
+                TELEGRAM, settings, SIGNER_A, null));
+        assertFalse("signer still required", BuiltInBlockExemptions.socialAllowed(
+                TELEGRAM, settings, "bb".repeat(32), Set.of()));
+    }
+
+    @Test
+    public void onlyNewOrRePinnedPackagesAreCheckedOnASave() {
+        Settings before = Settings.NONE.withSocial(TELEGRAM, SIGNER_A);
+        assertEquals(Set.of(), BuiltInBlockExemptions.newlyPinned(before, before.withChrome(true)));
+        assertEquals(Set.of(), BuiltInBlockExemptions.newlyPinned(before, Settings.NONE));
+        assertEquals(Set.of(WHATSAPP), BuiltInBlockExemptions.newlyPinned(before, before.withSocial(WHATSAPP, SIGNER_A)));
+        assertEquals(Set.of(TELEGRAM), BuiltInBlockExemptions.newlyPinned(before, before.withSocial(TELEGRAM, "bb".repeat(32))));
+    }
+
+    @Test
+    public void refusedContainmentIsAuditedOnlyWhenTheSetChanges() {
+        assertNull(BuiltInBlockExemptions.containmentAuditTransition(Set.of(), Set.of()));
+        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(), Set.of(TELEGRAM)));
+        assertNull(BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of(TELEGRAM)));
+        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + WHATSAPP + "," + TELEGRAM,
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of(TELEGRAM, WHATSAPP)));
+        assertEquals("builtin-exemption: social containment restored",
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of()));
     }
 
     @Test

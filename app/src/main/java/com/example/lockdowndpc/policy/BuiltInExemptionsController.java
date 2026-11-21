@@ -39,7 +39,12 @@ public final class BuiltInExemptionsController {
          */
         FILTER_NOT_READY,
         /** Stored and, when protection is on, applied; the audit entry did not persist. */
-        AUDIT_NOT_SAVED
+        AUDIT_NOT_SAVED,
+        /**
+         * Not approved: the application is an active device administrator, which
+         * Android would refuse to hide again. Nothing was saved.
+         */
+        ACTIVE_ADMIN_REFUSED
     }
 
     public record Outcome(Status status, LockdownPolicyController.PolicyResult result) {}
@@ -69,6 +74,9 @@ public final class BuiltInExemptionsController {
         void reconcileCredentialsLock();
 
         boolean protectionActive();
+
+        /** Packages with an active device-administrator component; {@code null} when unreadable. */
+        Set<String> activeAdminPackages();
 
         LockdownPolicyController.PolicyResult applyPass();
     }
@@ -145,6 +153,11 @@ public final class BuiltInExemptionsController {
             }
 
             @Override
+            public Set<String> activeAdminPackages() {
+                return LockdownPolicyController.activeAdminPackages(context);
+            }
+
+            @Override
             public LockdownPolicyController.PolicyResult applyPass() {
                 return LockdownPolicyController.apply(context);
             }
@@ -153,16 +166,17 @@ public final class BuiltInExemptionsController {
 
     /**
      * Approved social packages whose single current signer matches the pin
-     * right now, read with the hidden-package query. An unreadable signer is
-     * not verified.
+     * right now, read with the hidden-package query, and that are not active
+     * device administrators. An unreadable signer is not verified.
      */
     public static Set<String> verifiedSocial(Context context) {
         BuiltInBlockExemptions.Settings settings = BuiltInBlockExemptionsStore.read(context);
+        Set<String> activeAdmins = LockdownPolicyController.activeAdminPackages(context);
         LinkedHashSet<String> verified = new LinkedHashSet<>();
         for (String packageName : settings.socialPins().keySet()) {
             String signer = PackageIdentity.currentSignerSha256IncludingHidden(
                     context.getPackageManager(), packageName);
-            if (BuiltInBlockExemptions.socialVisible(packageName, settings, signer)) {
+            if (BuiltInBlockExemptions.socialAllowed(packageName, settings, signer, activeAdmins)) {
                 verified.add(packageName);
             }
         }
@@ -196,6 +210,15 @@ public final class BuiltInExemptionsController {
             // Approving Chrome over a pending teardown would let that teardown
             // finish under the approval.
             return new Outcome(Status.FILTER_NOT_READY, null);
+        }
+        Set<String> granted = BuiltInBlockExemptions.newlyPinned(before, after);
+        if (!granted.isEmpty()) {
+            // Android refuses to hide an active device administrator, so such an
+            // approval could not be taken back; it is never granted.
+            Set<String> activeAdmins = sink.activeAdminPackages();
+            if (activeAdmins == null || granted.stream().anyMatch(activeAdmins::contains)) {
+                return new Outcome(Status.ACTIVE_ADMIN_REFUSED, null);
+            }
         }
         if (after.chrome() && !sink.lockCredentials()) {
             // The lock covers the approval from before it exists; no lock, no save.

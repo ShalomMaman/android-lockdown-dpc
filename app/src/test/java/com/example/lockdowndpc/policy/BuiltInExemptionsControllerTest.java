@@ -13,6 +13,7 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /** The change rule at the policy boundary, against a recording sink. */
 public final class BuiltInExemptionsControllerTest {
@@ -28,6 +29,7 @@ public final class BuiltInExemptionsControllerTest {
         boolean filterSteady = true;
         boolean lockSucceeds = true;
         BuiltInBlockExemptions.Record record = BuiltInBlockExemptions.Record.EMPTY;
+        Set<String> activeAdmins = Set.of();
         Settings written;
 
         @Override
@@ -77,6 +79,11 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
+        public Set<String> activeAdminPackages() {
+            return activeAdmins;
+        }
+
+        @Override
         public LockdownPolicyController.PolicyResult applyPass() {
             calls.add("pass");
             return new LockdownPolicyController.PolicyResult(true, true, 0, 0, List.of());
@@ -95,6 +102,51 @@ public final class BuiltInExemptionsControllerTest {
         // is restored and the lock is reconciled against it before returning.
         assertEquals("no audit and no pass after a failed write",
                 List.of("lock", "write", "lock-reconcile"), sink.calls);
+    }
+
+    // --- Active device administrators -------------------------------------------------
+
+    @Test
+    public void anActiveDeviceAdministratorIsNeverApproved() {
+        RecordingSink sink = new RecordingSink();
+        sink.activeAdmins = Set.of("com.whatsapp");
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), true,
+                "approve:com.whatsapp", sink);
+        assertEquals(Status.ACTIVE_ADMIN_REFUSED, outcome.status());
+        assertNull(outcome.result());
+        assertNull(sink.written);
+        assertTrue("nothing written, no lock, no pass", sink.calls.isEmpty());
+    }
+
+    @Test
+    public void unreadableAdministratorsRefuseAnApproval() {
+        RecordingSink sink = new RecordingSink();
+        sink.activeAdmins = null;
+        assertEquals(Status.ACTIVE_ADMIN_REFUSED, BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), true,
+                "approve:com.whatsapp", sink).status());
+        assertTrue(sink.calls.isEmpty());
+    }
+
+    @Test
+    public void anotherAppsAdministratorDoesNotBlockAnApproval() {
+        RecordingSink sink = new RecordingSink();
+        sink.activeAdmins = Set.of("com.example.lockdowndpc");
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), true,
+                "approve:com.whatsapp", sink).status());
+    }
+
+    @Test
+    public void revokingAnAdministratorsApprovalIsStillAccepted() {
+        RecordingSink sink = new RecordingSink();
+        sink.activeAdmins = Set.of("com.whatsapp");
+        Settings before = Settings.NONE.withSocial("com.whatsapp", SIGNER);
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
+                before, settings -> settings.withoutSocial("com.whatsapp"), false,
+                "remove:com.whatsapp", sink).status());
+        assertEquals(Settings.NONE, sink.written);
     }
 
     @Test

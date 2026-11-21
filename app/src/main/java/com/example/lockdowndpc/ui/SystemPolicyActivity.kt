@@ -390,6 +390,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     context.getString(R.string.system_policy_exempt_paused_refused),
                     isError = true,
                 )
+                changed?.status() == BuiltInExemptionsController.Status.ACTIVE_ADMIN_REFUSED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_active_admin_refused),
+                    isError = true,
+                )
                 result == null -> null
                 else -> UiMessage(
                     context.getString(R.string.system_policy_applied_ok),

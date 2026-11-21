@@ -53,7 +53,7 @@ public final class LockdownPolicyController {
         boolean filterEnabled = homeFilter != null && homeFilter.enabled();
         String pacUrl = homeFilter != null && homeFilter.configured() ? homeFilter.config().pacUrl() : null;
         BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
-        SocialPass social = new SocialPass(context, exemptions);
+        SocialPass social = new SocialPass(context, exemptions, activeAdminPackages(dpm));
         boolean chromeInScope = ChromeFilterExemption.inScope(
                 Build.VERSION.SDK_INT, resolveWebViewProvider(context.getPackageManager()));
         ChromeFilterExemption.Decision chromeUnavailable = ChromeFilterExemption.unavailableReason(
@@ -184,11 +184,15 @@ public final class LockdownPolicyController {
             // follow the final, verified result rather than the earlier decision.
             filterConfirmed = filterConfirmed && lockConfirmed;
             boolean routedAway = !chrome.shown();
+            BuiltInBlockExemptions.Observed beforeRelease = ChromeFilterExemption.observe(chromeGateway);
             chrome = ChromeFilterExemption.release(chrome, filterConfirmed, chromeGateway, errors);
-            if (chrome.shown()) {
-                // This pass showed Chrome on confirmed evidence; the package
-                // event Android sends for it may continue this pass.
+            if (ChromeFilterExemption.unhidByRelease(beforeRelease, chrome)) {
+                // This pass changed Chrome from hidden to visible on confirmed
+                // evidence; the package event Android sends for that may
+                // continue this pass. An already-visible Chrome sends none.
                 BuiltInBlockExemptionsStore.recordChromeRelease(context, homeFilter);
+            }
+            if (chrome.shown()) {
                 // Link routing is not a release condition: a routing failure
                 // is reported, falls back to the blocked page, and neither
                 // fails the pass nor hides Chrome again.
@@ -995,6 +999,13 @@ public final class LockdownPolicyController {
             boolean exempted = social.visible(packageName);
             if (exempted) {
                 shouldBlock = false;
+            } else if (BuiltInBlockExemptions.isExemptableSocial(packageName)) {
+                // The containment step owns these on every pass, with its
+                // suspension fallback for a refused hide; it already ran.
+                if (isInstalled(pm, packageName)) {
+                    blockedCount++;
+                }
+                continue;
             }
 
             // Kiosk hides the known escape surfaces even though Lock Task already
@@ -1072,6 +1083,11 @@ public final class LockdownPolicyController {
             } catch (RuntimeException exception) {
                 errors.add("package-policy:" + packageName + ":"
                         + exception.getClass().getSimpleName());
+            }
+            if (exempted) {
+                // An approved package may have been suspended by an earlier
+                // containment fallback; an approval releases that too.
+                releaseSuspension(dpm, admin, packageName, errors);
             }
         }
         // Only drop the restore obligation after a pass that actually completed.
@@ -1194,7 +1210,7 @@ public final class LockdownPolicyController {
         private final BuiltInBlockExemptions.Settings settings;
         private final LinkedHashSet<String> verified = new LinkedHashSet<>();
 
-        SocialPass(Context context, BuiltInBlockExemptions.Settings settings) {
+        SocialPass(Context context, BuiltInBlockExemptions.Settings settings, Set<String> activeAdmins) {
             this.settings = settings;
             PackageManager pm = context.getPackageManager();
             for (String packageName : settings.socialPins().keySet()) {
@@ -1202,7 +1218,7 @@ public final class LockdownPolicyController {
                     continue;
                 }
                 String signer = PackageIdentity.currentSignerSha256IncludingHidden(pm, packageName);
-                if (BuiltInBlockExemptions.socialVisible(packageName, settings, signer)) {
+                if (BuiltInBlockExemptions.socialAllowed(packageName, settings, signer, activeAdmins)) {
                     verified.add(packageName);
                 }
             }
@@ -1235,19 +1251,95 @@ public final class LockdownPolicyController {
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
+        LinkedHashSet<String> refused = new LinkedHashSet<>();
         for (String packageName : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
             if (social.visible(packageName) || !isInstalled(pm, packageName)) {
                 continue;
             }
-            try {
-                dpm.setApplicationHidden(admin, packageName, true);
-                if (!dpm.isApplicationHidden(admin, packageName)) {
-                    errors.add("social-contain-unverified:" + packageName);
-                }
-            } catch (RuntimeException exception) {
-                errors.add("social-contain:" + packageName + ":" + exception.getClass().getSimpleName());
+            SocialContainment.Result result = SocialContainment.contain(
+                    packageName, new AndroidSocialGateway(dpm, admin, packageName), errors);
+            if (result == SocialContainment.Result.REFUSED) {
+                refused.add(packageName);
+                Log.e(TAG, SocialContainment.REFUSED_ERROR + ": " + packageName + " stays launchable");
             }
         }
+        String auditLine = BuiltInBlockExemptionsStore.containmentOutcome(context, refused);
+        if (auditLine != null) {
+            AuditLog.append(context, auditLine);
+        }
+    }
+
+    /** Lifts a suspension from an approved package; a failure is a pass error. */
+    private static void releaseSuspension(
+            DevicePolicyManager dpm, ComponentName admin, String packageName, List<String> errors) {
+        try {
+            if (!dpm.isPackageSuspended(admin, packageName)) {
+                return;
+            }
+            String[] failed = dpm.setPackagesSuspended(admin, new String[]{packageName}, false);
+            if ((failed != null && failed.length > 0) || dpm.isPackageSuspended(admin, packageName)) {
+                errors.add("social-release-unverified:" + packageName);
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {
+            // Not installed.
+        } catch (RuntimeException exception) {
+            errors.add("social-release:" + packageName + ":" + exception.getClass().getSimpleName());
+        }
+    }
+
+    /** One catalogue social package, through the Device Owner APIs. */
+    private record AndroidSocialGateway(DevicePolicyManager dpm, ComponentName admin, String packageName)
+            implements SocialContainment.Gateway {
+        @Override
+        public void hide() {
+            dpm.setApplicationHidden(admin, packageName, true);
+        }
+
+        @Override
+        public boolean hidden() {
+            return dpm.isApplicationHidden(admin, packageName);
+        }
+
+        @Override
+        public boolean suspend() {
+            String[] failed = dpm.setPackagesSuspended(admin, new String[]{packageName}, true);
+            return failed == null || failed.length == 0;
+        }
+
+        @Override
+        public boolean suspended() {
+            try {
+                return dpm.isPackageSuspended(admin, packageName);
+            } catch (PackageManager.NameNotFoundException exception) {
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Packages with an active device-administrator component, or {@code null}
+     * when Android could not be asked. Android refuses to hide or suspend these.
+     */
+    static Set<String> activeAdminPackages(DevicePolicyManager dpm) {
+        if (dpm == null) {
+            return null;
+        }
+        try {
+            LinkedHashSet<String> packages = new LinkedHashSet<>();
+            List<ComponentName> admins = dpm.getActiveAdmins();
+            if (admins != null) {
+                for (ComponentName component : admins) {
+                    packages.add(component.getPackageName());
+                }
+            }
+            return packages;
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    static Set<String> activeAdminPackages(Context context) {
+        return activeAdminPackages(context.getSystemService(DevicePolicyManager.class));
     }
 
     /**

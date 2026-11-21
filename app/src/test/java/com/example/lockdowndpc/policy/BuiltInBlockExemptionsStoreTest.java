@@ -117,6 +117,7 @@ public final class BuiltInBlockExemptionsStoreTest {
     public void aFailedSaveOverAnExistingFileKeepsTheFile() {
         Map<String, Object> memory = new HashMap<>();
         memory.put("chrome", false);
+        memory.put("social_pins", new LinkedHashSet<String>());
         memory.put("format", BuiltInBlockExemptions.FORMAT_VERSION);
         boolean[] fileExists = {true};
         boolean[] deleted = {false};
@@ -125,6 +126,47 @@ public final class BuiltInBlockExemptionsStoreTest {
         assertFalse(store.write(Settings.NONE.withChrome(true)));
         assertFalse("an existing file is never deleted", deleted[0]);
         assertEquals(Boolean.FALSE, memory.get("chrome"));
+        assertFalse(store.record().unreadable());
+    }
+
+    @Test
+    public void onlyTheBackupLeftByAFailedWriteStillCountsAsAFile() throws java.io.IOException {
+        java.io.File dir = java.nio.file.Files.createTempDirectory("prefs").toFile();
+        try {
+            java.io.File file = new java.io.File(dir, "builtin_block_exemptions.xml");
+            java.io.File backup = new java.io.File(dir, "builtin_block_exemptions.xml.bak");
+            java.util.function.BooleanSupplier exists = BuiltInBlockExemptionsStore.fileOrBackupExists(file);
+            assertFalse("neither", exists.getAsBoolean());
+            assertTrue(backup.createNewFile());
+            assertTrue("backup only", exists.getAsBoolean());
+
+            // A damaged file Android loaded as an empty map, of which a failed
+            // write left only the backup: still unreadable, never a fresh device.
+            BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
+                    androidLikePreferences(new HashMap<>(), new boolean[]{false}), exists, () -> {});
+            assertTrue(store.record().unreadable());
+            assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, store.record().flag());
+
+            assertTrue(backup.delete());
+            assertTrue(file.createNewFile());
+            assertTrue("file only", exists.getAsBoolean());
+        } finally {
+            for (java.io.File child : dir.listFiles()) {
+                child.delete();
+            }
+            dir.delete();
+        }
+    }
+
+    @Test
+    public void refusedContainmentIsAuditedThroughTheStoreOnlyOnAChange() {
+        SharedPreferences prefs = androidLikePreferences(new HashMap<>(), new boolean[]{false});
+        assertEquals(null, BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of()));
+        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM)));
+        assertEquals(null, BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM)));
+        assertEquals("builtin-exemption: social containment restored",
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of()));
     }
 
     // --- Routing warning audit -----------------------------------------------------------

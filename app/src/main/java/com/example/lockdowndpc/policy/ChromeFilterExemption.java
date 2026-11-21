@@ -277,6 +277,14 @@ public final class ChromeFilterExemption {
         return result;
     }
 
+    /**
+     * Whether the release changed Chrome from hidden to visible: only then does
+     * Android send the package event that may continue this pass.
+     */
+    public static boolean unhidByRelease(BuiltInBlockExemptions.Observed beforeRelease, Decision afterRelease) {
+        return afterRelease.shown() && beforeRelease == BuiltInBlockExemptions.Observed.HIDDEN;
+    }
+
     /** What Android reports now; a failed read is {@code UNKNOWN}, never guessed. */
     public static BuiltInBlockExemptions.Observed observe(Gateway gateway) {
         try {

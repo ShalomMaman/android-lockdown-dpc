@@ -34,6 +34,7 @@ public final class BuiltInBlockExemptionsStore {
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
     private static final String KEY_ROUTING_FAILING = "chrome_routing_failing";
+    private static final String KEY_CONTAINMENT_REFUSED = "social_containment_refused";
 
     /** How long after its own Chrome release a pass counts as caused by that release. */
     static final long OWN_RELEASE_WINDOW_MS = 60_000L;
@@ -81,7 +82,8 @@ public final class BuiltInBlockExemptionsStore {
                     Context app = context.getApplicationContext();
                     java.io.File file = new java.io.File(app.getApplicationInfo().dataDir,
                             "shared_prefs/" + PREFS + ".xml");
-                    current = persistenceFor(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE), file::exists,
+                    current = persistenceFor(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE),
+                            fileOrBackupExists(file),
                             // Delete the file itself, not through deleteSharedPreferences, so
                             // the cached preference instance held here stays the only one.
                             () -> {
@@ -103,6 +105,16 @@ public final class BuiltInBlockExemptionsStore {
     static BuiltInExemptionsPersistence persistenceFor(
             SharedPreferences prefs, BooleanSupplier fileExists, Runnable deleteFile) {
         return new BuiltInExemptionsPersistence(new PreferencesBacking(prefs, fileExists, deleteFile));
+    }
+
+    /**
+     * Whether the preference file exists in any form: Android keeps the last
+     * good copy as {@code <name>.xml.bak} while it writes, and a failed write
+     * can leave only that backup, which Android restores on the next load.
+     */
+    static BooleanSupplier fileOrBackupExists(java.io.File file) {
+        java.io.File backup = new java.io.File(file.getPath() + ".bak");
+        return () -> file.exists() || backup.exists();
     }
 
     /** The prior raw values, and whether the file existed at all. */
@@ -313,6 +325,22 @@ public final class BuiltInBlockExemptionsStore {
             prefs.edit().putBoolean(KEY_ROUTING_FAILING, failingNow).commit();
         }
         return BuiltInBlockExemptions.routingAuditTransition(wasFailing, failingNow, detail);
+    }
+
+    /**
+     * Records the social packages Android refused to contain on this pass and
+     * returns the audit line for a change in that set, or {@code null}.
+     */
+    static String containmentOutcome(Context context, Set<String> refusedNow) {
+        return containmentOutcome(readbackPrefs(context), refusedNow);
+    }
+
+    static String containmentOutcome(SharedPreferences prefs, Set<String> refusedNow) {
+        Set<String> was = new LinkedHashSet<>(prefs.getStringSet(KEY_CONTAINMENT_REFUSED, Set.of()));
+        if (!was.equals(refusedNow)) {
+            prefs.edit().putStringSet(KEY_CONTAINMENT_REFUSED, new LinkedHashSet<>(refusedNow)).commit();
+        }
+        return BuiltInBlockExemptions.containmentAuditTransition(was, refusedNow);
     }
 
     /** The last read-back, or {@code null} when none was recorded. */

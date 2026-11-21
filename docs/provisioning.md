@@ -414,6 +414,12 @@ cannot be configured as the home filter's VPN.
 - A failed link-routing step does not hide Chrome or fail the pass: links
   fall back to the blocked page and the failure is logged on every pass and
   audited once, when it starts and again when it recovers.
+- Android refuses to hide an active device administrator. Such an app cannot
+  be approved, and an approved app that becomes one loses its approval on the
+  next pass. A catalogue app whose hide is refused is suspended instead; if
+  Android refuses that too, the app stays launchable and every pass reports
+  `CONTAINMENT_REFUSED` for it (audited when the set of such apps changes).
+  Remove the app's administrator access in Android Settings.
 
 - Web content that another app renders itself (its own WebView or in-app
   browser) does not follow Chrome's policies; it is filtered only at the

@@ -224,12 +224,19 @@ public final class BuiltInBlockExemptions {
      *   <li>Otherwise the format marker must be {@link #FORMAT_VERSION}. A file
      *       that exists without it — including a zero-byte file, or a damaged
      *       one Android loaded as an empty map — is unreadable.</li>
-     *   <li>Any malformed value is unreadable.</li>
+     *   <li>A versioned record holds every field the writer always writes —
+     *       the marker, the Chrome flag and the pin set — or it is unreadable.</li>
+     *   <li>Every pin names a catalogue package, once, mapped to exactly 64
+     *       lower-case hex characters; anything else makes the whole record
+     *       unreadable.</li>
      * </ul>
      *
      * @param raw        the stored values as Android loaded them
      * @param fileExists the preference file exists on disk (any size)
      */
+    /** A pin as the writer stores it: a SHA-256 digest in lower-case hex. */
+    private static final java.util.regex.Pattern STORED_DIGEST = java.util.regex.Pattern.compile("[0-9a-f]{64}");
+
     public static Record parseRecord(Map<String, ?> raw, boolean fileExists) {
         Map<String, ?> values = raw == null ? Map.of() : raw;
         if (values.isEmpty() && !fileExists) {
@@ -238,25 +245,25 @@ public final class BuiltInBlockExemptions {
         if (!Integer.valueOf(FORMAT_VERSION).equals(values.get(KEY_FORMAT))) {
             return Record.UNREADABLE;
         }
-        Object rawChrome = values.get(KEY_CHROME);
-        if (rawChrome != null && !(rawChrome instanceof Boolean)) {
+        if (!(values.get(KEY_CHROME) instanceof Boolean chrome)
+                || !(values.get(KEY_SOCIAL_PINS) instanceof Set<?> entries)) {
             return Record.UNREADABLE;
         }
         LinkedHashMap<String, String> pins = new LinkedHashMap<>();
-        Object rawPins = values.get(KEY_SOCIAL_PINS);
-        if (rawPins != null) {
-            if (!(rawPins instanceof Set<?> entries)) {
+        for (Object entry : entries) {
+            if (!(entry instanceof String text) || text.indexOf('=') <= 0) {
                 return Record.UNREADABLE;
             }
-            for (Object entry : entries) {
-                if (!(entry instanceof String text) || text.indexOf('=') <= 0) {
-                    return Record.UNREADABLE;
-                }
-                pins.put(text.substring(0, text.indexOf('=')), text.substring(text.indexOf('=') + 1));
+            String packageName = text.substring(0, text.indexOf('='));
+            String digest = text.substring(text.indexOf('=') + 1);
+            if (!isExemptableSocial(packageName)
+                    || !STORED_DIGEST.matcher(digest).matches()
+                    || pins.put(packageName, digest) != null) {
+                return Record.UNREADABLE;
             }
         }
         try {
-            return new Record(new Settings(Boolean.TRUE.equals(rawChrome), pins));
+            return new Record(new Settings(chrome, pins));
         } catch (IllegalArgumentException exception) {
             return Record.UNREADABLE;
         }
@@ -474,6 +481,51 @@ public final class BuiltInBlockExemptions {
         String pinned = settings.socialPins().get(packageName);
         String observed = LockdownPackages.normalizeDigest(currentSignerSha256);
         return pinned != null && !observed.isEmpty() && pinned.equals(observed);
+    }
+
+    /**
+     * {@link #socialVisible} for a pass: Android refuses to hide or suspend an
+     * active device administrator, so an approved application that has become
+     * one is not allowed either. {@code null} — the administrators could not be
+     * read — allows nothing.
+     */
+    public static boolean socialAllowed(
+            String packageName, Settings settings, String currentSignerSha256, Set<String> activeAdminPackages) {
+        return activeAdminPackages != null
+                && !activeAdminPackages.contains(packageName)
+                && socialVisible(packageName, settings, currentSignerSha256);
+    }
+
+    /**
+     * The packages a change newly approves or re-pins: those an approval save
+     * must check against the active device administrators.
+     */
+    public static Set<String> newlyPinned(Settings before, Settings after) {
+        java.util.LinkedHashSet<String> granted = new java.util.LinkedHashSet<>();
+        for (Map.Entry<String, String> pin : after.socialPins().entrySet()) {
+            if (!pin.getValue().equals(before.socialPins().get(pin.getKey()))) {
+                granted.add(pin.getKey());
+            }
+        }
+        return granted;
+    }
+
+    /**
+     * The audit line for social packages Android refused to contain, only when
+     * that set changes, so a lasting refusal cannot crowd out administrator
+     * entries; the pass result reports it every time.
+     *
+     * @return the line to audit, or {@code null} when nothing changed
+     */
+    public static String containmentAuditTransition(Set<String> wasRefused, Set<String> refusedNow) {
+        if (wasRefused.equals(refusedNow)) {
+            return null;
+        }
+        if (refusedNow.isEmpty()) {
+            return "builtin-exemption: social containment restored";
+        }
+        return "builtin-exemption: " + SocialContainment.REFUSED_ERROR + ": "
+                + String.join(",", new java.util.TreeSet<>(refusedNow));
     }
 
     public static boolean chromeSignerVerified(String currentSignerSha256) {

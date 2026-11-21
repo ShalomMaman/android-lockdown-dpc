@@ -121,6 +121,15 @@ public final class ChromeFilterExemptionTest {
     // --- Scope ----------------------------------------------------------------------
 
     @Test
+    public void onlyAReleaseThatUnhidChromeMayContinueThePass() {
+        assertTrue(ChromeFilterExemption.unhidByRelease(Observed.HIDDEN, Decision.SHOWN));
+        assertFalse("already visible: no package event",
+                ChromeFilterExemption.unhidByRelease(Observed.VISIBLE, Decision.SHOWN));
+        assertFalse(ChromeFilterExemption.unhidByRelease(Observed.UNKNOWN, Decision.SHOWN));
+        assertFalse("not shown", ChromeFilterExemption.unhidByRelease(Observed.HIDDEN, Decision.SHOW_UNVERIFIED));
+    }
+
+    @Test
     public void theExemptionIsInertWhileChromeIsTheWebViewProviderOrBeforeAndroid10() {
         assertFalse(ChromeFilterExemption.inScope(33, BuiltInBlockExemptions.CHROME));
         assertFalse(ChromeFilterExemption.inScope(28, "com.google.android.webview"));

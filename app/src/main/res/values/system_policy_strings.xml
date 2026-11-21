@@ -171,6 +171,7 @@
     <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
     <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
     <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
+    <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Device Guard block it again. Remove its administrator access in Android Settings first.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
