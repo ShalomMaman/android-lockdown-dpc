@@ -199,8 +199,15 @@ passphrase, the administrator PIN or a recovery code.
 > **Android 12 (API 31) and later.** Use an APK that includes both setup wizard
 > handlers. Device Guard selects fully managed device mode and cancels setup
 > if Android supplies an allowed-mode list that excludes it. After Android
-> grants Device Owner, the compliance handler runs Device Guard's existing
-> local policy pass and returns control to the wizard. Both handlers require
+> grants Device Owner, the compliance handler shows a progress screen and
+> applies Device Guard's baseline policy through the same verified pass the
+> console uses, recorded as `provisioning-compliance`. Protection is switched
+> on by that pass. The wizard continues only when Android has read the whole
+> policy back; an unverified or crashed pass cancels setup, and the failure is
+> kept in the policy status and the audit log. A compliance request that
+> arrives after setup has finished, or after a verified pass, is acknowledged
+> without applying the baseline again, so it never overrides a protection
+> state an administrator has since changed. Both handlers require
 > `BIND_DEVICE_ADMIN`. After setup, check ownership and policy read-back as
 > described below. QR enrolment on physical devices is pending in
 > [Group Q](hardware-validation.md#group-q--android-12-qr-enrolment).
@@ -339,11 +346,19 @@ three:
 2. **The console.** Open Device Guard. The status surface reads
    `isDeviceOwnerApp` directly, so it shows ownership rather than an assumption.
 
-3. **A verified policy apply.** Apply the intended protection profile and
-   confirm the console reports it as applied. Device Guard never reports a
-   requested policy as active until it has read the value back from the
-   platform, so an "applied" state is evidence and a "failed" state is a real
-   OEM refusal to investigate — not a display defect.
+3. **A verified policy apply.** On Android 12 or later with QR enrolment, the
+   baseline was already applied during setup: confirm the console reports it
+   as applied and that the device health report names
+   `provisioning-compliance` as the last verified reconciliation.
+   Otherwise, apply the intended protection profile and confirm the console
+   reports it as applied. Device Guard never reports a requested policy as
+   active until it has read the value back from the platform, so an "applied"
+   state is evidence and a "failed" state is a real OEM refusal to
+   investigate — not a display defect. Once the baseline is applied, the
+   Settings reset entry is gone; see
+   [the recovery section](#recovering-a-device-with-the-wrong-component-or-identity).
+   On production builds USB debugging is disabled by the baseline, so take
+   this evidence from the console, not from ADB.
 
 An enrolment that satisfies 1 and 2 but not 3 is an OEM policy problem on a
 correctly owned device. Record which restriction failed before continuing; that
@@ -358,14 +373,16 @@ not try to repair it in place.
 | --- | --- | --- |
 | Wizard cannot download the APK | Download location unreachable, HTTP redirect, captive portal | Fix the host and network; re-scan. The URL must be clean HTTPS end to end. |
 | "Package checksum does not match" or a signature error | The URL serves an APK signed with a different key, or `--signer-sha256` was wrong | Rebuild the payload with `--apk` so the digest is read from the artifact. |
-| Wizard installs the DPC but does not hand over | The APK lacks a provisioning handler, fully managed mode is unavailable, or the compliance callback could not complete | Check the APK version and capture `adb logcat` where available. Factory reset before retrying. |
+| Wizard installs the DPC but does not hand over | The APK lacks a provisioning handler, fully managed mode is unavailable, or the compliance callback could not verify the baseline | Check the APK version and capture `adb logcat` where available. If the console opens, record its policy error. Factory reset before retrying; a failed compliance pass may already have blocked the Settings reset entry. |
+| Setup finished, then the device must be wiped | Compliance passed, so the baseline, including `DISALLOW_FACTORY_RESET`, is in force | The Settings reset entry is disabled. Use the model's recovery-mode wipe; see the recovery section below. |
 | "Already provisioned" / owner already set | The device was not fully wiped | Factory reset. |
 | Enrolment ends with no management consent screen | Wizard was already completed once | Factory reset. |
 | Device reboots into the wizard repeatedly | Encryption or wizard step interrupted | Factory reset; do not use `--skip-encryption` as a workaround. |
 
-After any failure: factory reset, then start Runbook A from step 1. If the
-device became owned before it failed, the Settings reset entry may already be
-blocked — see the recovery section below for what remains. Keep the failure in
+After any failure: factory reset, then start Runbook A from step 1. Once the
+compliance step has applied the baseline, the Settings reset entry is
+disabled even if setup failed afterwards, and only the recovery-mode wipe
+works — see the recovery section below. Keep the failure in
 the enrolment record — the pattern across models is the deliverable
 of the OEM matrix, not noise.
 

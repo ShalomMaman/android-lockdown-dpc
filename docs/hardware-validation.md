@@ -217,26 +217,39 @@ spurious error.
 ### Q-1 Fully managed setup through both provisioning handlers
 
 **Applies to:** Android 12 (API 31) or later on each firmware family with a QR
-entry point in the setup wizard. Start with a factory-reset test device and a
-signed APK containing both handlers.
+entry point in the setup wizard, including at least one device with Google
+Mobile Services. Start with a factory-reset test device and a signed APK
+containing both handlers.
 
 **Steps**
 
 1. Prepare the QR payload for the exact APK and enrol from the welcome screen
    using [Runbook A](provisioning.md#runbook-a--qr-enrolment-on-the-setup-wizard).
-2. Finish setup. Confirm Device Owner status using the platform and console
-   checks in [Prove Device Owner took effect](provisioning.md#prove-device-owner-took-effect).
-3. Before applying any policy from the console, record its initial policy
-   status. Check the device's user restrictions with `adb shell dumpsys user`
-   once ADB is available. Confirm the default `no_factory_reset` restriction
-   is present for the managed user.
+2. During the compliance step, confirm Device Guard shows its progress screen,
+   that Back does not dismiss it, and that the wizard continues on its own once
+   the pass finishes.
+3. Complete every wizard step that follows compliance (on a GMS device this
+   includes the Google screens, account and service prompts that the firmware
+   still shows), noting any step that fails or behaves differently under the
+   applied baseline.
+4. Confirm Device Owner status using the platform and console checks in
+   [Prove Device Owner took effect](provisioning.md#prove-device-owner-took-effect).
+5. Before any console action, record the policy status and confirm the device
+   health report names `provisioning-compliance` as the last reconciliation,
+   with a verified outcome. Confirm the
+   Settings reset entry is disabled. On a pilot build, also check the managed
+   user's restrictions with `adb shell dumpsys user` and confirm
+   `no_factory_reset` is present. On a production build USB debugging is
+   disabled, so take this evidence from the console only.
 
 **Expected:** setup completes with Device Guard as Device Owner, with no work
-profile or app interaction during the two callbacks. The existing baseline
-policy is in effect before any console action.
+profile or app interaction during the two callbacks. The baseline policy is
+verified and in effect before any console action, and the wizard steps after
+compliance complete under it.
 
 **Fail action:** stop and record which stage failed. Capture available setup
-wizard or Device Guard errors before factory resetting for a retry.
+wizard or Device Guard errors before wiping for a retry. If compliance had
+passed, use the recovery-mode wipe; the Settings reset entry is disabled.
 
 **Evidence:** record the wizard outcome, owner read-back, initial policy status
 and restriction read-back in [`device-matrix.md`](device-matrix.md). Keep the QR

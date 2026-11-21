@@ -132,8 +132,7 @@
         <activity
             android:name=".admin.PolicyComplianceActivity"
             android:exported="true"
-            android:permission="android.permission.BIND_DEVICE_ADMIN"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            android:permission="android.permission.BIND_DEVICE_ADMIN">
             <intent-filter>
                 <action android:name="android.app.action.ADMIN_POLICY_COMPLIANCE" />
                 <category android:name="android.intent.category.DEFAULT" />

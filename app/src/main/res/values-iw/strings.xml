@@ -21,6 +21,7 @@
     <string name="admin_label">ניהול והגנת המכשיר</string>
     <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
     <string name="admin_profile_name">מכשיר מוגן</string>
+    <string name="provisioning_compliance_progress">מחיל את הגנת המכשיר…</string>
     <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
     <plurals name="policy_applied">
         <item quantity="one">ההגנה פעילה ומאומתת. נחסמה אפליקציה אחת.</item>
