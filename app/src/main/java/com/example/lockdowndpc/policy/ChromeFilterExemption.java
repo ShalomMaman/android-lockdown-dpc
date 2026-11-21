@@ -37,6 +37,8 @@ public final class ChromeFilterExemption {
     public static final String CONTAIN_UNVERIFIED_ERROR = "chrome-exemption-contain-unverified";
     public static final String SHOW_UNVERIFIED_ERROR = "chrome-exemption-show-unverified";
     public static final String FILTER_UNCONFIRMED_ERROR = "chrome-exemption-filter-unconfirmed";
+    /** An active window targets Chrome and Android did not confirm the suspension shown with it. */
+    public static final String WINDOW_SUSPEND_UNVERIFIED_ERROR = "chrome-exemption-window-suspend-unverified";
 
     /** Why Chrome is, or is not, shown on this pass. */
     public enum Decision {
@@ -245,12 +247,49 @@ public final class ChromeFilterExemption {
             Gateway gateway,
             List<String> errors
     ) {
+        return release(decision, filterConfirmed, false, gateway, errors);
+    }
+
+    /**
+     * @param windowTarget an active night or work window targets Chrome
+     *                     ({@link ScheduleSuspension.Hold#targets}). Then
+     *                     Chrome is suspended first and unhidden only once
+     *                     Android confirms the suspension, and that suspension
+     *                     is never lifted here: Chrome is never visible and
+     *                     launchable inside a window, whatever a later step of
+     *                     the pass does; the schedule step then suspends and
+     *                     records it too. The first release after the window
+     *                     ends lifts it. A suspension Android does not confirm
+     *                     leaves Chrome hidden.
+     */
+    public static Decision release(
+            Decision decision,
+            boolean filterConfirmed,
+            boolean windowTarget,
+            Gateway gateway,
+            List<String> errors
+    ) {
         if (decision.shown() && filterConfirmed) {
             try {
-                gateway.setHidden(false);
-                gateway.setSuspended(false);
-                if (observe(gateway) == BuiltInBlockExemptions.Observed.VISIBLE) {
-                    return Decision.SHOWN;
+                if (windowTarget) {
+                    gateway.setSuspended(true);
+                    if (!gateway.suspended()) {
+                        // Still hidden: nothing was unhidden yet.
+                        errors.add(WINDOW_SUSPEND_UNVERIFIED_ERROR);
+                        return hide(gateway, errors) == Containment.CONTAINED
+                                ? Decision.SHOW_UNVERIFIED
+                                : Decision.HIDE_REFUSED;
+                    }
+                    gateway.setHidden(false);
+                    if (observe(gateway) == BuiltInBlockExemptions.Observed.SUSPENDED) {
+                        return Decision.SHOWN;
+                    }
+                } else {
+                    gateway.setHidden(false);
+                    gateway.setSuspended(false);
+                    if (observe(gateway) == BuiltInBlockExemptions.Observed.VISIBLE) {
+                        return Decision.SHOWN;
+                    }
                 }
                 errors.add(SHOW_UNVERIFIED_ERROR);
             } catch (RuntimeException exception) {

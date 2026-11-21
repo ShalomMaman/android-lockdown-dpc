@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -54,6 +56,12 @@ import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PlayStoreCompatibility
 import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
+import com.example.lockdowndpc.policy.ScheduleAlarm
+import com.example.lockdowndpc.policy.ScheduleChange
+import com.example.lockdowndpc.policy.ScheduleClock
+import com.example.lockdowndpc.policy.ScheduleController
+import com.example.lockdowndpc.policy.ScheduleSettings
+import com.example.lockdowndpc.policy.ScheduleStore
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyLabels
 import com.example.lockdowndpc.policy.SystemPolicyOutcome
@@ -191,6 +199,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     // A background pass can change what Android reports; re-read on return.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++ }
     var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
+    val schedule = remember(revision) { ScheduleStore.read(context) }
+    val scheduleExact = remember(revision) { ScheduleAlarm.exactPermitted(context) }
+    val scheduleClockLocked = remember(revision) { ScheduleClock.locked(context) }
+    var pendingSchedule by remember { mutableStateOf<Boolean?>(null) }
 
     fun requireSession(): Boolean {
         if (AdminSession.isUnlocked()) {
@@ -412,6 +424,81 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         }
     }
 
+    /**
+     * Turns night and work hours on or off at the policy boundary, which
+     * checks the administrator session again before a loosening is saved and
+     * then runs the enforcing pass.
+     */
+    fun submitSchedule(requested: Boolean) {
+        if (working || !requireSession()) {
+            return
+        }
+        working = true
+        message = null
+        coroutineScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    Result.success(ScheduleController.setEnabled(context.applicationContext, requested))
+                } catch (exception: RuntimeException) {
+                    // SecurityException included: shown as an expired session below.
+                    Result.failure<ScheduleController.Result>(exception)
+                }
+            }
+            working = false
+            revision++
+            val result = outcome.getOrElse { failure ->
+                // The stored schedule is re-read on the next render, so the
+                // row shows what is actually in force.
+                message = if (failure is SecurityException) {
+                    UiMessage(context.getString(R.string.system_policy_error_auth), isError = true)
+                } else {
+                    UiMessage(
+                        context.getString(
+                            R.string.system_policy_applied_failed,
+                            failure.javaClass.simpleName.bidiIsolated(),
+                        ),
+                        isError = true,
+                    )
+                }
+                return@launch
+            }
+            val pass = result.pass()
+            message = when (result.outcome().status()) {
+                ScheduleChange.Status.SESSION_REQUIRED -> UiMessage(
+                    context.getString(R.string.system_policy_error_auth),
+                    isError = true,
+                )
+                ScheduleChange.Status.NOT_SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_schedule_not_saved),
+                    isError = true,
+                )
+                ScheduleChange.Status.CLOCK_UNLOCKED -> UiMessage(
+                    context.getString(R.string.system_policy_schedule_clock_unconfirmed),
+                    isError = true,
+                )
+                ScheduleChange.Status.UNCHANGED -> null
+                else -> when {
+                    pass == null -> UiMessage(
+                        context.getString(R.string.system_policy_paused_note),
+                        isError = false,
+                    )
+                    !pass.applied() -> UiMessage(
+                        context.getString(
+                            R.string.system_policy_applied_failed,
+                            (pass.errors().firstOrNull()
+                                ?: context.getString(R.string.error_unknown)).bidiIsolated(),
+                        ),
+                        isError = true,
+                    )
+                    else -> UiMessage(
+                        context.getString(R.string.system_policy_applied_ok),
+                        isError = false,
+                    )
+                }
+            }
+        }
+    }
+
     /** Pins the application to the signer it has right now, then submits. */
     fun approveSocial(candidate: ExemptionCandidate) {
         val signer = PackageIdentity.currentSignerSha256IncludingHidden(
@@ -496,6 +583,19 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
+        SectionCard(title = stringResource(R.string.system_policy_section_schedule)) {
+            key(revision) {
+                ScheduleRow(
+                    settings = schedule,
+                    exactAlarms = scheduleExact,
+                    clockLocked = scheduleClockLocked,
+                    enabled = !working,
+                    onToggle = { requested -> pendingSchedule = requested },
+                )
+            }
+        }
+
+        Spacer(Modifier.height(20.dp))
         key(revision) {
             BuiltInExemptionsSection(
                 view = exemptionsView,
@@ -552,6 +652,17 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 }
             },
             onDismiss = { pendingExemption = null },
+        )
+    }
+
+    pendingSchedule?.let { requested ->
+        ScheduleConfirmDialog(
+            requested = requested,
+            onConfirm = {
+                pendingSchedule = null
+                submitSchedule(requested)
+            },
+            onDismiss = { pendingSchedule = null },
         )
     }
 
@@ -621,6 +732,151 @@ private fun PlayCompatibilityRow(
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+}
+
+/**
+ * Night and work hours: one switch for both windows, the state on file, and
+ * what the windows do. An unreadable record reads as on, because the device
+ * enforces both default windows for it. While a schedule is on, the
+ * exact-alarm state is stated as it is, with no promised delay. On Android
+ * 8.0/8.1 an unlocked clock is stated as the reason the schedule cannot be
+ * turned on yet.
+ */
+@Composable
+private fun ScheduleRow(
+    settings: ScheduleSettings,
+    exactAlarms: Boolean,
+    clockLocked: Boolean,
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    // On while any window restricts: one enabled window is still a schedule
+    // in force, and the fail-closed windows of an unreadable record too.
+    val on = settings.unreadable() || settings.enforcing()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 64.dp)
+            // The row owns the switch semantics, so TalkBack reads the title
+            // and status together with the state.
+            .toggleable(
+                value = on,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onToggle,
+            )
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.system_policy_schedule_row),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                text = stringResource(
+                    R.string.system_policy_status_line,
+                    stringResource(
+                        when {
+                            settings.unreadable() -> R.string.system_policy_schedule_state_unreadable
+                            on -> R.string.system_policy_schedule_state_on
+                            else -> R.string.system_policy_schedule_state_off
+                        }
+                    ),
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (settings.unreadable()) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+        Spacer(Modifier.size(16.dp))
+        // Decorative: the row above is the toggle.
+        Switch(
+            checked = on,
+            onCheckedChange = null,
+            enabled = enabled,
+        )
+    }
+    Text(
+        text = stringResource(R.string.system_policy_schedule_body),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+    )
+    if (on) {
+        Text(
+            text = stringResource(
+                if (exactAlarms) {
+                    R.string.system_policy_schedule_exact
+                } else {
+                    R.string.system_policy_schedule_inexact
+                }
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (exactAlarms) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+    if (!clockLocked) {
+        Text(
+            text = stringResource(R.string.system_policy_schedule_clock_needed),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (on) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+}
+
+/** What turning the windows on or off does, stated before anything is written. */
+@Composable
+private fun ScheduleConfirmDialog(
+    requested: Boolean,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                stringResource(
+                    if (requested) {
+                        R.string.system_policy_schedule_confirm_enable_title
+                    } else {
+                        R.string.system_policy_schedule_confirm_disable_title
+                    }
+                )
+            )
+        },
+        text = {
+            Text(
+                stringResource(
+                    if (requested) {
+                        R.string.system_policy_schedule_confirm_enable_body
+                    } else {
+                        R.string.system_policy_schedule_confirm_disable_body
+                    }
+                )
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text(stringResource(R.string.system_policy_confirm_apply))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
     )
 }
 

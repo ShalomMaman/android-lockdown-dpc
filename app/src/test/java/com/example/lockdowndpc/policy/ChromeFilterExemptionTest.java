@@ -493,4 +493,136 @@ public final class ChromeFilterExemptionTest {
         chrome.suspended = true;
         assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
     }
+
+    // --- Night and work hours ---------------------------------------------------------
+
+    @Test
+    public void aReleaseNeverLiftsASuspensionAnActiveWindowTargets() {
+        // Shown on an earlier pass, then suspended by an active window; this
+        // pass contains Chrome again (not a continuation) and releases it.
+        FakeChrome chrome = new FakeChrome();
+        chrome.suspended = true;
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        List<String> errors = new ArrayList<>();
+        Containment containment = ChromeFilterExemption.contain(true, true, PAC, false, chrome, errors);
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, PAC, chrome, errors);
+        assertEquals(Decision.SHOWN, decision);
+        Decision released = ChromeFilterExemption.release(decision, true, true, chrome, errors);
+        assertEquals(Decision.SHOWN, released);
+        assertTrue(errors.isEmpty());
+        assertFalse("the window's suspension is never lifted", chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+        assertFalse(chrome.hidden);
+        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aReleaseOutsideAWindowLiftsAContainmentSuspension() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.hidden = true;
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.SHOWN, ChromeFilterExemption.release(Decision.SHOWN, true, false, chrome, errors));
+        assertTrue(chrome.calls.contains("suspend=false"));
+        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aHeldReleaseThatAndroidLeavesHiddenIsUnverifiedAndContained() {
+        FakeChrome chrome = new FakeChrome() {
+            @Override
+            public void setHidden(boolean value) {
+                calls.add("hide=" + value);
+                hidden = true;
+            }
+        };
+        chrome.hidden = true;
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.SHOW_UNVERIFIED,
+                ChromeFilterExemption.release(Decision.SHOWN, true, true, chrome, errors));
+        assertTrue(errors.contains(ChromeFilterExemption.SHOW_UNVERIFIED_ERROR));
+        assertFalse(chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+    }
+
+    @Test
+    public void aHeldChromeIsStillContainedWhenTheFilterIsUnconfirmed() {
+        FakeChrome chrome = visibleChrome();
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.FILTER_UNCONFIRMED,
+                ChromeFilterExemption.release(Decision.SHOWN, false, true, chrome, errors));
+        assertFalse(chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+    }
+
+    @Test
+    public void aFirstShowInsideAWindowSuspendsChromeBeforeUnhidingIt() {
+        // Hidden by containment, never suspended, never recorded by the schedule.
+        FakeChrome chrome = new FakeChrome();
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        List<String> errors = new ArrayList<>();
+        Containment containment = ChromeFilterExemption.contain(true, true, PAC, false, chrome, errors);
+        assertEquals(Containment.CONTAINED, containment);
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, PAC, chrome, errors);
+        chrome.calls.clear();
+        Decision released = ChromeFilterExemption.release(decision, true, true, chrome, errors);
+        assertEquals(Decision.SHOWN, released);
+        assertEquals(List.of(), errors);
+        int suspend = chrome.calls.indexOf("suspend=true");
+        int unhide = chrome.calls.indexOf("hide=false");
+        assertTrue(chrome.calls.toString(), suspend >= 0 && unhide > suspend);
+        assertFalse(chrome.calls.contains("suspend=false"));
+        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aWindowSuspensionAndroidDoesNotConfirmKeepsChromeHidden() {
+        FakeChrome chrome = new FakeChrome() {
+            @Override
+            public void setSuspended(boolean value) {
+                calls.add("suspend=" + value);
+                // Silently ignored.
+            }
+        };
+        chrome.hidden = true;
+        List<String> errors = new ArrayList<>();
+        Decision released = ChromeFilterExemption.release(Decision.SHOWN, true, true, chrome, errors);
+        assertEquals(Decision.SHOW_UNVERIFIED, released);
+        assertTrue(errors.contains(ChromeFilterExemption.WINDOW_SUSPEND_UNVERIFIED_ERROR));
+        assertFalse("never unhidden unsuspended", chrome.calls.contains("hide=false"));
+        assertTrue(chrome.hidden);
+        assertFalse(released.shown());
+    }
+
+    @Test
+    public void aRefusedWindowSuspensionKeepsChromeHidden() {
+        FakeChrome chrome = new FakeChrome() {
+            @Override
+            public void setSuspended(boolean value) {
+                calls.add("suspend=" + value);
+                throw new IllegalStateException("suspension-refused");
+            }
+        };
+        chrome.hidden = true;
+        List<String> errors = new ArrayList<>();
+        Decision released = ChromeFilterExemption.release(Decision.SHOWN, true, true, chrome, errors);
+        assertFalse(released.shown());
+        assertFalse(chrome.calls.contains("hide=false"));
+        assertTrue(chrome.hidden);
+        assertFalse(errors.isEmpty());
+    }
+
+    @Test
+    public void aChromeShownBeforeTheWindowIsSuspendedWhenTheWindowStarts() {
+        FakeChrome chrome = visibleChrome();
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.SHOWN, ChromeFilterExemption.release(Decision.SHOWN, true, true, chrome, errors));
+        assertEquals(List.of(), errors);
+        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
+        // The window ends: the next release lifts its own suspension.
+        assertEquals(Decision.SHOWN, ChromeFilterExemption.release(Decision.SHOWN, true, false, chrome, errors));
+        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
+    }
 }

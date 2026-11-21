@@ -18,6 +18,39 @@ class ManifestPermissionsTest(unittest.TestCase):
 
         self.assertIn("android.permission.ACCESS_NETWORK_STATE", permissions)
 
+    def test_schedule_boundaries_use_the_grantable_exact_alarm_permission_only(self):
+        manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
+        permissions = {
+            element.attrib[ANDROID_NAME]
+            for element in manifest.findall("uses-permission")
+        }
+
+        self.assertIn("android.permission.SCHEDULE_EXACT_ALARM", permissions)
+        # Reserved for alarm clock and calendar apps; the boundary alarm falls
+        # back to an inexact window instead.
+        self.assertNotIn("android.permission.USE_EXACT_ALARM", permissions)
+
+    def test_clock_and_timezone_changes_reach_the_unexported_policy_receiver(self):
+        manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
+        receivers = [
+            receiver
+            for receiver in manifest.findall("application/receiver")
+            if receiver.get(ANDROID_NAME) == ".receivers.PolicyRefreshReceiver"
+        ]
+        self.assertEqual(1, len(receivers))
+        receiver = receivers[0]
+        self.assertEqual("false", receiver.get(f"{ANDROID}exported"))
+        actions = {
+            item.get(ANDROID_NAME) for item in receiver.findall("intent-filter/action")
+        }
+        for action in (
+            "android.intent.action.BOOT_COMPLETED",
+            "android.intent.action.TIME_SET",
+            "android.intent.action.TIMEZONE_CHANGED",
+            "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED",
+        ):
+            self.assertIn(action, actions)
+
     def test_provisioning_mode_activity_is_protected(self):
         self.assert_provisioning_activity(
             ".admin.ProvisioningModeActivity", "android.app.action.GET_PROVISIONING_MODE"

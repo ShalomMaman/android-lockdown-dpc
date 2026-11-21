@@ -10,6 +10,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Required when JobScheduler enforces network constraints for update checks. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!--
+        Night and work hours boundaries fire on time when exact alarms are
+        permitted; without it they fall back to inexact alarms. Granted by
+        default on Android 12 and 13, an administrator choice on Android 14+.
+        See policy/ScheduleAlarm.java.
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
     <application
         android:allowBackup="false"
@@ -198,6 +205,16 @@
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 
+        <!--
+            Night and work hours catch-up sweep, armed only while a schedule is
+            enforcing. Exported with BIND_JOB_SERVICE for the same reason as
+            the maintenance guard: only the platform can bind it.
+        -->
+        <service
+            android:name=".policy.ScheduleSweepJobService"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <receiver
             android:name=".updates.UpdateInstallReceiver"
             android:exported="false" />
@@ -209,6 +226,14 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <!--
+                    Night and work hours: a clock, timezone or exact alarm
+                    access change re-runs the policy pass. The boundary alarm
+                    itself targets this receiver explicitly.
+                -->
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
