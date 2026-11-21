@@ -139,6 +139,16 @@ switch states why it cannot be turned on, and a pass with an enforcing schedule
 on those releases requires it again and is not verified while it is not
 confirmed. Turning the schedule off leaves automatic date and time required.
 
+- **Double write failure, then restart.** If both the ownership record and its "unknown"
+  mark fail to save, and the process restarts outside a window, an older valid record can
+  load. A package the schedule suspended can then stay suspended past the window until the
+  next window records every target again. This errs on the strict side; it never opens an app.
+- **Android 8.0 and 8.1 share one suspension state.** On these versions a window target that
+  another component had already suspended is recorded and released at the end of the window,
+  even if that component still wants it suspended. Every Device Guard step that keeps a package
+  suspended outside windows is excluded from the release, so this only affects suspensions made
+  by other apps (for example an OEM wellbeing tool).
+
 ## Validation still owed
 
 The JVM tests cover the rules above against fake Android layers. Physical-device
