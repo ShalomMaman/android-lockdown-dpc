@@ -78,6 +78,23 @@ public final class LockdownPolicyController {
             }
 
             @Override
+            public void containWebViewProvider(List<String> containErrors) {
+                // The same routine the pass runs later, unchanged: a
+                // browser-backed provider is suspended before protection starts.
+                suspendBrowserBackedWebViewIfNeeded(context, dpm, admin,
+                        homeFilter != null ? homeFilter : HomeFilterPolicy.Settings.OFF, containErrors);
+            }
+
+            @Override
+            public void recordEarlyReadback(List<String> readbackErrors) {
+                readbackErrors.add(HomeFilterController.CORRUPT_CONFIGURATION);
+                recordExemptionReadback(context, dpm, admin, exemptions, social,
+                        chromeInScope ? ChromeFilterExemption.Decision.FILTER_DISABLED
+                                : ChromeFilterExemption.Decision.NOT_AVAILABLE,
+                        readbackErrors);
+            }
+
+            @Override
             public ChromeFilterExemption.Containment containChrome(List<String> containErrors) {
                 return chromeGateway == null ? null : ChromeFilterExemption.contain(
                         exemptions.chrome(), filterEnabled, pacUrl, chromeGateway, containErrors);
@@ -111,7 +128,6 @@ public final class LockdownPolicyController {
             return new PolicyResult(false, false, 0, 0, List.of(error));
         }
         ChromeFilterExemption.Decision chrome = start.chrome();
-        boolean chromeShown = chrome.shown();
         SystemPolicyPass systemPolicy = applySystemPolicy(context, dpm, admin, errors);
         // Resolved from this pass's read-back evidence, never from the stored
         // switch: a compatibility mode whose install lock the device did not
@@ -128,23 +144,28 @@ public final class LockdownPolicyController {
         // every persistent preferred activity of this package, and
         // routeLinks below re-registers the managed-filtering ones.
         KioskController.reconcile(context, dpm, admin, errors);
-        if (!chromeShown) {
+        if (!chrome.shown()) {
             routeLinks(context, dpm, admin, false, errors);
         }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
                 playCompatibility, homeFilter, social, chromeInScope, errors);
-        if (chromeInScope) {
-            // Chrome's place in the sweep: shown only on a SHOWN decision.
-            ChromeFilterExemption.applyVisibility(chrome, chromeGateway, errors);
-        }
-        if (chromeShown) {
-            // Routed only after the package pass: a hidden Chrome has no
-            // activity to resolve. A failure falls back to the blocked page.
-            routeLinks(context, dpm, admin, true, errors);
-        }
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
+        int errorsBeforeFilter = errors.size();
         HomeFilterController.reconcile(context, dpm, admin, errors);
+        if (chromeInScope) {
+            // Chrome is released only now, after the home filter's own
+            // reconciliation, and only if it reported no error. Links follow
+            // the final, verified result rather than the earlier decision.
+            boolean filterConfirmed = homeFilter.enabled() && errors.size() == errorsBeforeFilter;
+            boolean routedAway = !chrome.shown();
+            chrome = ChromeFilterExemption.release(chrome, filterConfirmed, chromeGateway, errors);
+            if (chrome.shown()) {
+                routeLinks(context, dpm, admin, true, errors);
+            } else if (!routedAway) {
+                routeLinks(context, dpm, admin, false, errors);
+            }
+        }
         recordExemptionReadback(context, dpm, admin, exemptions, social, chrome, errors);
         boolean verified = errors.isEmpty();
         if (verified) {

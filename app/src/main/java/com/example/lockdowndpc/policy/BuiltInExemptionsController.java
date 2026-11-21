@@ -17,7 +17,9 @@ import java.util.function.UnaryOperator;
  * audit entry is committed, and only then does a policy pass run. A write that
  * does not persist changes nothing: no pass runs and the caller shows an error.
  * While protection is paused the decision is stored only; the next protected
- * pass enforces it.
+ * pass enforces it. While an earlier failed save is unresolved, passes enforce
+ * no exemptions at all, so any save — a removal included — would re-enable the
+ * others; it therefore needs a live administrator session too.
  */
 public final class BuiltInExemptionsController {
 
@@ -43,6 +45,9 @@ public final class BuiltInExemptionsController {
 
         boolean audit(String entry);
 
+        /** An earlier save failed and passes currently enforce no exemptions. */
+        boolean exemptionsUntrusted();
+
         boolean protectionActive();
 
         LockdownPolicyController.PolicyResult applyPass();
@@ -67,6 +72,11 @@ public final class BuiltInExemptionsController {
                     @Override
                     public boolean audit(String entry) {
                         return AuditLog.appendCommitted(context, entry);
+                    }
+
+                    @Override
+                    public boolean exemptionsUntrusted() {
+                        return BuiltInBlockExemptionsStore.untrusted(context);
                     }
 
                     @Override
@@ -110,7 +120,7 @@ public final class BuiltInExemptionsController {
         if (before.equals(after)) {
             return new Outcome(Status.UNCHANGED, null);
         }
-        if (before.loosensTo(after) && !sessionUnlocked) {
+        if ((before.loosensTo(after) || sink.exemptionsUntrusted()) && !sessionUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
         }
         if (!sink.write(after)) {

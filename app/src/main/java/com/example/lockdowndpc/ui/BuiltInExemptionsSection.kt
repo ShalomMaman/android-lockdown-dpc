@@ -107,6 +107,10 @@ internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = wh
         R.string.system_policy_exempt_chrome_reason_contain_unverified
     ChromeFilterExemption.Decision.CONFIG_UNVERIFIED ->
         R.string.system_policy_exempt_chrome_reason_config_unverified
+    ChromeFilterExemption.Decision.FILTER_UNCONFIRMED ->
+        R.string.system_policy_exempt_chrome_reason_filter_unconfirmed
+    ChromeFilterExemption.Decision.SHOW_UNVERIFIED ->
+        R.string.system_policy_exempt_chrome_reason_show_unverified
     ChromeFilterExemption.Decision.ERROR -> R.string.system_policy_exempt_chrome_reason_error
 }
 

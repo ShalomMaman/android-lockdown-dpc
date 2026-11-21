@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * Chrome's containment, decision and visibility, driven through the production
  * calls in the order the pass makes them ({@code contain}, {@code decide},
- * then {@code applyVisibility} in the sweep's place) against a fake Android
+ * then {@code release} after the home filter's reconciliation) against a fake Android
  * layer that records every call. Visibility only ever changes through those
  * calls. These tests make no claim about what Chrome or Android does with the
  * values.
@@ -38,6 +38,7 @@ public final class ChromeFilterExemptionTest {
         boolean refuseHide;
         RuntimeException throwOnRead;
         RuntimeException throwOnObserve;
+        boolean observeFailsAfterShow;
 
         @Override public boolean installed() { return installed; }
         @Override public String currentSignerSha256() { return signer; }
@@ -65,6 +66,12 @@ public final class ChromeFilterExemptionTest {
             if (!(refuseHide && value)) {
                 hidden = value;
             }
+            if (!value && observeFailsAfterShow) {
+                throwOnObserve = new IllegalStateException("binder");
+            }
+            if (value) {
+                throwOnObserve = null;
+            }
         }
 
         @Override
@@ -84,15 +91,23 @@ public final class ChromeFilterExemptionTest {
         @Override public boolean suspended() { return suspended; }
     }
 
-    /** One protected pass's Chrome steps, in production order. */
+    /**
+     * One protected pass's Chrome steps, in production order.
+     *
+     * @param filterConfirmed the home filter's reconciliation in this pass reported no error
+     */
     private static Decision pass(FakeChrome chrome, boolean exempted, boolean protectionActive,
-                                 boolean filterEnabled, List<String> errors) {
+                                 boolean filterEnabled, boolean filterConfirmed, List<String> errors) {
         String pac = filterEnabled ? PAC : null;
         Containment containment = ChromeFilterExemption.contain(exempted, filterEnabled, pac, chrome, errors);
         Decision decision = ChromeFilterExemption.decide(
                 containment, exempted, protectionActive, filterEnabled, pac, chrome, errors);
-        ChromeFilterExemption.applyVisibility(decision, chrome, errors);
-        return decision;
+        return ChromeFilterExemption.release(decision, filterConfirmed, chrome, errors);
+    }
+
+    private static Decision pass(FakeChrome chrome, boolean exempted, boolean protectionActive,
+                                 boolean filterEnabled, List<String> errors) {
+        return pass(chrome, exempted, protectionActive, filterEnabled, filterEnabled, errors);
     }
 
     private static FakeChrome visibleChrome() {
@@ -180,17 +195,56 @@ public final class ChromeFilterExemptionTest {
     }
 
     @Test
-    public void theSweepStepNeverShowsChromeForANotShownDecision() {
+    public void theReleaseStepNeverShowsChromeForANotShownDecision() {
         for (Decision decision : Decision.values()) {
             if (decision.shown()) {
                 continue;
             }
-            FakeChrome chrome = new FakeChrome();
-            chrome.hidden = true;
-            ChromeFilterExemption.applyVisibility(decision, chrome, new ArrayList<>());
-            assertFalse(decision.name(), chrome.calls.contains("hide=false"));
-            assertFalse(decision.name(), chrome.calls.contains("suspend=false"));
+            for (boolean filterConfirmed : new boolean[]{true, false}) {
+                FakeChrome chrome = new FakeChrome();
+                chrome.hidden = true;
+                ChromeFilterExemption.release(decision, filterConfirmed, chrome, new ArrayList<>());
+                assertFalse(decision.name(), chrome.calls.contains("hide=false"));
+                assertFalse(decision.name(), chrome.calls.contains("suspend=false"));
+            }
         }
+    }
+
+    // --- Release after the home filter's reconciliation --------------------------------
+
+    @Test
+    public void firstFilterEnableWithAMissingVpnKeepsChromeContained() {
+        // The filter was off; the administrator enables it, but the configured
+        // VPN app is missing, so this pass's reconciliation reports an error.
+        FakeChrome chrome = new FakeChrome();
+        chrome.hidden = true;
+        List<String> errors = new ArrayList<>();
+        Decision decision = pass(chrome, true, true, true, false, errors);
+        assertEquals(Decision.FILTER_UNCONFIRMED, decision);
+        assertFalse(chrome.calls.contains("hide=false"));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+        assertTrue(errors.contains(ChromeFilterExemption.FILTER_UNCONFIRMED_ERROR));
+    }
+
+    @Test
+    public void anAllowedChromeIsHiddenWhenThisPassesReconciliationFails() {
+        FakeChrome chrome = visibleChrome();
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        assertEquals(Decision.FILTER_UNCONFIRMED, pass(chrome, true, true, true, false, new ArrayList<>()));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aVisibilityReadFailureAfterShowingHidesChromeAgainAndBlocksRouting() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.hidden = true;
+        chrome.observeFailsAfterShow = true;
+        List<String> errors = new ArrayList<>();
+        Decision decision = pass(chrome, true, true, true, true, errors);
+        assertEquals(Decision.SHOW_UNVERIFIED, decision);
+        assertFalse("only SHOWN routes links", decision.shown());
+        assertEquals("hide=true", chrome.calls.get(chrome.calls.size() - 1));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
     }
 
     // --- Ordering ------------------------------------------------------------------------
@@ -246,8 +300,9 @@ public final class ChromeFilterExemptionTest {
         chrome.throwOnObserve = new IllegalStateException("binder");
         assertEquals(Observed.UNKNOWN, ChromeFilterExemption.observe(chrome));
         List<String> errors = new ArrayList<>();
-        ChromeFilterExemption.applyVisibility(Decision.NOT_EXEMPTED, chrome, errors);
-        assertTrue(errors.contains(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR));
+        ChromeFilterExemption.release(Decision.NOT_EXEMPTED, true, chrome, errors);
+        assertTrue("an unknown state is contained again",
+                chrome.calls.contains("hide=true"));
     }
 
     @Test

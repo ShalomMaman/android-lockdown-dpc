@@ -24,6 +24,7 @@ public final class BuiltInExemptionsControllerTest {
         boolean writeSucceeds = true;
         boolean auditSucceeds = true;
         boolean protectionActive = true;
+        boolean untrusted;
         Settings written;
 
         @Override
@@ -39,6 +40,11 @@ public final class BuiltInExemptionsControllerTest {
         public boolean audit(String entry) {
             calls.add("audit:" + entry);
             return auditSucceeds;
+        }
+
+        @Override
+        public boolean exemptionsUntrusted() {
+            return untrusted;
         }
 
         @Override
@@ -120,6 +126,20 @@ public final class BuiltInExemptionsControllerTest {
         String audit = sink.calls.get(1);
         assertTrue(audit, audit.contains("remove:chrome (no administrator session)"));
         assertFalse(audit, audit.contains("administrator remove"));
+    }
+
+    @Test
+    public void whileAFailedSaveIsUnresolvedEvenARemovalNeedsASession() {
+        // Passes enforce no exemptions while the latch is set; a removal that
+        // saved would clear it and re-enable every other approval.
+        RecordingSink sink = new RecordingSink();
+        sink.untrusted = true;
+        Settings saved = Settings.NONE.withChrome(true).withSocial("com.whatsapp", SIGNER);
+        assertThrows(SecurityException.class, () -> BuiltInExemptionsController.change(
+                saved, settings -> settings.withChrome(false), false, "remove:chrome", sink));
+        assertTrue(sink.calls.isEmpty());
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
+                saved, settings -> settings.withChrome(false), true, "remove:chrome", sink).status());
     }
 
     /** Android's commit(): memory changes even when the disk write fails. */

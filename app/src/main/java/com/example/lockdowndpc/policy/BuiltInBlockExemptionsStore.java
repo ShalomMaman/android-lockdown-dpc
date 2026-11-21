@@ -45,6 +45,11 @@ public final class BuiltInBlockExemptionsStore {
         return persistence(context).readForEdit();
     }
 
+    /** An earlier save failed and passes currently enforce no exemptions. */
+    static boolean untrusted(Context context) {
+        return persistence(context).untrusted();
+    }
+
     /** Persists the decision. {@code false} means nothing changed. */
     static boolean write(Context context, BuiltInBlockExemptions.Settings settings) {
         return persistence(context).write(settings);

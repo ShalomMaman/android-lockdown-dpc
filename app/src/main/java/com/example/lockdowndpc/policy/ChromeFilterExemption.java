@@ -18,8 +18,11 @@ import java.util.Map;
  *       the hide is read back.</li>
  *   <li>{@link #decide} writes and reads back the managed configuration —
  *       never when containment was refused — and returns the decision.</li>
- *   <li>{@link #applyVisibility}, in the sweep's place, is the only step that
- *       shows Chrome, and only for {@link Decision#SHOWN}.</li>
+ *   <li>{@link #release}, after the home filter's own reconciliation in the
+ *       same pass, is the only step that shows Chrome: only for
+ *       {@link Decision#SHOWN} and only when that reconciliation reported no
+ *       error. A show Android does not confirm is undone. Its result, not the
+ *       earlier decision, decides link routing.</li>
  * </ol>
  * No state is kept between passes. Any exception is a "not shown" decision.
  */
@@ -33,6 +36,7 @@ public final class ChromeFilterExemption {
     public static final String CONFIG_UNVERIFIED_ERROR = "chrome-exemption-config-unverified";
     public static final String CONTAIN_UNVERIFIED_ERROR = "chrome-exemption-contain-unverified";
     public static final String SHOW_UNVERIFIED_ERROR = "chrome-exemption-show-unverified";
+    public static final String FILTER_UNCONFIRMED_ERROR = "chrome-exemption-filter-unconfirmed";
 
     /** Why Chrome is, or is not, shown on this pass. */
     public enum Decision {
@@ -45,6 +49,10 @@ public final class ChromeFilterExemption {
         SIGNER_UNVERIFIED(false),
         CONTAIN_UNVERIFIED(false),
         CONFIG_UNVERIFIED(false),
+        /** Everything held, but the home filter's reconciliation in this pass failed. */
+        FILTER_UNCONFIRMED(false),
+        /** Shown, but Android did not confirm it, so Chrome was hidden again. */
+        SHOW_UNVERIFIED(false),
         ERROR(false),
         SHOWN(true);
 
@@ -166,28 +174,47 @@ public final class ChromeFilterExemption {
     }
 
     /**
-     * Chrome's part of the package sweep, the only step that shows it: on
-     * {@link Decision#SHOWN} only. Otherwise it confirms Chrome is not visible.
+     * The only step that shows Chrome, run after the home filter's own
+     * reconciliation. Shows it only for {@link Decision#SHOWN} and only when
+     * that reconciliation reported no error; a show Android does not confirm
+     * visible is undone. In every other case Chrome is hidden if Android does
+     * not already report it hidden or suspended.
+     *
+     * @param filterConfirmed the home filter's reconciliation in this pass
+     *                        reported no error
+     * @return the final decision; only {@link Decision#SHOWN} may route links
      */
-    public static void applyVisibility(Decision decision, Gateway gateway, List<String> errors) {
-        if (!decision.shown()) {
-            BuiltInBlockExemptions.Observed observed = observe(gateway);
-            if (observed == BuiltInBlockExemptions.Observed.VISIBLE
-                    || observed == BuiltInBlockExemptions.Observed.UNKNOWN) {
-                errors.add(CONTAIN_UNVERIFIED_ERROR);
+    public static Decision release(
+            Decision decision,
+            boolean filterConfirmed,
+            Gateway gateway,
+            List<String> errors
+    ) {
+        if (decision.shown() && filterConfirmed) {
+            try {
+                gateway.setHidden(false);
+                gateway.setSuspended(false);
+                if (observe(gateway) == BuiltInBlockExemptions.Observed.VISIBLE) {
+                    return Decision.SHOWN;
+                }
+                errors.add(SHOW_UNVERIFIED_ERROR);
+            } catch (RuntimeException exception) {
+                errors.add(SHOW_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
             }
-            return;
+            hide(gateway, errors);
+            return Decision.SHOW_UNVERIFIED;
         }
-        try {
-            gateway.setHidden(false);
-            gateway.setSuspended(false);
-        } catch (RuntimeException exception) {
-            errors.add(SHOW_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
-            return;
+        Decision result = decision;
+        if (decision.shown()) {
+            errors.add(FILTER_UNCONFIRMED_ERROR);
+            result = Decision.FILTER_UNCONFIRMED;
         }
-        if (observe(gateway) != BuiltInBlockExemptions.Observed.VISIBLE) {
-            errors.add(SHOW_UNVERIFIED_ERROR);
+        BuiltInBlockExemptions.Observed observed = observe(gateway);
+        if (observed == BuiltInBlockExemptions.Observed.VISIBLE
+                || observed == BuiltInBlockExemptions.Observed.UNKNOWN) {
+            hide(gateway, errors);
         }
+        return result;
     }
 
     /** What Android reports now; a failed read is {@code UNKNOWN}, never guessed. */

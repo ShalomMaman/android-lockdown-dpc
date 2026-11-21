@@ -40,6 +40,16 @@ public final class ExemptionPassStartTest {
         }
 
         @Override
+        public void containWebViewProvider(List<String> errors) {
+            calls.add("suspend-webview-provider");
+        }
+
+        @Override
+        public void recordEarlyReadback(List<String> errors) {
+            calls.add("record-readback");
+        }
+
+        @Override
         public Containment containChrome(List<String> errors) {
             calls.add("contain-chrome");
             return chromeInScope ? Containment.CONTAINED : null;
@@ -70,7 +80,8 @@ public final class ExemptionPassStartTest {
         steps.homeFilterReadable = false;
         ExemptionPassStart.Start start = ExemptionPassStart.begin(steps, new ArrayList<>());
         assertEquals(Stop.CORRUPT_HOME_FILTER, start.stop());
-        assertEquals(List.of("contain-social", "contain-chrome", "check-home-filter"), steps.calls);
+        assertEquals(List.of("contain-social", "suspend-webview-provider", "contain-chrome",
+                "check-home-filter", "record-readback"), steps.calls);
         assertFalse("nothing after the early return runs", steps.calls.contains("decide-chrome"));
     }
 
@@ -85,6 +96,8 @@ public final class ExemptionPassStartTest {
         assertEquals(Decision.SHOWN, start.chrome());
         assertTrue(steps.calls.indexOf("start") < steps.calls.indexOf("decide-chrome"));
         assertTrue(steps.calls.indexOf("contain-chrome") < steps.calls.indexOf("start"));
+        assertTrue("a browser-backed WebView provider is suspended before protection starts",
+                steps.calls.indexOf("suspend-webview-provider") < steps.calls.indexOf("start"));
     }
 
     @Test
@@ -104,6 +117,7 @@ public final class ExemptionPassStartTest {
         assertEquals(Stop.NOT_DEVICE_OWNER, start.stop());
         assertNull(start.chrome());
         assertFalse(steps.calls.contains("contain-social"));
+        assertFalse(steps.calls.contains("record-readback"));
         assertFalse(steps.calls.contains("decide-chrome"));
     }
 }

@@ -309,7 +309,8 @@ is on, applied at once; while protection is paused it is stored only and the
 next protected pass enforces it. A change that fails to persist is not applied
 and the console reports it; until a later save succeeds, every policy pass
 treats all exemptions as absent, while the next edit still starts from the
-last saved decision. A removal made after the administrator session expired is
+last saved decision; any save in that state, a removal included, needs the
+administrator session. A removal made after the administrator session expired is
 audited as such.
 
 **Chrome.** Only `com.android.chrome`, only on Android 10 or later, and only
@@ -340,10 +341,14 @@ The configuration makes Chrome fail closed on its own:
 
 Every protected pass starts with one containment step, before any early return
 (unreadable home filter settings included): each installed catalogue social app
-without a verified exemption is hidden, and Chrome, unless it is already
-allowed, is hidden; both are read back. Chrome's configuration is written only
-after Android confirmed that hide, and only the step that replaces the package
-sweep for Chrome shows it again. A refused hide is an error, so the pass is
+without a verified exemption is hidden, a browser-backed WebView provider is
+suspended by the existing routine, and Chrome, unless it is already allowed, is
+hidden; each is read back, and a pass that stops on unreadable settings records
+what Android reports before it returns. Chrome's configuration is written only
+after Android confirmed that hide. Chrome is shown again only after the home
+filter's own reconciliation in the same pass reported no error (so enabling the
+filter with a missing VPN app keeps it hidden); a show Android does not confirm
+is undone, and links follow that final result. A refused hide is an error, so the pass is
 reported unverified. The console shows, per app, only what Android last
 reported for the current decision. While Chrome is shown, `http`/`https`
 links route to it; Custom Tabs and Trusted Web Activities that
