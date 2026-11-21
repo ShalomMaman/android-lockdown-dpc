@@ -24,26 +24,24 @@ import java.util.TreeSet;
  * suspension on a window target. That needs no ownership record, so it holds
  * even when the record cannot be read.
  *
- * <p>Ownership: Android keeps one suspension flag per package for this admin,
- * and other steps of the pass use it too (the social containment fallback, the
- * Chrome exemption, a browser-backed WebView provider). The schedule therefore
- * records which packages <em>it</em> suspended and only ever releases those.
- * A window target already suspended by another step simply stays suspended and
- * is not recorded; that step lifts it once the window no longer holds it. An
- * owned package that another step now needs suspended is handed over (dropped
- * from the record) instead of released. Ownership is saved before a
- * suspension, so a pass that dies midway never leaves a schedule suspension
- * nobody tracks.
+ * <p>Ownership: inside a window the schedule suspends every target itself on
+ * every pass, whatever Android reports first, because Android reports the
+ * combined suspension state and another app's or step's suspension may be
+ * lifted at any time. It records every target, and releases only what it
+ * recorded. An owned package that another step needs suspended once the
+ * window ends (the social containment fallback, Chrome while its exemption is
+ * not shown) is handed over (dropped from the record) instead of released.
+ * The record is saved before a suspension; a save that fails does not stop
+ * the suspension, it marks the record unknown and is reported.
  *
- * <p>An unreadable ownership record (a wrong type, a damaged file Android
- * loaded as empty) is "unknown", never "none", and the pass reports it. No
- * window target is ever released on account of it, and the record is kept
- * until it is rewritten from Android's own read-back. Inside a window the
- * rewrite records every window target Android reports suspended that no other
- * step holds, plus what this pass suspends. Outside a window no package is a
- * target, so every launchable package Android reports suspended that no other
- * step holds is released, which is what a readable record would have led to,
- * and the record is rewritten with whatever Android did not confirm released.
+ * <p>An unknown ownership record (a failed save, a wrong type, a damaged file
+ * Android loaded as empty) is never read as "none", and the pass reports it.
+ * No window target is ever released on account of it. Inside a window the
+ * record is rewritten from a full inventory: every target. Outside a window no
+ * package is a target, so every launchable package Android reports suspended
+ * that no other step holds is released, which is what a readable record would
+ * have led to, and the record is rewritten with whatever Android did not
+ * confirm released.
  *
  * <p>Every change is read back. A refusal, a silently ignored call or an
  * exception adds an error token, so the pass is never reported as verified.
@@ -189,12 +187,10 @@ public final class ScheduleSuspension {
         Set<String> active = activeWindows(settings, now);
         // null: the record is unreadable, so ownership is unknown.
         TreeSet<String> owned = readOwned(gateway, errors);
-        if (owned == null) {
-            owned = active.isEmpty()
-                    ? recover(device, gateway, errors)
-                    : rebuild(settings, device, gateway, errors);
-        } else if (!active.isEmpty() || !owned.isEmpty()) {
-            enforce(settings, active, device, owned, gateway, errors);
+        if (owned == null && active.isEmpty()) {
+            owned = recover(device, gateway, errors);
+        } else if (owned == null || !active.isEmpty() || !owned.isEmpty()) {
+            owned = enforce(settings, active, device, owned, gateway, errors);
         }
         Optional<Instant> next = settings.schedule() == null
                 ? Optional.empty()
@@ -242,7 +238,24 @@ public final class ScheduleSuspension {
         saveOwned(gateway, remaining, errors);
     }
 
-    private static void enforce(
+    /**
+     * Inside a window, or outside one with packages still recorded: releases
+     * what the schedule recorded and no longer targets, then records and
+     * suspends every window target.
+     *
+     * <p>Every target is suspended by this admin on every pass, whatever
+     * Android reports first: Android reports a package's combined suspension
+     * state, and a suspension another app or step placed may be lifted at any
+     * time. The call is idempotent. A record that cannot be saved does not
+     * stop the suspension: the failed save marks the record unknown, which no
+     * later pass reads as "nothing owned", and the pass reports it.
+     *
+     * @param owned the recorded packages, or {@code null} when unknown: then
+     *              nothing is released, and the record is rewritten only from
+     *              a full inventory
+     * @return the record after the pass, or {@code null} when it stays unknown
+     */
+    private static TreeSet<String> enforce(
             ScheduleSettings settings,
             Set<String> active,
             Device device,
@@ -250,84 +263,56 @@ public final class ScheduleSuspension {
             Gateway gateway,
             List<String> errors
     ) {
-        Set<String> exempt = exempt(settings, device);
-
+        TreeSet<String> record = owned == null ? new TreeSet<>() : new TreeSet<>(owned);
         TreeSet<String> target = new TreeSet<>();
+        boolean inventoried = false;
         if (!active.isEmpty()) {
             try {
                 target.addAll(gateway.launchablePackages());
+                inventoried = true;
             } catch (RuntimeException exception) {
-                // Without an inventory nothing new is suspended, and nothing
-                // already held is released either.
+                // Without an inventory only what is recorded is suspended, and
+                // nothing recorded is released.
                 errors.add(INVENTORY_FAILED + ":" + exception.getClass().getSimpleName());
             }
-            target.addAll(owned);
-            target.removeAll(exempt);
+            target.addAll(record);
+            target.removeAll(exempt(settings, device));
         }
-
-        boolean ownershipChanged = false;
-        // Release first: what is no longer in the target, unless another step holds it.
-        for (String packageName : new ArrayList<>(owned)) {
-            if (target.contains(packageName)) {
-                continue;
-            }
-            if (device.heldByOthers().contains(packageName) || release(packageName, gateway, errors)) {
-                owned.remove(packageName);
-                ownershipChanged = true;
-            }
-        }
-
-        // Then claim: only packages Android reports installed and not suspended.
-        ArrayList<String> candidates = new ArrayList<>();
-        for (String packageName : target) {
-            Boolean suspended;
-            try {
-                suspended = gateway.suspended(packageName);
-            } catch (RuntimeException exception) {
-                errors.add(SUSPEND_FAILED + ":" + packageName + ":" + exception.getClass().getSimpleName());
-                continue;
-            }
-            if (suspended == null) {
-                if (owned.remove(packageName)) {
-                    ownershipChanged = true;
+        if (owned != null) {
+            // Release what is no longer a target, unless another step holds it.
+            for (String packageName : owned) {
+                if (!target.contains(packageName)
+                        && (device.heldByOthers().contains(packageName) || release(packageName, gateway, errors))) {
+                    record.remove(packageName);
                 }
-            } else if (!suspended) {
-                candidates.add(packageName);
             }
-            // Suspended and owned: already ours. Suspended and not owned:
-            // another step's suspension, which the schedule never claims.
+        } else if (!inventoried) {
+            return null;
         }
-
-        if (candidates.isEmpty()) {
-            if (ownershipChanged) {
-                saveOwned(gateway, owned, errors);
-            }
-            return;
+        record.addAll(target);
+        if (!record.equals(owned)) {
+            // Recorded before the suspension, so a pass that dies midway leaves
+            // nothing untracked. A failed save is reported and marks it unknown.
+            saveOwned(gateway, record, errors);
         }
-        TreeSet<String> claimed = new TreeSet<>(owned);
-        claimed.addAll(candidates);
-        if (!saveOwned(gateway, claimed, errors)) {
-            // An untracked suspension would never be released; suspend nothing.
-            return;
-        }
-        owned.clear();
-        owned.addAll(claimed);
-        suspendAndVerify(candidates, owned, gateway, errors);
+        suspendAndVerify(target, record, gateway, errors);
+        return record;
     }
 
     /**
-     * Suspends {@code candidates}, already recorded in {@code owned}, and reads
-     * each back. A package Android does not report suspended is dropped from
-     * the record again and reported.
+     * Suspends {@code targets}, already recorded in {@code record}, and reads
+     * each back. A package Android refused, or does not report suspended, is
+     * reported and dropped from the record again; a package that is gone is
+     * dropped silently.
      */
     private static void suspendAndVerify(
-            List<String> candidates, TreeSet<String> owned, Gateway gateway, List<String> errors) {
-        if (candidates.isEmpty()) {
+            Set<String> targets, TreeSet<String> record, Gateway gateway, List<String> errors) {
+        if (targets.isEmpty()) {
             return;
         }
         Set<String> refused = new LinkedHashSet<>();
         try {
-            String[] failed = gateway.setSuspended(candidates.toArray(new String[0]), true);
+            String[] failed = gateway.setSuspended(targets.toArray(new String[0]), true);
             if (failed != null) {
                 Collections.addAll(refused, failed);
             }
@@ -335,7 +320,7 @@ public final class ScheduleSuspension {
             errors.add(SUSPEND_FAILED + ":" + exception.getClass().getSimpleName());
         }
         boolean dropped = false;
-        for (String packageName : candidates) {
+        for (String packageName : targets) {
             Boolean suspended;
             try {
                 suspended = gateway.suspended(packageName);
@@ -344,69 +329,24 @@ public final class ScheduleSuspension {
                 errors.add(SUSPEND_UNVERIFIED + ":" + packageName);
                 continue;
             }
-            if (Boolean.TRUE.equals(suspended)) {
-                continue;
+            if (suspended == null) {
+                // Uninstalled since the inventory.
+                record.remove(packageName);
+                dropped = true;
+            } else if (refused.contains(packageName)) {
+                // Another suspension may still show; this admin's is not there.
+                errors.add(SUSPEND_REFUSED + ":" + packageName);
+                record.remove(packageName);
+                dropped = true;
+            } else if (!suspended) {
+                errors.add(SUSPEND_UNVERIFIED + ":" + packageName);
+                record.remove(packageName);
+                dropped = true;
             }
-            if (suspended != null) {
-                errors.add((refused.contains(packageName) ? SUSPEND_REFUSED : SUSPEND_UNVERIFIED)
-                        + ":" + packageName);
-            }
-            // Not suspended (or gone): not ours, so another step may use it.
-            owned.remove(packageName);
-            dropped = true;
         }
         if (dropped) {
-            saveOwned(gateway, owned, errors);
+            saveOwned(gateway, record, errors);
         }
-    }
-
-    /**
-     * Inside a window with an unreadable record: rewrites the record from
-     * Android's read-back and suspends what is missing. Nothing is released.
-     * Every window target Android reports suspended and no other step holds is
-     * recorded as the schedule's: inside the window it must stay suspended
-     * anyway, and no step but the schedule needs it suspended once the window
-     * ends. Without an inventory the record is left as it is.
-     *
-     * @return the rewritten record, or {@code null} when it was not rewritten
-     */
-    private static TreeSet<String> rebuild(
-            ScheduleSettings settings, Device device, Gateway gateway, List<String> errors) {
-        Set<String> exempt = exempt(settings, device);
-        TreeSet<String> target = new TreeSet<>();
-        try {
-            target.addAll(gateway.launchablePackages());
-        } catch (RuntimeException exception) {
-            errors.add(INVENTORY_FAILED + ":" + exception.getClass().getSimpleName());
-            return null;
-        }
-        target.removeAll(exempt);
-        TreeSet<String> adopted = new TreeSet<>();
-        ArrayList<String> candidates = new ArrayList<>();
-        for (String packageName : target) {
-            Boolean suspended;
-            try {
-                suspended = gateway.suspended(packageName);
-            } catch (RuntimeException exception) {
-                errors.add(SUSPEND_FAILED + ":" + packageName + ":" + exception.getClass().getSimpleName());
-                continue;
-            }
-            if (Boolean.TRUE.equals(suspended)) {
-                if (!device.heldByOthers().contains(packageName)) {
-                    adopted.add(packageName);
-                }
-            } else if (suspended != null) {
-                candidates.add(packageName);
-            }
-        }
-        TreeSet<String> owned = new TreeSet<>(adopted);
-        owned.addAll(candidates);
-        if (!saveOwned(gateway, owned, errors)) {
-            // The unreadable record stays; suspend nothing untracked.
-            return null;
-        }
-        suspendAndVerify(candidates, owned, gateway, errors);
-        return owned;
     }
 
     /**

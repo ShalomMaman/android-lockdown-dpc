@@ -138,7 +138,13 @@ public final class LockdownPolicyController {
             }
         }, errors);
         if (start.stop() == ExemptionPassStart.Stop.CORRUPT_HOME_FILTER) {
-            return corruptHomeFilter();
+            ArrayList<String> corrupt = new ArrayList<>(List.of(HomeFilterController.CORRUPT_CONFIGURATION));
+            if (deviceOwner) {
+                // Night and work hours do not depend on the home filter: they
+                // are still enforced, and the pass still reports the filter.
+                reconcileScheduleWithoutFilter(context, dpm, admin, social, chromeInScope, corrupt);
+            }
+            return new PolicyResult(false, false, 0, 0, corrupt);
         }
         if (start.stop() == ExemptionPassStart.Stop.NOT_DEVICE_OWNER) {
             String error = "device-owner-required";
@@ -175,7 +181,8 @@ public final class LockdownPolicyController {
         // suspension on a window target, whatever the ownership record says.
         ScheduleDeviceGateway scheduleGateway = new ScheduleDeviceGateway(context, dpm, admin);
         ScheduleSuspension.Hold scheduleHold = scheduleHold(context, dpm, schedule, scheduleNow,
-                trustedManagement, enforcedFilter, playCompatibility, social, scheduleGateway);
+                schedulePassCore(context, trustedManagement, enforcedFilter, playCompatibility),
+                social, scheduleGateway);
         if (!chrome.shown()) {
             routeLinks(context, dpm, admin, false, errors);
         }
@@ -1114,8 +1121,7 @@ public final class LockdownPolicyController {
                 // An approved package may have been suspended by an earlier
                 // containment fallback; an approval releases that too. Inside
                 // a window that targets it, the suspension stays: the schedule
-                // leaves it unrecorded, and the first pass after the window
-                // lifts it here.
+                // holds it, and releases it when the window ends.
                 releaseSuspension(dpm, admin, packageName, errors);
             }
         }
@@ -1140,11 +1146,10 @@ public final class LockdownPolicyController {
      * any package step runs so every step follows the same rule: none lifts a
      * suspension on a window target. Outside a window nothing is computed.
      *
-     * <p>The always-available core: this app, the trusted management and VPN
-     * apps, essential system packages, the default dialer, SMS, clock and
-     * launcher, the active input method, active device administrators, the
-     * WebView provider, the kiosk target and, while they apply, the maintenance
-     * stores and the Play Store kept for compatibility. When the role apps
+     * <p>The always-available core: this app, {@code passCore} (what this pass's
+     * other settings keep available), essential system packages, the default
+     * dialer, SMS, clock and launcher, the active input method, active device
+     * administrators, the WebView provider and the kiosk target. When the role apps
      * cannot be read, the core is partial: more packages count as targets,
      * which only ever keeps a suspension in place, and {@code gateway} is told
      * so the schedule suspends nothing new against a partial core.
@@ -1154,9 +1159,7 @@ public final class LockdownPolicyController {
             DevicePolicyManager dpm,
             ScheduleSettings schedule,
             Instant now,
-            Set<String> trustedManagement,
-            HomeFilterPolicy.Settings homeFilter,
-            PlayStoreCompatibility.State playCompatibility,
+            Set<String> passCore,
             SocialPass social,
             ScheduleDeviceGateway gateway
     ) {
@@ -1165,10 +1168,7 @@ public final class LockdownPolicyController {
         }
         LinkedHashSet<String> core = new LinkedHashSet<>();
         core.add(context.getPackageName());
-        core.addAll(trustedManagement);
-        if (homeFilter.enabled()) {
-            core.add(homeFilter.config().vpnPackage());
-        }
+        core.addAll(passCore);
         core.addAll(LockdownPackages.ESSENTIAL_SYSTEM);
         try {
             core.addAll(ScheduleDeviceGateway.roleApps(context));
@@ -1193,6 +1193,24 @@ public final class LockdownPolicyController {
             // Suspending the pinned app would break lock task mid-session.
             core.add(kioskTarget);
         }
+        return ScheduleSuspension.Hold.of(schedule, now, core);
+    }
+
+    /**
+     * What this pass's other settings keep available inside a window: the
+     * trusted management apps, the home filter's VPN, and, while they apply,
+     * the maintenance stores and the Play Store kept for compatibility.
+     */
+    private static Set<String> schedulePassCore(
+            Context context,
+            Set<String> trustedManagement,
+            HomeFilterPolicy.Settings homeFilter,
+            PlayStoreCompatibility.State playCompatibility
+    ) {
+        LinkedHashSet<String> core = new LinkedHashSet<>(trustedManagement);
+        if (homeFilter.enabled()) {
+            core.add(homeFilter.config().vpnPackage());
+        }
         MaintenanceWindow window = liveMaintenanceWindow(context);
         if (MaintenanceAppPolicy.opensApplicationStores(window)
                 && !(homeFilter.enabled() && conflictsWithHomeFilter(window))) {
@@ -1202,7 +1220,40 @@ public final class LockdownPolicyController {
             // Kept for the apps that depend on it; installation stays blocked.
             core.add(PlayStoreCompatibility.PLAY_STORE_PACKAGE);
         }
-        return ScheduleSuspension.Hold.of(schedule, now, core);
+        return core;
+    }
+
+    /**
+     * The schedule step of a pass that stops early on a corrupt home filter
+     * configuration. Chrome stays contained by that pass, and the filter's VPN
+     * is unknown, so the live always-on VPN and the default one are kept
+     * available. The pass is never verified, so a retry is scheduled.
+     */
+    private static void reconcileScheduleWithoutFilter(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            SocialPass social,
+            boolean chromeInScope,
+            List<String> errors
+    ) {
+        ScheduleSettings schedule = ScheduleStore.read(context);
+        Instant now = Instant.now();
+        ScheduleDeviceGateway gateway = new ScheduleDeviceGateway(context, dpm, admin);
+        LinkedHashSet<String> passCore = new LinkedHashSet<>(resolveTrustedManagementPackages(context, errors));
+        passCore.add(HomeFilterPolicy.DEFAULT_VPN_PACKAGE);
+        try {
+            String alwaysOn = dpm.getAlwaysOnVpnPackage(admin);
+            if (alwaysOn != null) {
+                passCore.add(alwaysOn);
+            }
+        } catch (RuntimeException exception) {
+            // The default VPN is kept; nothing else is known.
+        }
+        ScheduleSuspension.Hold hold = scheduleHold(context, dpm, schedule, now, passCore, social, gateway);
+        reconcileSchedule(context, dpm, admin, schedule, now, hold, gateway, chromeInScope,
+                ChromeFilterExemption.Decision.FILTER_DISABLED, social, errors);
+        recordScheduleOutcome(context, schedule, now, false);
     }
 
     /**

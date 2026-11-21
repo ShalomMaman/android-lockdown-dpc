@@ -130,4 +130,22 @@ public final class ScheduleCatchUpTest {
         ScheduleCatchUp.State stale = new ScheduleCatchUp.State(null, 3, now.plus(Duration.ofHours(5)));
         assertTrue(ScheduleCatchUp.due(on(), stale, now));
     }
+
+    @Test
+    public void aFailedPassInsideAWindowIsRetriedWithoutAnyBoundaryInBetween() {
+        // Verified at 23:05, then a pass at 23:10 in the same window failed.
+        Instant failedAt = at(2026, 11, 22, 23, 10);
+        ScheduleCatchUp.State state = ScheduleCatchUp.afterFailed(
+                verifiedAt(at(2026, 11, 22, 23, 5)), failedAt);
+        assertFalse(ScheduleCatchUp.boundaryMissed(on(), state.lastVerified(), failedAt.plusSeconds(120)));
+        assertFalse("backoff first", ScheduleCatchUp.due(on(), state, failedAt.plusSeconds(30)));
+        assertTrue(ScheduleCatchUp.due(on(), state, failedAt.plus(ScheduleCatchUp.FIRST_RETRY)));
+    }
+
+    @Test
+    public void aFailedPassIsNotRetriedForAScheduleThatRestrictsNothing() {
+        ScheduleCatchUp.State failed = ScheduleCatchUp.afterFailed(
+                ScheduleCatchUp.State.UNKNOWN, at(2026, 11, 22, 23, 10));
+        assertFalse(ScheduleCatchUp.due(ScheduleSettings.OFF, failed, at(2026, 11, 22, 23, 30)));
+    }
 }

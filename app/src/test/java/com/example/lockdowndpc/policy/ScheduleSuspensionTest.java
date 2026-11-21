@@ -143,6 +143,8 @@ public final class ScheduleSuspensionTest {
         public boolean saveOwned(Set<String> owned) {
             calls.add("save:" + String.join(",", owned));
             if (saveFails) {
+                // SchedulePersistence marks a record it could not save unknown.
+                ownedUnreadable = true;
                 return false;
             }
             state.owned.clear();
@@ -257,20 +259,39 @@ public final class ScheduleSuspensionTest {
     // ----------------------------------------------------------- other owners
 
     @Test
-    public void aPackageAnotherStepSuspendedIsNeverClaimedOrReleased() {
+    public void aTargetAlreadySuspendedElsewhereIsStillSuspendedByThisAdmin() {
         AndroidState state = new AndroidState();
-        state.suspended.add(SOCIAL); // the social containment fallback
+        // Suspended by another app or step: Android reports the combined state,
+        // and that suspension may be lifted at any time.
+        state.suspended.add(GAME);
         FakeGateway gateway = new FakeGateway(state);
         List<String> errors = new ArrayList<>();
         pass(enabled(), at(19, 23, 30), gateway, errors);
-        assertFalse("not claimed", state.owned.contains(SOCIAL));
-        pass(enabled(), at(20, 7, 0), gateway, errors);
-        assertTrue("still suspended by its owner", state.suspended.contains(SOCIAL));
+        assertEquals(List.of(), errors);
+        assertTrue(gateway.suspensionCalls().toString(),
+                gateway.suspensionCalls().get(0).startsWith("suspend:") && gateway.suspensionCalls().get(0).contains(GAME));
+        assertTrue(state.owned.contains(GAME));
+        // Every pass in the window asks again: the call is idempotent.
+        gateway.calls.clear();
+        pass(enabled(), at(19, 23, 40), gateway, errors);
+        assertTrue(gateway.suspensionCalls().get(0).contains(GAME));
+    }
+
+    @Test
+    public void aTargetAnotherStepHoldsIsHandedOverWhenTheWindowEnds() {
+        AndroidState state = new AndroidState();
+        state.suspended.add(SOCIAL); // the social containment fallback
+        FakeGateway gateway = new FakeGateway(state);
+        ScheduleSuspension.Device contained = new ScheduleSuspension.Device(CORE, Set.of(SOCIAL));
+        List<String> errors = new ArrayList<>();
+        ScheduleSuspension.reconcile(enabled(), at(19, 23, 30), contained, gateway, errors);
+        ScheduleSuspension.reconcile(enabled(), at(20, 7, 0), contained, gateway, errors);
+        assertEquals(List.of(), errors);
+        assertEquals("still suspended for containment", Set.of(SOCIAL), state.suspended);
+        assertEquals(Set.of(), state.owned);
         for (String call : gateway.suspensionCalls()) {
             assertFalse(call, call.startsWith("release:") && call.contains(SOCIAL));
         }
-        assertEquals(List.of(), errors);
-        assertEquals(Set.of(SOCIAL), state.suspended);
     }
 
     @Test
@@ -363,14 +384,22 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
-    public void ownershipThatCannotBeSavedSuspendsNothing() {
+    public void ownershipThatCannotBeSavedStillSuspendsAndIsRecoveredLater() {
         AndroidState state = new AndroidState();
         FakeGateway gateway = new FakeGateway(state);
         gateway.saveFails = true;
         List<String> errors = new ArrayList<>();
         pass(enabled(), at(19, 23, 30), gateway, errors);
         assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNSAVED), errors);
-        assertEquals(List.of(), gateway.suspensionCalls());
+        assertEquals(new TreeSet<>(Set.of(GAME, VIDEO, WORK_APP, SOCIAL)), state.suspended);
+        assertTrue("marked unknown, never \"none\"", gateway.ownedUnreadable);
+        // The window ends: recovered from the read-back once saving works.
+        gateway.saveFails = false;
+        errors.clear();
+        pass(enabled(), at(20, 7, 0), gateway, errors);
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException"), errors);
+        assertEquals(Set.of(), state.suspended);
+        assertFalse(gateway.ownedUnreadable);
     }
 
     @Test
@@ -500,7 +529,7 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
-    public void aRewriteNeverAdoptsWhatAnotherStepHolds() {
+    public void aRewriteHandsOverWhatAnotherStepHoldsWhenTheWindowEnds() {
         AndroidState state = new AndroidState();
         state.suspended.add(SOCIAL); // the containment fallback
         FakeGateway gateway = new FakeGateway(state);
@@ -508,10 +537,10 @@ public final class ScheduleSuspensionTest {
         ScheduleSuspension.Device contained = new ScheduleSuspension.Device(CORE, Set.of(SOCIAL));
         List<String> errors = new ArrayList<>();
         ScheduleSuspension.reconcile(enabled(), at(19, 23, 30), contained, gateway, errors);
-        assertFalse(state.owned.contains(SOCIAL));
         assertTrue(state.owned.contains(GAME));
         ScheduleSuspension.reconcile(enabled(), at(20, 7, 0), contained, gateway, errors);
         assertEquals(Set.of(SOCIAL), state.suspended);
+        assertFalse(state.owned.contains(SOCIAL));
     }
 
     @Test
@@ -529,7 +558,7 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
-    public void unknownOwnershipThatCannotBeRewrittenSuspendsNothing() {
+    public void unknownOwnershipThatCannotBeRewrittenStillSuspendsAndStaysUnknown() {
         AndroidState state = new AndroidState();
         FakeGateway gateway = new FakeGateway(state);
         gateway.ownedUnreadable = true;
@@ -538,7 +567,7 @@ public final class ScheduleSuspensionTest {
         pass(enabled(), at(19, 23, 30), gateway, errors);
         assertTrue(errors.contains(ScheduleSuspension.OWNERSHIP_UNSAVED));
         assertTrue(gateway.ownedUnreadable);
-        assertEquals(List.of(), gateway.suspensionCalls());
+        assertTrue(state.suspended.contains(GAME));
     }
 
     @Test
@@ -705,16 +734,16 @@ public final class ScheduleSuspensionTest {
     // ------------------------------------------------------------------ pause
 
     @Test
-    public void pauseReleasesOnlyWhatTheScheduleSuspendedAndCancelsTheAlarm() {
+    public void pauseReleasesWhatTheScheduleRecordedAndCancelsTheAlarm() {
         AndroidState state = new AndroidState();
-        state.suspended.add(SOCIAL); // another owner's
+        state.suspended.add(CLOCK); // never a target, never recorded
         FakeGateway gateway = new FakeGateway(state);
         pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
         assertTrue(state.alarm != null);
         List<String> errors = new ArrayList<>();
         ScheduleSuspension.releaseAll(gateway, errors);
         assertEquals(List.of(), errors);
-        assertEquals(Set.of(SOCIAL), state.suspended);
+        assertEquals(Set.of(CLOCK), state.suspended);
         assertEquals(Set.of(), state.owned);
         assertEquals(null, state.alarm);
     }

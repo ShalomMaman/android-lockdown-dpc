@@ -257,10 +257,10 @@ public final class ChromeFilterExemption {
      *                     Android confirms the suspension, and that suspension
      *                     is never lifted here: Chrome is never visible and
      *                     launchable inside a window, whatever a later step of
-     *                     the pass does. The suspension is this step's own, so
-     *                     the schedule does not record it; the first release
-     *                     after the window ends lifts it. A suspension Android
-     *                     does not confirm leaves Chrome hidden.
+     *                     the pass does; the schedule step then suspends and
+     *                     records it too. The first release after the window
+     *                     ends lifts it. A suspension Android does not confirm
+     *                     leaves Chrome hidden.
      */
     public static Decision release(
             Decision decision,

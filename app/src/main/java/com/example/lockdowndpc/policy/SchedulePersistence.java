@@ -81,8 +81,11 @@ final class SchedulePersistence {
          */
         boolean commit(String packages);
 
-        /** As {@link Backing#restore}. */
-        void restore(String[] snapshot, boolean fileExisted);
+        /**
+         * Writes the packages without the {@link #FORMAT} marker, so every
+         * later read is "unknown"; memory is changed whatever the disk does.
+         */
+        void markUnknown(String packages);
     }
 
     private SchedulePersistence() {}
@@ -187,26 +190,17 @@ final class SchedulePersistence {
     }
 
     /**
-     * Persists the ownership record. A failed commit writes the previous raw
-     * values back, so memory never holds a record the disk does not.
+     * Persists the ownership record. A failed commit marks the record unknown
+     * rather than writing the previous value back: the schedule suspends even
+     * when the save fails, so the previous value could under-report what it
+     * holds. An unknown record is recovered from Android's read-back.
      */
     static boolean saveOwned(OwnedBacking backing, Set<String> owned) {
-        String[] previous;
-        try {
-            previous = backing.snapshot();
-        } catch (RuntimeException exception) {
-            previous = null;
-        }
-        boolean existed = fileExists(backing);
-        if (backing.commit(encodeOwned(owned))) {
+        String packages = encodeOwned(owned);
+        if (backing.commit(packages)) {
             return true;
         }
-        if (previous != null && previous.length == 2) {
-            backing.restore(previous, existed);
-        }
-        // A wrong-typed previous value cannot be written back as it was. The
-        // new value stays in memory: the schedule suspends only after a
-        // successful save, so it may over-report what it holds, never under-report.
+        backing.markUnknown(packages);
         return false;
     }
 

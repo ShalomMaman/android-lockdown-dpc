@@ -33,16 +33,25 @@ the schedule and the clock, not from any record, so it holds even when a record
 is unreadable.
 
 - An approved social application that an earlier containment fallback
-  suspended stays suspended for the rest of the window; the exemption step lifts
-  it on the first pass after the window.
+  suspended stays suspended for the rest of the window; it is released once the
+  window ends.
 - Chrome shown by its exemption inside a window is suspended first and unhidden
   only once Android confirms the suspension. It is never visible and launchable
   inside a window. If Android does not confirm the suspension, Chrome stays
   hidden and the pass is not verified.
 
-The schedule records only the packages it suspended itself, and releases only
-those. A window target another step already suspended stays suspended and is not
-recorded.
+Inside a window the schedule suspends every target itself on every pass, even
+one Android already reports suspended: Android reports the combined suspension
+state, and a suspension another app or step placed may be lifted at any time.
+The call is idempotent. The schedule records every target and releases only
+what it recorded. A recorded package that another step needs suspended after
+the window (an unapproved social application, Chrome while its exemption is not
+shown) is handed over to that step instead of released.
+
+A corrupt home filter configuration stops the rest of the pass, but not the
+schedule step: the windows are still enforced, with the live always-on VPN and
+the default VPN kept available because the configured one is unknown, and the
+pass still reports the corrupt configuration.
 
 ## Failing closed
 
@@ -58,12 +67,13 @@ preference file as an empty map, so a file that exists, or once existed, without
 its marker is damaged, never "off" and never "nothing owned".
 
 An unreadable ownership record is *unknown*, never "nothing owned", and the
-pass that finds it is reported as not verified. No window target is released on
-account of it, and the record is kept until it is rewritten from Android's own
-read-back:
+pass that finds it is reported as not verified. A save that fails marks the
+record unknown too, rather than leaving the previous value: the schedule
+suspends even when the save fails, so the previous value could under-report.
+No window target is released on account of an unknown record, and the record
+is kept until it is rewritten from Android's own read-back:
 
-- inside a window, the rewrite records every window target Android reports
-  suspended that no other step holds, plus what the pass suspends;
+- inside a window, the rewrite records every window target;
 - outside a window no package is a target, so every launchable package Android
   reports suspended that no other step holds is released, which is what a
   readable record would have led to, and the record keeps whatever Android did
@@ -87,8 +97,9 @@ suspended, which errs on the restrictive side.
 - **A retry after a failed pass.** The instant a missed boundary is measured
   from advances only after a pass that was verified end to end. A pass that was
   not verified schedules a one-off retry with backoff (1, 2, 4 and 8 minutes,
-  then every 15), and the screen-on check and the sweep respect the same
-  backoff.
+  then every 15). The screen-on check, the sweep and the retry run a pass while
+  the last one did not verify, even inside the same window with no boundary in
+  between, and all of them respect the same backoff.
 
 ## Accepted limits
 
@@ -103,6 +114,21 @@ to **Alarms and reminders** in Android Settings. The screen-on check, the sweep
 and the retry narrow the gap but cannot close it: each runs the pass in the
 background, so an application may open for a moment before the pass finishes.
 This is a platform limit, accepted for this feature.
+
+**Android 9 and newer rely on the date and time restriction.** The windows
+come from the wall clock, and from Android 9 the only thing that keeps the user
+from setting the clock is the date and time system policy control
+(`DISALLOW_CONFIG_DATE_TIME`). It is enforced by default; turning it off is an
+administrator action in System policy, and with it off the user could move the
+clock and end a window early. The schedule does not check or override that
+choice: it relies on the administrator keeping the control on.
+
+**Only applications with a launcher entry are targets.** The schedule's
+inventory is the launcher. An application without a launcher entry, opened
+only through a deep link or another application, is not suspended by a window.
+The main package policy already hides every application that is not approved,
+so such an application is reachable only when an administrator approved it;
+deep-link-only applications are out of scope for night and work hours.
 
 **Android 8.0 and 8.1 need automatic date and time.** Every window comes from
 the wall clock, and the date and time restriction that keeps the user from

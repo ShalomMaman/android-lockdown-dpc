@@ -112,12 +112,10 @@ public final class SchedulePersistenceTest {
         }
 
         @Override
-        public void restore(String[] snapshot, boolean fileExisted) {
-            value = snapshot[0];
-            format = snapshot[1];
-            if (!fileExisted && value == null && format == null) {
-                fileExists = false;
-            }
+        public void markUnknown(String packages) {
+            value = packages;
+            format = null;
+            fileExists = true;
         }
 
         /** Android loading a damaged file: the file is there, the map is empty. */
@@ -347,33 +345,25 @@ public final class SchedulePersistenceTest {
     }
 
     @Test
-    public void aFailedOwnershipCommitRestoresThePreviousValueInMemory() {
+    public void aFailedOwnershipCommitMarksTheRecordUnknown() {
         OwnedLikeBacking backing = new OwnedLikeBacking();
         assertTrue(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
         backing.diskFails = true;
         assertFalse(SchedulePersistence.saveOwned(backing, Set.of("com.example.a", "com.example.b")));
-        assertEquals("com.example.a", backing.value);
-        assertFalse(SchedulePersistence.saveOwned(backing, Set.of()));
-        assertEquals("com.example.a", backing.value);
-        assertEquals(Set.of("com.example.a"), SchedulePersistence.readOwned(backing));
+        // Never the previous value, which could under-report what is suspended.
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(backing));
+        assertEquals("com.example.a,com.example.b", backing.value);
+        backing.diskFails = false;
+        assertTrue("a later save makes it known again",
+                SchedulePersistence.saveOwned(backing, Set.of("com.example.b")));
+        assertEquals(Set.of("com.example.b"), SchedulePersistence.readOwned(backing));
     }
 
     @Test
-    public void aFailedFirstOwnershipSaveLeavesAFreshDeviceOwningNothing() {
+    public void aFailedFirstOwnershipSaveIsUnknownNotNone() {
         OwnedLikeBacking backing = new OwnedLikeBacking();
         backing.diskFails = true;
         assertFalse(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
-        assertFalse("the file left by the failed write is removed", backing.fileExists);
-        assertEquals(Set.of(), SchedulePersistence.readOwned(backing));
-    }
-
-    @Test
-    public void aFailedCommitOverAWrongTypedOwnershipRecordKeepsTheNewValue() {
-        OwnedLikeBacking backing = new OwnedLikeBacking();
-        backing.wrongType = true;
-        backing.diskFails = true;
-        assertFalse(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
-        assertEquals("may over-report what it holds, never under-report", "com.example.a", backing.value);
-        assertEquals(1, backing.commits.size());
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(backing));
     }
 }

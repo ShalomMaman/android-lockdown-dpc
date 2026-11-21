@@ -52,14 +52,19 @@ final class ScheduleCatchUp {
     private ScheduleCatchUp() {}
 
     /**
-     * Whether a catch-up trigger should run a pass now: a boundary was missed
-     * ({@link #boundaryMissed}) and no backoff is pending. A retry time further
-     * away than {@link #MAX_RETRY} can only come from a clock moved back, and
-     * does not hold the pass back.
+     * Whether a catch-up trigger should run a pass now: the last pass did not
+     * verify, or a boundary was missed ({@link #boundaryMissed}), and no
+     * backoff is pending. A failed pass is retried inside the same window, with
+     * no boundary in between. A retry time further away than
+     * {@link #MAX_RETRY} can only come from a clock moved back, and does not
+     * hold the pass back.
      */
     static boolean due(ScheduleSettings settings, State state, Instant now) {
         State current = state == null ? State.UNKNOWN : state;
-        if (!boundaryMissed(settings, current.lastVerified(), now)) {
+        if (settings == null || now == null || !settings.enforcing()) {
+            return false;
+        }
+        if (current.failedAttempts() == 0 && !boundaryMissed(settings, current.lastVerified(), now)) {
             return false;
         }
         Instant retryAt = current.retryAt();

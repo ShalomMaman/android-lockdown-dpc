@@ -146,8 +146,9 @@ public final class ScheduleAlarm {
     /**
      * The catch-up check behind the boundary alarm, for the screen and unlock
      * broadcasts and the sweep and retry jobs. Run it on the policy thread: it
-     * reads the stored schedule and queues a full pass only when a boundary
-     * passed without a verified pass and no retry backoff is pending.
+     * reads the stored schedule and queues a full pass only when the last pass
+     * did not verify or a boundary passed since the last verified one, and no
+     * retry backoff is pending.
      *
      * @param completion runs when a queued pass ends; never when nothing was queued
      * @return whether a pass was queued

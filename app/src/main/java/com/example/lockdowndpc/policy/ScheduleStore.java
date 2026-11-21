@@ -179,14 +179,8 @@ public final class ScheduleStore {
             }
 
             @Override
-            public void restore(String[] snapshot, boolean fileExisted) {
-                SharedPreferences.Editor editor = prefs.edit();
-                put(editor, KEY_OWNED, snapshot[0]);
-                put(editor, KEY_OWNED_FORMAT, snapshot[1]);
-                editor.commit();
-                if (!fileExisted && allNull(snapshot)) {
-                    deleteFile(file);
-                }
+            public void markUnknown(String packages) {
+                prefs.edit().putString(KEY_OWNED, packages).remove(KEY_OWNED_FORMAT).commit();
             }
         };
     }
