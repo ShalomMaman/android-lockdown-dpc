@@ -350,6 +350,27 @@ public final class ChromeFilterExemptionTest {
     }
 
     @Test
+    public void afterARemovedApprovalWhoseHideAndroidRefusedTurningOffTheFilterIsRefused() {
+        // The approval is removed (flag absent), but Android refuses to hide
+        // Chrome on the pass that follows. The live guard then refuses to turn
+        // the filter off: Chrome is not observed contained.
+        FakeChrome chrome = visibleChrome();
+        chrome.refuseHide = true;
+        Decision decision = pass(chrome, false, true, true, new ArrayList<>());
+        assertFalse(decision.shown());
+        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
+        assertEquals(BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED,
+                BuiltInBlockExemptions.teardownVerdict(BuiltInBlockExemptions.ChromeFlag.ABSENT,
+                        ChromeFilterExemption.observe(chrome), true));
+        // Once Android confirms the hide on a later pass, the same request is allowed.
+        chrome.refuseHide = false;
+        pass(chrome, false, true, true, new ArrayList<>());
+        assertEquals(BuiltInBlockExemptions.TeardownVerdict.ALLOWED,
+                BuiltInBlockExemptions.teardownVerdict(BuiltInBlockExemptions.ChromeFlag.ABSENT,
+                        ChromeFilterExemption.observe(chrome), true));
+    }
+
+    @Test
     public void aDisabledChromeIsObservedAsDisabledNotAvailable() {
         FakeChrome chrome = visibleChrome();
         chrome.enabled = false;

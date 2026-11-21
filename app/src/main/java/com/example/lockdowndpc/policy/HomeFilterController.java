@@ -28,10 +28,20 @@ public final class HomeFilterController {
 
     public record Snapshot(HomeFilterPolicy.Settings settings, HomeFilterPolicy.Report report) {}
 
-    /** Turning the filter off or removing its CA while Chrome is approved. */
-    public static final class ChromeApprovalBlocksChangeException extends IllegalStateException {
-        private ChromeApprovalBlocksChangeException() {
-            super("Remove the Chrome approval before turning off the home filter or removing its certificate");
+    /**
+     * Turning the filter off or removing its CA was refused: a Chrome approval
+     * is saved or unreadable, or Android does not report Chrome contained now.
+     */
+    public static final class FilterTeardownRefusedException extends IllegalStateException {
+        private final BuiltInBlockExemptions.TeardownVerdict verdict;
+
+        private FilterTeardownRefusedException(BuiltInBlockExemptions.TeardownVerdict verdict) {
+            super("Home filter teardown refused: " + verdict);
+            this.verdict = verdict;
+        }
+
+        public BuiltInBlockExemptions.TeardownVerdict verdict() {
+            return verdict;
         }
     }
 
@@ -101,11 +111,14 @@ public final class HomeFilterController {
             }
             HomeFilterPolicy.Settings before = requireSettings(context);
             HomeFilterPolicy.Settings after = operation.apply(before);
-            // Enforced here, not only in the console: a saved Chrome approval
-            // relies on the filter, so it must be removed first.
-            if (BuiltInBlockExemptions.blocksFilterChange(
-                    BuiltInBlockExemptionsStore.readForEdit(context), before, after)) {
-                throw new ChromeApprovalBlocksChangeException();
+            // Enforced here, before any side effect, from live facts only: no
+            // saved (or unreadable) Chrome approval, and Chrome observed
+            // contained right now.
+            if (BuiltInBlockExemptions.isFilterTeardown(before, after)) {
+                BuiltInBlockExemptions.TeardownVerdict verdict = teardownVerdict(context);
+                if (verdict != BuiltInBlockExemptions.TeardownVerdict.ALLOWED) {
+                    throw new FilterTeardownRefusedException(verdict);
+                }
             }
             if (!before.equals(after)) {
                 try {
@@ -142,8 +155,31 @@ public final class HomeFilterController {
         if (!settings.configured()) {
             return;
         }
-        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
+        // A pending teardown (turn off, or CA removal) never finishes while a
+        // Chrome approval is saved or Chrome is not observed contained: the
+        // filter is kept on with its CA, the request stays pending, and the
+        // pass reports why. Boot and retry passes come through here too.
+        boolean held = false;
+        HomeFilterPolicy.Settings enforced = settings;
+        if (BuiltInBlockExemptions.hasPendingTeardown(settings)) {
+            BuiltInBlockExemptions.TeardownVerdict verdict = teardownVerdict(context);
+            if (verdict != BuiltInBlockExemptions.TeardownVerdict.ALLOWED) {
+                held = true;
+                enforced = BuiltInBlockExemptions.withTeardownHeld(settings);
+                errors.add("home-filter:teardown-held:" + verdict);
+            }
+        }
+        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
+        if (held) {
+            if (!report.androidSettingsConfirmed(enforced)) {
+                errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
+                        + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
+                        + ",private-dns=" + report.privateDns());
+            }
+            HomeFilterStore.saveReadback(context, report);
+            return;
+        }
         boolean verified = settings.enabled()
                 ? report.androidSettingsConfirmed(settings) : report.removed();
         if (!verified) {
@@ -158,6 +194,14 @@ public final class HomeFilterController {
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
         }
+    }
+
+    /** The teardown guard's verdict from the raw approval flag and a live observation. */
+    static BuiltInBlockExemptions.TeardownVerdict teardownVerdict(Context context) {
+        return BuiltInBlockExemptions.teardownVerdict(
+                BuiltInBlockExemptionsStore.chromeFlag(context),
+                ExemptionObserver.observe(context, BuiltInBlockExemptions.CHROME),
+                AllowedAppsStore.isProtectionEnabled(context));
     }
 
     public static boolean isEnabled(Context context) {

@@ -6,11 +6,13 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import com.example.lockdowndpc.kiosk.KioskAppCatalog;
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Observed;
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Settings;
 
 import org.junit.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -172,7 +174,7 @@ public final class BuiltInBlockExemptionsTest {
         assertEquals(Boolean.FALSE, merged.get("PasswordManagerEnabled"));
     }
 
-    // --- Home filter changes while Chrome is approved -------------------------------
+    // --- Home filter teardown guard (live facts, fail closed) -----------------------
 
     private static HomeFilterPolicy.Settings enabledFilter(String ca) {
         return new HomeFilterPolicy.Settings(
@@ -180,37 +182,126 @@ public final class BuiltInBlockExemptionsTest {
     }
 
     @Test
-    public void disablingTheFilterIsRefusedWhileChromeIsApproved() {
-        HomeFilterPolicy.Settings before = enabledFilter(null);
-        assertTrue(BuiltInBlockExemptions.blocksFilterChange(
-                Settings.NONE.withChrome(true), before, before.requestDisable()));
-    }
-
-    @Test
-    public void removingTheCertificateIsRefusedWhileChromeIsApproved() {
+    public void turningOffOrRemovingTheCertificateIsATeardown() {
         HomeFilterPolicy.Settings before = enabledFilter("MIIB");
-        assertTrue(BuiltInBlockExemptions.blocksFilterChange(
-                Settings.NONE.withChrome(true), before, before.requestRemoveCa()));
+        assertTrue(BuiltInBlockExemptions.isFilterTeardown(before, before.requestDisable()));
+        assertTrue(BuiltInBlockExemptions.isFilterTeardown(before, before.requestRemoveCa()));
+        assertFalse("retry", BuiltInBlockExemptions.isFilterTeardown(before, before));
+        assertFalse("first enable", BuiltInBlockExemptions.isFilterTeardown(HomeFilterPolicy.Settings.OFF, before));
     }
 
     @Test
-    public void bothChangesAreAllowedOnceTheChromeApprovalIsRemoved() {
-        Settings withoutChrome = Settings.NONE.withChrome(true).withChrome(false)
-                .withSocial(WHATSAPP, SIGNER_A);
-        HomeFilterPolicy.Settings before = enabledFilter("MIIB");
-        assertFalse(BuiltInBlockExemptions.blocksFilterChange(withoutChrome, before, before.requestDisable()));
-        assertFalse(BuiltInBlockExemptions.blocksFilterChange(withoutChrome, before, before.requestRemoveCa()));
+    public void aSavedOrUnreadableApprovalRefusesTeardown() {
+        for (Observed observed : Observed.values()) {
+            for (boolean active : new boolean[]{true, false}) {
+                assertEquals(BuiltInBlockExemptions.TeardownVerdict.CHROME_APPROVED,
+                        BuiltInBlockExemptions.teardownVerdict(
+                                BuiltInBlockExemptions.ChromeFlag.PRESENT, observed, active));
+                assertEquals(BuiltInBlockExemptions.TeardownVerdict.APPROVAL_UNREADABLE,
+                        BuiltInBlockExemptions.teardownVerdict(
+                                BuiltInBlockExemptions.ChromeFlag.UNREADABLE, observed, active));
+            }
+        }
     }
 
     @Test
-    public void otherFilterChangesAreNotAffectedByAChromeApproval() {
-        Settings chrome = Settings.NONE.withChrome(true);
-        HomeFilterPolicy.Settings before = enabledFilter(null);
-        assertFalse("retry", BuiltInBlockExemptions.blocksFilterChange(chrome, before, before));
-        assertFalse("installing a certificate", BuiltInBlockExemptions.blocksFilterChange(
-                chrome, before, new HomeFilterPolicy.Settings(before.config(), true, "MIIB", false)));
-        assertFalse("first enable", BuiltInBlockExemptions.blocksFilterChange(
-                chrome, HomeFilterPolicy.Settings.OFF, before));
+    public void withoutAnApprovalTeardownNeedsChromeObservedContainedWhileProtected() {
+        BuiltInBlockExemptions.ChromeFlag absent = BuiltInBlockExemptions.ChromeFlag.ABSENT;
+        for (Observed contained : new Observed[]{Observed.HIDDEN, Observed.SUSPENDED, Observed.NOT_INSTALLED}) {
+            assertEquals(contained.name(), BuiltInBlockExemptions.TeardownVerdict.ALLOWED,
+                    BuiltInBlockExemptions.teardownVerdict(absent, contained, true));
+        }
+        for (Observed open : new Observed[]{Observed.VISIBLE, Observed.DISABLED, Observed.UNKNOWN}) {
+            assertEquals(open.name(), BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED,
+                    BuiltInBlockExemptions.teardownVerdict(absent, open, true));
+        }
+        assertEquals("paused shows every app by design; only the approval counts then",
+                BuiltInBlockExemptions.TeardownVerdict.ALLOWED,
+                BuiltInBlockExemptions.teardownVerdict(absent, Observed.VISIBLE, false));
+    }
+
+    @Test
+    public void theChromeFlagIsReadOnItsOwnAndAMalformedRecordIsUnreadable() {
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, BuiltInBlockExemptions.chromeFlag(null, null));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, BuiltInBlockExemptions.chromeFlag(false, Set.of()));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT,
+                BuiltInBlockExemptions.chromeFlag(true, Set.of(WHATSAPP + "=" + SIGNER_A)));
+        assertEquals("a malformed social pin no longer hides a saved Chrome flag",
+                BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
+                BuiltInBlockExemptions.chromeFlag(true, Set.of("not-a-pin")));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
+                BuiltInBlockExemptions.chromeFlag(false, Set.of("org.example.reader=" + SIGNER_A)));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, BuiltInBlockExemptions.chromeFlag("true", null));
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, BuiltInBlockExemptions.chromeFlag(false, "pins"));
+    }
+
+    @Test
+    public void aPendingTeardownIsHeldWithTheFilterOnAndItsCertificateKept() {
+        HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
+        HomeFilterPolicy.Settings pendingRemoval = enabledFilter("MIIB").requestRemoveCa();
+        assertTrue(BuiltInBlockExemptions.hasPendingTeardown(pendingDisable));
+        assertTrue(BuiltInBlockExemptions.hasPendingTeardown(pendingRemoval));
+        assertFalse(BuiltInBlockExemptions.hasPendingTeardown(enabledFilter("MIIB")));
+        for (HomeFilterPolicy.Settings pending : List.of(pendingDisable, pendingRemoval)) {
+            HomeFilterPolicy.Settings held = BuiltInBlockExemptions.withTeardownHeld(pending);
+            assertTrue(held.enabled());
+            assertFalse(held.removeCa());
+            assertEquals("MIIB", held.ca());
+        }
+    }
+
+    @Test
+    public void chromeIsApprovedOnlyOverASteadyFilter() {
+        HomeFilterPolicy.Settings steady = enabledFilter("MIIB");
+        assertTrue(BuiltInBlockExemptions.filterSteadyForChrome(steady, HomeFilterPolicy.State.CONFIRMED));
+        assertTrue("no certificate in the profile",
+                BuiltInBlockExemptions.filterSteadyForChrome(enabledFilter(null), HomeFilterPolicy.State.NOT_REQUESTED));
+        assertFalse("certificate not installed",
+                BuiltInBlockExemptions.filterSteadyForChrome(steady, HomeFilterPolicy.State.UNCONFIRMED));
+        assertFalse("pending certificate removal",
+                BuiltInBlockExemptions.filterSteadyForChrome(steady.requestRemoveCa(), HomeFilterPolicy.State.CONFIRMED));
+        assertFalse("pending disable",
+                BuiltInBlockExemptions.filterSteadyForChrome(steady.requestDisable(), HomeFilterPolicy.State.CONFIRMED));
+        assertFalse(BuiltInBlockExemptions.filterSteadyForChrome(HomeFilterPolicy.Settings.OFF, null));
+    }
+
+    // --- Credentials lock -------------------------------------------------------------
+
+    private static final class FakeLock implements BuiltInBlockExemptions.CredentialsLock {
+        boolean set;
+        boolean refuse;
+
+        @Override public boolean isSet() { return set; }
+
+        @Override
+        public void set(boolean locked) {
+            if (!refuse) {
+                set = locked;
+            }
+        }
+    }
+
+    @Test
+    public void theCredentialsLockFollowsTheChromeApprovalBothWays() {
+        assertTrue(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.PRESENT));
+        assertTrue(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.UNREADABLE));
+        assertFalse(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.ABSENT));
+        FakeLock lock = new FakeLock();
+        java.util.List<String> errors = new java.util.ArrayList<>();
+        assertTrue(BuiltInBlockExemptions.reconcileCredentialsLock(true, lock, errors));
+        assertTrue("set while Chrome is approved", lock.set);
+        assertTrue(BuiltInBlockExemptions.reconcileCredentialsLock(false, lock, errors));
+        assertFalse("released when the approval is removed", lock.set);
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test
+    public void aLockAndroidRefusesIsReported() {
+        FakeLock lock = new FakeLock();
+        lock.refuse = true;
+        java.util.List<String> errors = new java.util.ArrayList<>();
+        assertFalse(BuiltInBlockExemptions.reconcileCredentialsLock(true, lock, errors));
+        assertEquals(List.of("credentials-lock-unverified:true"), errors);
     }
 
     // --- Kiosk ------------------------------------------------------------------------

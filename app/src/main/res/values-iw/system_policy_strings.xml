@@ -143,7 +143,6 @@
     <string name="system_policy_exempt_observed_suspended">מושעה</string>
     <string name="system_policy_exempt_observed_not_installed">לא מותקן</string>
     <string name="system_policy_exempt_observed_unknown">לא ניתן היה לקרוא את המצב</string>
-    <string name="system_policy_exempt_pass_unverified">מעבר המדיניות האחרון דיווח על בעיה</string>
     <string name="system_policy_exempt_chrome_reason_shown">אושר במעבר האחרון</string>
     <string name="system_policy_exempt_chrome_reason_not_available">לא זמין במכשיר הזה: Chrome מספק את רכיב WebView של המערכת</string>
     <string name="system_policy_exempt_chrome_reason_not_exempted">לא מאושר</string>
@@ -161,7 +160,7 @@
     <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>
     <string name="system_policy_exempt_social_approved">מאושר</string>
     <string name="system_policy_exempt_social_not_approved">לא מאושר</string>
-    <string name="system_policy_exempt_state_pending">לא נבדק מאז השינוי האחרון</string>
+    <string name="system_policy_exempt_filter_not_ready">‏Chrome לא אושר: יש להפעיל קודם את סינון הבית ולתת לשינויים הממתינים שלו להסתיים. אם הפרופיל כולל תעודת סינון, היא חייבת להיות מותקנת.</string>
     <string name="system_policy_exempt_social_title">יישומי רשתות חברתיות והודעות שאושרו</string>
     <string name="system_policy_exempt_social_body">היישומים האלה חסומים ברשימה המובנית. הפעלה של יישום משאירה אותו זמין כל עוד ההגנה פועלת. כל אישור קשור לחתימת המפתח שיש ליישום עכשיו, ויישום עם חתימה אחרת נשאר חסום. כיבוי חוסם אותו שוב מיד.</string>
     <string name="system_policy_exempt_social_none_installed">לא מותקן במכשיר הזה יישום רשת חברתית או הודעות מהרשימה המובנית.</string>

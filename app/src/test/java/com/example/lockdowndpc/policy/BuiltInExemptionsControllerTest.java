@@ -25,6 +25,7 @@ public final class BuiltInExemptionsControllerTest {
         boolean auditSucceeds = true;
         boolean protectionActive = true;
         boolean untrusted;
+        boolean filterSteady = true;
         Settings written;
 
         @Override
@@ -45,6 +46,11 @@ public final class BuiltInExemptionsControllerTest {
         @Override
         public boolean exemptionsUntrusted() {
             return untrusted;
+        }
+
+        @Override
+        public boolean filterSteadyForChrome() {
+            return filterSteady;
         }
 
         @Override
@@ -201,6 +207,28 @@ public final class BuiltInExemptionsControllerTest {
                 before, settings -> settings.withoutSocial("com.discord"), true, "remove:com.discord", sink);
         assertEquals(Status.APPLIED, outcome.status());
         assertEquals(Settings.NONE, sink.written);
+    }
+
+    @Test
+    public void chromeIsNotApprovedOverAPendingFilterTeardown() {
+        // A certificate removal Android refused left removeCa pending: the
+        // filter is not steady, so the approval is refused before any write.
+        RecordingSink sink = new RecordingSink();
+        sink.filterSteady = false;
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink);
+        assertEquals(Status.FILTER_NOT_READY, outcome.status());
+        assertTrue(sink.calls.isEmpty());
+        assertNull(sink.written);
+    }
+
+    @Test
+    public void aSocialApprovalDoesNotDependOnTheFilterState() {
+        RecordingSink sink = new RecordingSink();
+        sink.filterSteady = false;
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(Settings.NONE,
+                settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
+                sink).status());
     }
 
     @Test

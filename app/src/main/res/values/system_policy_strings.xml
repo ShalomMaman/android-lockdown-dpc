@@ -151,7 +151,6 @@
     <string name="system_policy_exempt_observed_suspended">suspended</string>
     <string name="system_policy_exempt_observed_not_installed">not installed</string>
     <string name="system_policy_exempt_observed_unknown">state could not be read</string>
-    <string name="system_policy_exempt_pass_unverified">The last policy pass reported a problem</string>
     <string name="system_policy_exempt_chrome_reason_shown">Allowed on the last pass</string>
     <string name="system_policy_exempt_chrome_reason_not_available">Not available on this device: Chrome provides the system WebView</string>
     <string name="system_policy_exempt_chrome_reason_not_exempted">Not allowed</string>
@@ -169,7 +168,7 @@
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
     <string name="system_policy_exempt_social_approved">Approved</string>
     <string name="system_policy_exempt_social_not_approved">Not approved</string>
-    <string name="system_policy_exempt_state_pending">Not checked since the last change</string>
+    <string name="system_policy_exempt_filter_not_ready">Chrome was not allowed: turn on the home filter and let its pending changes finish first. If the profile has a filter certificate, it must be installed.</string>
     <string name="system_policy_exempt_social_title">Approved social and messaging applications</string>
     <string name="system_policy_exempt_social_body">These applications are blocked by the built-in list. Turn one on to keep it available while protection is on. Each approval is tied to the developer signature the app has now; an app with a different signature stays blocked. Turning it off blocks it again at once.</string>
     <string name="system_policy_exempt_social_none_installed">No built-in social or messaging application is installed on this device.</string>

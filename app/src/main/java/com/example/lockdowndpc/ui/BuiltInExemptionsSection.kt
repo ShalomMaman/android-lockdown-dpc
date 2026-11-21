@@ -26,6 +26,8 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
 import com.example.lockdowndpc.policy.BuiltInBlockExemptionsStore
 import com.example.lockdowndpc.policy.ChromeFilterExemption
+import com.example.lockdowndpc.policy.ExemptionObserver
+import com.example.lockdowndpc.policy.PackageIdentity
 import com.example.lockdowndpc.security.AppLabelSanitizer
 
 /** One installed package from an exemptable catalogue, with its display label. */
@@ -37,14 +39,24 @@ internal sealed interface PendingExemption {
     data class Social(val candidate: ExemptionCandidate) : PendingExemption
 }
 
-/** Everything the section shows, read once per revision. */
+/**
+ * Everything the section shows, read once per revision (every action and every
+ * resume). Android states are observed live here; only the reason for the
+ * last pass's Chrome decision comes from storage.
+ */
 internal data class ExemptionsView(
     val settings: BuiltInBlockExemptions.Settings,
-    /** The last read-back, only when it was taken for the current decision. */
-    val readback: BuiltInBlockExemptionsStore.Readback?,
-    val chromeInstalled: Boolean,
+    /** The last pass's Chrome decision, only when it was taken for the current decision. */
+    val chromeDecision: ChromeFilterExemption.Decision?,
+    val chromeObserved: BuiltInBlockExemptions.Observed,
     val social: List<ExemptionCandidate>,
-)
+    val socialObserved: Map<String, BuiltInBlockExemptions.Observed>,
+    /** Approved social packages whose installed signer differs from the pin, read live. */
+    val socialSignerMismatch: Set<String>,
+) {
+    val chromeInstalled: Boolean
+        get() = chromeObserved != BuiltInBlockExemptions.Observed.NOT_INSTALLED
+}
 
 /**
  * Installed packages from [catalogue], including ones this device has hidden:
@@ -82,14 +94,25 @@ internal fun installedExemptionCandidates(
 
 internal fun loadExemptionsView(context: Context): ExemptionsView {
     val settings = BuiltInBlockExemptionsStore.readForEdit(context)
+    val social = socialRows(context, settings)
+    val observed = social.associate { it.packageName to ExemptionObserver.observe(context, it.packageName) }
+    val mismatch = settings.socialPins().keys.filter { packageName ->
+        observed[packageName] != BuiltInBlockExemptions.Observed.NOT_INSTALLED &&
+            !BuiltInBlockExemptions.socialVisible(
+                packageName,
+                settings,
+                PackageIdentity.currentSignerSha256IncludingHidden(context.packageManager, packageName),
+            )
+    }.toSet()
     return ExemptionsView(
         settings = settings,
-        readback = BuiltInBlockExemptionsStore.readback(context)?.takeIf { it.describes(settings) },
-        chromeInstalled = installedExemptionCandidates(
-            context,
-            setOf(BuiltInBlockExemptions.CHROME),
-        ).isNotEmpty(),
-        social = socialRows(context, settings),
+        chromeDecision = BuiltInBlockExemptionsStore.readback(context)
+            ?.takeIf { it.describes(settings) }
+            ?.chromeDecision(),
+        chromeObserved = ExemptionObserver.observe(context, BuiltInBlockExemptions.CHROME),
+        social = social,
+        socialObserved = observed,
+        socialSignerMismatch = mismatch,
     )
 }
 
@@ -148,25 +171,17 @@ internal fun observedRes(state: BuiltInBlockExemptions.Observed?): Int = when (s
 /** The approval line for a social row: the stored decision, not Android's state. */
 internal fun socialApprovalRes(packageName: String, view: ExemptionsView): Int = when {
     packageName !in view.settings.socialPins() -> R.string.system_policy_exempt_social_not_approved
-    view.readback?.socialSignerMismatch()?.contains(packageName) == true ->
-        R.string.system_policy_exempt_social_signer_mismatch
+    packageName in view.socialSignerMismatch -> R.string.system_policy_exempt_social_signer_mismatch
     else -> R.string.system_policy_exempt_social_approved
 }
 
-/** Status lines from the read-back taken for the current decision only. */
+/** A reason line (if any) and what Android reports right now. */
 @Composable
-private fun ObservedLines(reason: String?, observed: BuiltInBlockExemptions.Observed?, view: ExemptionsView) {
-    val readback = view.readback
-    val lines = if (readback == null) {
-        listOfNotNull(reason, stringResource(R.string.system_policy_exempt_state_pending))
-    } else {
-        listOfNotNull(
-            reason,
-            stringResource(R.string.system_policy_exempt_android_state, stringResource(observedRes(observed))),
-            if (readback.passVerified()) null else stringResource(R.string.system_policy_exempt_pass_unverified),
-        )
-    }
-    lines.forEach { line ->
+private fun ObservedLines(reason: String?, observed: BuiltInBlockExemptions.Observed) {
+    listOfNotNull(
+        reason,
+        stringResource(R.string.system_policy_exempt_android_state, stringResource(observedRes(observed))),
+    ).forEach { line ->
         Text(
             text = line,
             style = MaterialTheme.typography.bodySmall,
@@ -206,9 +221,8 @@ internal fun BuiltInExemptionsSection(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 ObservedLines(
-                    reason = view.readback?.let { stringResource(chromeReasonRes(it.chromeDecision())) },
-                    observed = view.readback?.chromeObserved(),
-                    view = view,
+                    reason = view.chromeDecision?.let { stringResource(chromeReasonRes(it)) },
+                    observed = view.chromeObserved,
                 )
             }
             Spacer(Modifier.size(16.dp))
@@ -268,8 +282,8 @@ internal fun BuiltInExemptionsSection(
                     )
                     ObservedLines(
                         reason = stringResource(socialApprovalRes(candidate.packageName, view)),
-                        observed = view.readback?.social()?.get(candidate.packageName),
-                        view = view,
+                        observed = view.socialObserved[candidate.packageName]
+                            ?: BuiltInBlockExemptions.Observed.UNKNOWN,
                     )
                 }
                 Spacer(Modifier.size(16.dp))

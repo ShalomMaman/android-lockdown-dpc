@@ -88,7 +88,7 @@ public final class LockdownPolicyController {
             @Override
             public void recordEarlyReadback(List<String> readbackErrors) {
                 readbackErrors.add(HomeFilterController.CORRUPT_CONFIGURATION);
-                recordExemptionReadback(context, dpm, admin, exemptions, social,
+                recordExemptionReadback(context, dpm, admin, exemptions,
                         chromeInScope ? ChromeFilterExemption.Decision.FILTER_DISABLED
                                 : ChromeFilterExemption.Decision.NOT_AVAILABLE,
                         readbackErrors);
@@ -153,11 +153,15 @@ public final class LockdownPolicyController {
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
         int errorsBeforeFilter = errors.size();
         HomeFilterController.reconcile(context, dpm, admin, errors);
+        boolean filterConfirmed = homeFilter.enabled() && errors.size() == errorsBeforeFilter;
+        // While a Chrome approval is saved, Android Settings must not be able to
+        // remove the filter CA; Chrome is shown only with that lock confirmed.
+        boolean lockConfirmed = reconcileCredentialsLock(context, dpm, admin, errors);
         if (chromeInScope) {
             // Chrome is released only now, after the home filter's own
             // reconciliation, and only if it reported no error. Links follow
             // the final, verified result rather than the earlier decision.
-            boolean filterConfirmed = homeFilter.enabled() && errors.size() == errorsBeforeFilter;
+            filterConfirmed = filterConfirmed && lockConfirmed;
             boolean routedAway = !chrome.shown();
             chrome = ChromeFilterExemption.release(chrome, filterConfirmed, chromeGateway, errors);
             if (chrome.shown()) {
@@ -166,7 +170,7 @@ public final class LockdownPolicyController {
                 routeLinks(context, dpm, admin, false, errors);
             }
         }
-        recordExemptionReadback(context, dpm, admin, exemptions, social, chrome, errors);
+        recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             if (homeFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
@@ -268,7 +272,8 @@ public final class LockdownPolicyController {
         KioskController.reconcile(context, dpm, admin, errors);
         HomeFilterController.reconcile(context, dpm, admin, errors);
         BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
-        recordExemptionReadback(context, dpm, admin, exemptions, new SocialPass(context, exemptions),
+        reconcileCredentialsLock(context, dpm, admin, errors);
+        recordExemptionReadback(context, dpm, admin, exemptions,
                 ChromeFilterExemption.Decision.PROTECTION_PAUSED, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
@@ -1130,7 +1135,6 @@ public final class LockdownPolicyController {
     private static final class SocialPass {
         private final BuiltInBlockExemptions.Settings settings;
         private final LinkedHashSet<String> verified = new LinkedHashSet<>();
-        private final LinkedHashSet<String> signerMismatch = new LinkedHashSet<>();
 
         SocialPass(Context context, BuiltInBlockExemptions.Settings settings) {
             this.settings = settings;
@@ -1142,8 +1146,6 @@ public final class LockdownPolicyController {
                 String signer = PackageIdentity.currentSignerSha256IncludingHidden(pm, packageName);
                 if (BuiltInBlockExemptions.socialVisible(packageName, settings, signer)) {
                     verified.add(packageName);
-                } else {
-                    signerMismatch.add(packageName);
                 }
             }
         }
@@ -1158,10 +1160,6 @@ public final class LockdownPolicyController {
 
         Set<String> verified() {
             return verified;
-        }
-
-        Set<String> signerMismatch() {
-            return signerMismatch;
         }
     }
 
@@ -1195,54 +1193,65 @@ public final class LockdownPolicyController {
     }
 
     /**
-     * Reads back from Android the state of Chrome and every installed catalogue
-     * social package, and stores it for the console, bound to the decision it
-     * describes. A Chrome change is audited with the observed state. A read
-     * that throws is recorded as unknown; it never changes any state.
+     * Records the decision for Chrome and what Android reports for it now, and
+     * audits a change in that observation. The console shows only the decision
+     * from this record; every Android state it shows is read live.
      */
     private static void recordExemptionReadback(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
             BuiltInBlockExemptions.Settings exemptions,
-            SocialPass social,
             ChromeFilterExemption.Decision chrome,
             List<String> errors
     ) {
-        PackageManager pm = context.getPackageManager();
         BuiltInBlockExemptions.Observed chromeObserved =
                 ChromeFilterExemption.observe(new AndroidChromeGateway(context, dpm, admin));
-        java.util.LinkedHashMap<String, BuiltInBlockExemptions.Observed> socialObserved =
-                new java.util.LinkedHashMap<>();
-        for (String packageName : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
-            if (!isInstalled(pm, packageName)) {
-                continue;
-            }
-            BuiltInBlockExemptions.Observed state;
-            try {
-                state = dpm.isApplicationHidden(admin, packageName)
-                        ? BuiltInBlockExemptions.Observed.HIDDEN
-                        : dpm.isPackageSuspended(admin, packageName)
-                            ? BuiltInBlockExemptions.Observed.SUSPENDED
-                            : isEnabled(pm, packageName)
-                                ? BuiltInBlockExemptions.Observed.VISIBLE
-                                : BuiltInBlockExemptions.Observed.DISABLED;
-            } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
-                state = BuiltInBlockExemptions.Observed.UNKNOWN;
-            }
-            socialObserved.put(packageName, state);
-        }
         BuiltInBlockExemptionsStore.Readback previous = BuiltInBlockExemptionsStore.readback(context);
         if (previous != null && previous.chromeObserved() != chromeObserved) {
             AuditLog.append(context, "builtin-exemption: chrome android=" + chromeObserved.name()
                     + " (was " + previous.chromeObserved().name() + ", decision=" + chrome.name() + ")");
         }
         boolean saved = BuiltInBlockExemptionsStore.saveReadback(context,
-                new BuiltInBlockExemptionsStore.Readback(exemptions.auditText(), errors.isEmpty(),
-                        chrome, chromeObserved, socialObserved, social.signerMismatch()));
+                new BuiltInBlockExemptionsStore.Readback(exemptions.auditText(), chrome, chromeObserved));
         if (!saved) {
             errors.add("builtin-exemption-readback-not-saved");
         }
+    }
+
+    /**
+     * {@code DISALLOW_CONFIG_CREDENTIALS} while a Chrome approval is saved (or
+     * the record is unreadable), so Android Settings cannot remove the filter
+     * CA; released when no approval is saved. Nothing else in Device Guard sets
+     * this restriction, so releasing it cannot undo another requirement.
+     *
+     * @return whether Android reports the lock in the required state
+     */
+    private static boolean reconcileCredentialsLock(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            List<String> errors
+    ) {
+        boolean required = BuiltInBlockExemptions.credentialsLockRequired(
+                BuiltInBlockExemptionsStore.chromeFlag(context));
+        return BuiltInBlockExemptions.reconcileCredentialsLock(required,
+                new BuiltInBlockExemptions.CredentialsLock() {
+                    @Override
+                    public boolean isSet() {
+                        return dpm.getUserRestrictions(admin)
+                                .getBoolean(android.os.UserManager.DISALLOW_CONFIG_CREDENTIALS);
+                    }
+
+                    @Override
+                    public void set(boolean locked) {
+                        if (locked) {
+                            dpm.addUserRestriction(admin, android.os.UserManager.DISALLOW_CONFIG_CREDENTIALS);
+                        } else {
+                            dpm.clearUserRestriction(admin, android.os.UserManager.DISALLOW_CONFIG_CREDENTIALS);
+                        }
+                    }
+                }, errors);
     }
 
     /** Chrome as seen through DevicePolicyManager. */

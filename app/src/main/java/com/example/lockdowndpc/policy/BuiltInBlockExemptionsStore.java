@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -25,11 +24,8 @@ public final class BuiltInBlockExemptionsStore {
     private static final String KEY_CHROME = "chrome";
     private static final String KEY_SOCIAL_PINS = "social_pins";
     private static final String KEY_READBACK_FOR = "for";
-    private static final String KEY_PASS_VERIFIED = "pass_verified";
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
-    private static final String KEY_SOCIAL_OBSERVED = "social_observed";
-    private static final String KEY_SOCIAL_MISMATCH = "social_signer_mismatch";
 
     private static volatile BuiltInExemptionsPersistence persistence;
 
@@ -43,6 +39,21 @@ public final class BuiltInBlockExemptionsStore {
     /** The last durable decision, the baseline for an administrator's next edit. */
     public static BuiltInBlockExemptions.Settings readForEdit(Context context) {
         return persistence(context).readForEdit();
+    }
+
+    /**
+     * The stored Chrome flag read on its own from the raw record, for the home
+     * filter teardown guard. A malformed record is {@code UNREADABLE}, never
+     * "absent".
+     */
+    public static BuiltInBlockExemptions.ChromeFlag chromeFlag(Context context) {
+        try {
+            java.util.Map<String, ?> raw = context.getApplicationContext()
+                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll();
+            return BuiltInBlockExemptions.chromeFlag(raw.get(KEY_CHROME), raw.get(KEY_SOCIAL_PINS));
+        } catch (RuntimeException exception) {
+            return BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
+        }
     }
 
     /** An earlier save failed and passes currently enforce no exemptions. */
@@ -103,24 +114,16 @@ public final class BuiltInBlockExemptionsStore {
     }
 
     /**
-     * What the last pass read back from Android, for the decision it describes.
-     *
-     * @param passVerified the whole pass finished without an error
-     * @param social       the observed state of every installed catalogue social package
+     * What the last pass decided for Chrome and what Android reported then. The
+     * console shows the decision as the reason for the last pass only; every
+     * Android state it shows is read live. The observation is kept so the pass
+     * can audit a change.
      */
     public record Readback(
             String forSettings,
-            boolean passVerified,
             ChromeFilterExemption.Decision chromeDecision,
-            BuiltInBlockExemptions.Observed chromeObserved,
-            Map<String, BuiltInBlockExemptions.Observed> social,
-            Set<String> socialSignerMismatch
+            BuiltInBlockExemptions.Observed chromeObserved
     ) {
-        public Readback {
-            social = Map.copyOf(social);
-            socialSignerMismatch = Set.copyOf(socialSignerMismatch);
-        }
-
         public boolean describes(BuiltInBlockExemptions.Settings settings) {
             return forSettings.equals(settings.auditText());
         }
@@ -130,30 +133,12 @@ public final class BuiltInBlockExemptionsStore {
         return saveReadback(readbackPrefs(context), readback);
     }
 
-    /**
-     * Saves the read-back. Android's {@code commit()} updates memory before the
-     * disk write, so a failed save would still be visible to the console; on
-     * failure the record is therefore written again as unverified, which is
-     * what memory then holds whatever the disk does.
-     */
     static boolean saveReadback(SharedPreferences prefs, Readback readback) {
-        if (edit(prefs, readback).commit()) {
-            return true;
-        }
-        edit(prefs, readback).putBoolean(KEY_PASS_VERIFIED, false).commit();
-        return false;
-    }
-
-    private static SharedPreferences.Editor edit(SharedPreferences prefs, Readback readback) {
-        LinkedHashSet<String> social = new LinkedHashSet<>();
-        readback.social().forEach((name, state) -> social.add(name + "=" + state.name()));
         return prefs.edit()
                 .putString(KEY_READBACK_FOR, readback.forSettings())
-                .putBoolean(KEY_PASS_VERIFIED, readback.passVerified())
                 .putString(KEY_CHROME_DECISION, readback.chromeDecision().name())
                 .putString(KEY_CHROME_OBSERVED, readback.chromeObserved().name())
-                .putStringSet(KEY_SOCIAL_OBSERVED, social)
-                .putStringSet(KEY_SOCIAL_MISMATCH, new LinkedHashSet<>(readback.socialSignerMismatch()));
+                .commit();
     }
 
     /** The last read-back, or {@code null} when none was recorded. */
@@ -169,21 +154,10 @@ public final class BuiltInBlockExemptionsStore {
             if (forSettings == null || decision == null || observed == null) {
                 return null;
             }
-            LinkedHashMap<String, BuiltInBlockExemptions.Observed> social = new LinkedHashMap<>();
-            for (String entry : prefs.getStringSet(KEY_SOCIAL_OBSERVED, Set.of())) {
-                int split = entry.indexOf('=');
-                if (split > 0) {
-                    social.put(entry.substring(0, split),
-                            BuiltInBlockExemptions.Observed.valueOf(entry.substring(split + 1)));
-                }
-            }
             return new Readback(
                     forSettings,
-                    prefs.getBoolean(KEY_PASS_VERIFIED, false),
                     ChromeFilterExemption.Decision.valueOf(decision),
-                    BuiltInBlockExemptions.Observed.valueOf(observed),
-                    social,
-                    prefs.getStringSet(KEY_SOCIAL_MISMATCH, Set.of()));
+                    BuiltInBlockExemptions.Observed.valueOf(observed));
         } catch (IllegalArgumentException | ClassCastException exception) {
             return null;
         }

@@ -369,6 +369,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     ),
                     isError = true,
                 )
+                changed?.status() == BuiltInExemptionsController.Status.FILTER_NOT_READY -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_filter_not_ready),
+                    isError = true,
+                )
                 changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
                     context.getString(R.string.system_policy_exempt_audit_not_saved),
                     isError = true,

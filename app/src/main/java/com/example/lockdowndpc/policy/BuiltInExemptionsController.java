@@ -33,6 +33,11 @@ public final class BuiltInExemptionsController {
         /** Stored while protection is paused; nothing was applied. */
         SAVED,
         NOT_SAVED,
+        /**
+         * Chrome was not approved: the home filter is off, has a pending
+         * change, or its CA is not installed. Nothing was saved.
+         */
+        FILTER_NOT_READY,
         /** Stored and, when protection is on, applied; the audit entry did not persist. */
         AUDIT_NOT_SAVED
     }
@@ -47,6 +52,9 @@ public final class BuiltInExemptionsController {
 
         /** An earlier save failed and passes currently enforce no exemptions. */
         boolean exemptionsUntrusted();
+
+        /** The home filter is on, with nothing pending, and its CA (if any) installed. */
+        boolean filterSteadyForChrome();
 
         boolean protectionActive();
 
@@ -77,6 +85,17 @@ public final class BuiltInExemptionsController {
                     @Override
                     public boolean exemptionsUntrusted() {
                         return BuiltInBlockExemptionsStore.untrusted(context);
+                    }
+
+                    @Override
+                    public boolean filterSteadyForChrome() {
+                        try {
+                            HomeFilterController.Snapshot filter = HomeFilterController.read(context);
+                            return BuiltInBlockExemptions.filterSteadyForChrome(
+                                    filter.settings(), filter.report().ca());
+                        } catch (RuntimeException exception) {
+                            return false;
+                        }
                     }
 
                     @Override
@@ -122,6 +141,11 @@ public final class BuiltInExemptionsController {
         }
         if ((before.loosensTo(after) || sink.exemptionsUntrusted()) && !sessionUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
+        }
+        if (after.chrome() && !before.chrome() && !sink.filterSteadyForChrome()) {
+            // Approving Chrome over a pending teardown would let that teardown
+            // finish under the approval.
+            return new Outcome(Status.FILTER_NOT_READY, null);
         }
         if (!sink.write(after)) {
             return new Outcome(Status.NOT_SAVED, null);

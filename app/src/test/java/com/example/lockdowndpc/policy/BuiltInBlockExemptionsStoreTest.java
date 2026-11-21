@@ -1,7 +1,7 @@
 package com.example.lockdowndpc.policy;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import android.content.SharedPreferences;
@@ -17,33 +17,29 @@ import java.util.Set;
 /**
  * The read-back store against an Android-like {@code SharedPreferences}:
  * every commit updates memory, and the commit result reports the disk write.
+ * The console no longer shows a stored verification; only the decision reason
+ * is read back from here.
  */
 public final class BuiltInBlockExemptionsStoreTest {
 
-    private static BuiltInBlockExemptionsStore.Readback verifiedReadback() {
+    private static BuiltInBlockExemptionsStore.Readback readback() {
         return new BuiltInBlockExemptionsStore.Readback(
                 BuiltInBlockExemptions.Settings.NONE.auditText(),
-                true,
                 ChromeFilterExemption.Decision.NOT_EXEMPTED,
-                BuiltInBlockExemptions.Observed.HIDDEN,
-                Map.of("com.whatsapp", BuiltInBlockExemptions.Observed.HIDDEN),
-                Set.of());
+                BuiltInBlockExemptions.Observed.HIDDEN);
     }
 
     @Test
-    public void aSavedReadBackReadsBackAsVerified() {
+    public void aSavedReadBackReadsBack() {
         SharedPreferences prefs = androidLikePreferences(new HashMap<>(), new boolean[]{false});
-        assertTrue(BuiltInBlockExemptionsStore.saveReadback(prefs, verifiedReadback()));
-        assertTrue(BuiltInBlockExemptionsStore.readback(prefs).passVerified());
+        assertTrue(BuiltInBlockExemptionsStore.saveReadback(prefs, readback()));
+        assertEquals(readback(), BuiltInBlockExemptionsStore.readback(prefs));
     }
 
     @Test
-    public void aReadBackWhoseCommitFailedIsNeverShownAsVerified() {
+    public void aFailedReadBackCommitIsReportedToThePass() {
         SharedPreferences prefs = androidLikePreferences(new HashMap<>(), new boolean[]{true});
-        assertFalse(BuiltInBlockExemptionsStore.saveReadback(prefs, verifiedReadback()));
-        BuiltInBlockExemptionsStore.Readback inMemory = BuiltInBlockExemptionsStore.readback(prefs);
-        assertNotNull(inMemory);
-        assertFalse(inMemory.passVerified());
+        assertFalse(BuiltInBlockExemptionsStore.saveReadback(prefs, readback()));
     }
 
     private static SharedPreferences androidLikePreferences(Map<String, Object> memory, boolean[] diskFails) {

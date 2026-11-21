@@ -172,25 +172,141 @@ public final class BuiltInBlockExemptions {
         }
     }
 
+    /** The stored Chrome approval flag as found on disk, read on its own. */
+    public enum ChromeFlag { ABSENT, PRESENT, UNREADABLE }
+
     /**
-     * Whether a home filter change would take away what a saved Chrome approval
-     * relies on: turning the filter off, or removing its CA. While Chrome is
-     * approved such a change is refused; the administrator removes the Chrome
-     * approval first (that pass hides Chrome), and the filter change then works
-     * exactly as without the feature.
+     * Classifies the raw stored record for the teardown guard. Any malformed
+     * part of the record — the Chrome flag or any social pin — is
+     * {@link ChromeFlag#UNREADABLE}, which the guard treats like a saved
+     * approval. A pass, by contrast, withholds every exemption on such a record.
      */
-    public static boolean blocksFilterChange(
-            Settings exemptions,
-            HomeFilterPolicy.Settings before,
-            HomeFilterPolicy.Settings after
-    ) {
-        if (exemptions == null || !exemptions.chrome() || before == null || after == null
-                || !before.configured()) {
+    public static ChromeFlag chromeFlag(Object rawChrome, Object rawSocialPins) {
+        if (rawChrome != null && !(rawChrome instanceof Boolean)) {
+            return ChromeFlag.UNREADABLE;
+        }
+        if (rawSocialPins != null) {
+            if (!(rawSocialPins instanceof Set<?> pins)) {
+                return ChromeFlag.UNREADABLE;
+            }
+            LinkedHashMap<String, String> parsed = new LinkedHashMap<>();
+            for (Object entry : pins) {
+                if (!(entry instanceof String text) || text.indexOf('=') <= 0) {
+                    return ChromeFlag.UNREADABLE;
+                }
+                parsed.put(text.substring(0, text.indexOf('=')), text.substring(text.indexOf('=') + 1));
+            }
+            try {
+                new Settings(false, parsed);
+            } catch (IllegalArgumentException exception) {
+                return ChromeFlag.UNREADABLE;
+            }
+        }
+        return Boolean.TRUE.equals(rawChrome) ? ChromeFlag.PRESENT : ChromeFlag.ABSENT;
+    }
+
+    /** Whether a home filter change turns the filter off or removes its CA. */
+    public static boolean isFilterTeardown(HomeFilterPolicy.Settings before, HomeFilterPolicy.Settings after) {
+        if (before == null || after == null || !before.configured()) {
             return false;
         }
-        boolean disables = before.enabled() && !after.enabled();
-        boolean removesCa = !before.removeCa() && after.removeCa();
-        return disables || removesCa;
+        return (before.enabled() && !after.enabled()) || (!before.removeCa() && after.removeCa());
+    }
+
+    /** Whether stored settings still carry a teardown Android has not finished. */
+    public static boolean hasPendingTeardown(HomeFilterPolicy.Settings settings) {
+        return settings != null && settings.configured() && (!settings.enabled() || settings.removeCa());
+    }
+
+    /** The answer to "may the home filter be turned off or its CA removed now?". */
+    public enum TeardownVerdict {
+        ALLOWED,
+        /** A Chrome approval is saved; remove it first. */
+        CHROME_APPROVED,
+        /** The stored approval record could not be read; treated as approved. */
+        APPROVAL_UNREADABLE,
+        /** Android does not report Chrome hidden, suspended or uninstalled right now. */
+        CHROME_NOT_CONTAINED
+    }
+
+    /**
+     * The teardown guard, from live facts only and failing closed. While
+     * protection is on, Chrome must be observed hidden, suspended (the existing
+     * WebView-provider containment) or not installed; an unreadable observation
+     * refuses. While protection is paused every app is shown by design, so only
+     * the approval itself is checked then.
+     */
+    public static TeardownVerdict teardownVerdict(
+            ChromeFlag flag,
+            Observed chromeObserved,
+            boolean protectionActive
+    ) {
+        if (flag == ChromeFlag.PRESENT) {
+            return TeardownVerdict.CHROME_APPROVED;
+        }
+        if (flag != ChromeFlag.ABSENT) {
+            return TeardownVerdict.APPROVAL_UNREADABLE;
+        }
+        if (!protectionActive) {
+            return TeardownVerdict.ALLOWED;
+        }
+        return chromeObserved == Observed.HIDDEN
+                || chromeObserved == Observed.SUSPENDED
+                || chromeObserved == Observed.NOT_INSTALLED
+                ? TeardownVerdict.ALLOWED
+                : TeardownVerdict.CHROME_NOT_CONTAINED;
+    }
+
+    /**
+     * The settings reconciliation enforces while a pending teardown is held:
+     * the filter stays on with its CA, and the stored request is left pending.
+     */
+    public static HomeFilterPolicy.Settings withTeardownHeld(HomeFilterPolicy.Settings settings) {
+        return new HomeFilterPolicy.Settings(settings.config(), true, settings.ca(), false);
+    }
+
+    /**
+     * Whether Chrome may be approved now: the home filter is on, nothing is
+     * pending, and a CA the profile carries is installed. Approving over a
+     * pending teardown would let that teardown finish under the approval.
+     */
+    public static boolean filterSteadyForChrome(
+            HomeFilterPolicy.Settings settings,
+            HomeFilterPolicy.State caState
+    ) {
+        return settings != null && settings.configured() && settings.enabled() && !settings.removeCa()
+                && (settings.ca() == null || caState == HomeFilterPolicy.State.CONFIRMED);
+    }
+
+    /**
+     * While Chrome is approved — or the record is unreadable — Android Settings
+     * must not be able to remove the filter CA, so the credentials lock is on.
+     */
+    public static boolean credentialsLockRequired(ChromeFlag flag) {
+        return flag != ChromeFlag.ABSENT;
+    }
+
+    /** The credentials lock as Android reports it. Any call may throw. */
+    public interface CredentialsLock {
+        boolean isSet();
+
+        void set(boolean locked);
+    }
+
+    /** Brings the lock to {@code required} and reads it back; {@code false} on a mismatch. */
+    public static boolean reconcileCredentialsLock(boolean required, CredentialsLock lock, List<String> errors) {
+        try {
+            if (lock.isSet() != required) {
+                lock.set(required);
+            }
+            if (lock.isSet() == required) {
+                return true;
+            }
+            errors.add("credentials-lock-unverified:" + required);
+        } catch (RuntimeException exception) {
+            errors.add("credentials-lock:" + exception.getClass().getSimpleName());
+        }
+        return false;
     }
 
     /**
