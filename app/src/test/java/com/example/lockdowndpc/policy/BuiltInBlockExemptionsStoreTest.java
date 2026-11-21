@@ -34,7 +34,7 @@ public final class BuiltInBlockExemptionsStoreTest {
     public void aZeroByteFileThatExistsIsUnreadableAndEnforcesNothing() {
         Map<String, Object> memory = new HashMap<>();
         BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
-                androidLikePreferences(memory, new boolean[]{false}), () -> true);
+                androidLikePreferences(memory, new boolean[]{false}), () -> true, () -> {});
         assertTrue(store.record().unreadable());
         assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, store.record().flag());
         assertEquals(Settings.NONE, store.read());
@@ -43,7 +43,7 @@ public final class BuiltInBlockExemptionsStoreTest {
     @Test
     public void noFileAtAllIsAnEmptyReadableRecord() {
         BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
-                androidLikePreferences(new HashMap<>(), new boolean[]{false}), () -> false);
+                androidLikePreferences(new HashMap<>(), new boolean[]{false}), () -> false, () -> {});
         assertFalse(store.record().unreadable());
         assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, store.record().flag());
     }
@@ -54,7 +54,7 @@ public final class BuiltInBlockExemptionsStoreTest {
         memory.put("chrome", true);
         memory.put("social_pins", new LinkedHashSet<>(Set.of(TELEGRAM + "=" + SIGNER)));
         BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
-                androidLikePreferences(memory, new boolean[]{false}), () -> true);
+                androidLikePreferences(memory, new boolean[]{false}), () -> true, () -> {});
         assertTrue(store.record().unreadable());
         Settings enforced = store.read();
         assertFalse("no Chrome", enforced.chrome());
@@ -71,7 +71,7 @@ public final class BuiltInBlockExemptionsStoreTest {
         Map<String, Object> prior = new HashMap<>(memory);
         boolean[] diskFails = {true};
         BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
-                androidLikePreferences(memory, diskFails), () -> true);
+                androidLikePreferences(memory, diskFails), () -> true, () -> {});
         assertTrue(store.record().unreadable());
         assertFalse(store.write(Settings.NONE));
         assertEquals("exactly the prior map, no marker added", prior, memory);
@@ -83,10 +83,77 @@ public final class BuiltInBlockExemptionsStoreTest {
     public void aSuccessfulSaveWritesTheFormatMarker() {
         Map<String, Object> memory = new HashMap<>();
         BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
-                androidLikePreferences(memory, new boolean[]{false}), () -> true);
+                androidLikePreferences(memory, new boolean[]{false}), () -> true, () -> {});
         assertTrue(store.write(Settings.NONE.withChrome(true)));
         assertEquals(BuiltInBlockExemptions.FORMAT_VERSION, memory.get("format"));
         assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT, store.record().flag());
+    }
+
+    @Test
+    public void aFailedFirstSaveOnAFreshDeviceRestoresTheAbsentFile() {
+        Map<String, Object> memory = new HashMap<>();
+        boolean[] fileExists = {false};
+        boolean[] diskFails = {true};
+        SharedPreferences backing = androidLikePreferences(memory, diskFails);
+        // A failed commit can still leave a partial file behind; the store must remove it.
+        SharedPreferences prefs = creatingFileOnCommit(backing, fileExists);
+        BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
+                prefs, () -> fileExists[0], () -> fileExists[0] = false);
+        assertFalse(store.record().unreadable());
+
+        assertFalse(store.write(Settings.NONE.withChrome(true)));
+
+        assertFalse("no file, as before", fileExists[0]);
+        assertTrue("no keys, as before", memory.isEmpty());
+        assertFalse("readable, not damaged", store.record().unreadable());
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, store.record().flag());
+
+        diskFails[0] = false;
+        assertTrue("the next save works", store.write(Settings.NONE.withChrome(true)));
+        assertTrue(store.read().chrome());
+    }
+
+    @Test
+    public void aFailedSaveOverAnExistingFileKeepsTheFile() {
+        Map<String, Object> memory = new HashMap<>();
+        memory.put("chrome", false);
+        memory.put("format", BuiltInBlockExemptions.FORMAT_VERSION);
+        boolean[] fileExists = {true};
+        boolean[] deleted = {false};
+        BuiltInExemptionsPersistence store = BuiltInBlockExemptionsStore.persistenceFor(
+                androidLikePreferences(memory, new boolean[]{true}), () -> fileExists[0], () -> deleted[0] = true);
+        assertFalse(store.write(Settings.NONE.withChrome(true)));
+        assertFalse("an existing file is never deleted", deleted[0]);
+        assertEquals(Boolean.FALSE, memory.get("chrome"));
+    }
+
+    // --- Routing warning audit -----------------------------------------------------------
+
+    @Test
+    public void theRoutingWarningIsAuditedOnlyWhenItChanges() {
+        SharedPreferences prefs = androidLikePreferences(new HashMap<>(), new boolean[]{false});
+        assertEquals("healthy, nothing to audit", null,
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, false, ""));
+        assertEquals("first failure", "builtin-exemption: chrome link routing unverified: x",
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, true, "x"));
+        assertEquals("still failing: log only", null,
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, true, "x"));
+        assertEquals("still failing: log only", null,
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, true, "y"));
+        assertEquals("recovery", "builtin-exemption: chrome link routing recovered",
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, false, ""));
+        assertEquals("still healthy", null,
+                BuiltInBlockExemptionsStore.routingOutcome(prefs, false, ""));
+    }
+
+    @Test
+    public void routingAuditTransitionsArePure() {
+        assertEquals(null, BuiltInBlockExemptions.routingAuditTransition(false, false, ""));
+        assertEquals(null, BuiltInBlockExemptions.routingAuditTransition(true, true, "x"));
+        assertEquals("builtin-exemption: chrome link routing unverified: x",
+                BuiltInBlockExemptions.routingAuditTransition(false, true, "x"));
+        assertEquals("builtin-exemption: chrome link routing recovered",
+                BuiltInBlockExemptions.routingAuditTransition(true, false, ""));
     }
 
     // --- Pause durability ----------------------------------------------------------------
@@ -163,6 +230,29 @@ public final class BuiltInBlockExemptionsStoreTest {
     }
 
     // --- Android-like SharedPreferences --------------------------------------------------
+
+    /** Wraps preferences so that any commit, even a failed one, creates the file. */
+    private static SharedPreferences creatingFileOnCommit(SharedPreferences prefs, boolean[] fileExists) {
+        return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),
+                new Class<?>[]{SharedPreferences.class}, (proxy, method, args) -> {
+                    Object result = method.invoke(prefs, args);
+                    if (!"edit".equals(method.getName())) {
+                        return result;
+                    }
+                    SharedPreferences.Editor inner = (SharedPreferences.Editor) result;
+                    Object[] self = new Object[1];
+                    self[0] = Proxy.newProxyInstance(SharedPreferences.Editor.class.getClassLoader(),
+                            new Class<?>[]{SharedPreferences.Editor.class}, (p, m, a) -> {
+                                Object r = m.invoke(inner, a);
+                                if ("commit".equals(m.getName())) {
+                                    fileExists[0] = true;
+                                    return r;
+                                }
+                                return r == inner ? self[0] : r;
+                            });
+                    return self[0];
+                });
+    }
 
     private static SharedPreferences androidLikePreferences(Map<String, Object> memory, boolean[] diskFails) {
         return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),

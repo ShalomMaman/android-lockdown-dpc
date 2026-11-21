@@ -412,7 +412,8 @@ cannot be configured as the home filter's VPN.
   lockdown still apply in that window, and the first pass hides it unless it
   continues the last verified pass.
 - A failed link-routing step does not hide Chrome or fail the pass: links
-  fall back to the blocked page and the failure is logged and audited.
+  fall back to the blocked page and the failure is logged on every pass and
+  audited once, when it starts and again when it recovers.
 
 - Web content that another app renders itself (its own WebView or in-app
   browser) does not follow Chrome's policies; it is filtered only at the

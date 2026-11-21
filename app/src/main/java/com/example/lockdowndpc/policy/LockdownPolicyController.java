@@ -194,10 +194,15 @@ public final class LockdownPolicyController {
                 // fails the pass nor hides Chrome again.
                 ArrayList<String> routingWarnings = new ArrayList<>();
                 routeLinks(context, dpm, admin, true, routingWarnings);
+                String summary = summarizeErrors(routingWarnings);
                 if (!routingWarnings.isEmpty()) {
-                    String summary = summarizeErrors(routingWarnings);
                     Log.w(TAG, "Chrome link routing unverified: " + summary);
-                    AuditLog.append(context, "builtin-exemption: chrome link routing unverified: " + summary);
+                }
+                // Audited only on a change: the first failure and the recovery.
+                String auditLine = BuiltInBlockExemptionsStore.routingOutcome(
+                        context, !routingWarnings.isEmpty(), summary);
+                if (auditLine != null) {
+                    AuditLog.append(context, auditLine);
                 }
             } else if (!routedAway) {
                 routeLinks(context, dpm, admin, false, errors);

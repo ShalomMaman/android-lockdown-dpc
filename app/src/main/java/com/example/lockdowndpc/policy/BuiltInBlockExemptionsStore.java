@@ -33,6 +33,7 @@ public final class BuiltInBlockExemptionsStore {
     private static final String KEY_READBACK_FOR = "for";
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
+    private static final String KEY_ROUTING_FAILING = "chrome_routing_failing";
 
     /** How long after its own Chrome release a pass counts as caused by that release. */
     static final long OWN_RELEASE_WINDOW_MS = 60_000L;
@@ -80,7 +81,13 @@ public final class BuiltInBlockExemptionsStore {
                     Context app = context.getApplicationContext();
                     java.io.File file = new java.io.File(app.getApplicationInfo().dataDir,
                             "shared_prefs/" + PREFS + ".xml");
-                    current = persistenceFor(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE), file::exists);
+                    current = persistenceFor(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE), file::exists,
+                            // Delete the file itself, not through deleteSharedPreferences, so
+                            // the cached preference instance held here stays the only one.
+                            () -> {
+                                file.delete();
+                                new java.io.File(file.getPath() + ".bak").delete();
+                            });
                     persistence = current;
                 }
             }
@@ -88,10 +95,18 @@ public final class BuiltInBlockExemptionsStore {
         return current;
     }
 
-    /** The store's persistence over a given preference file, for the store tests. */
-    static BuiltInExemptionsPersistence persistenceFor(SharedPreferences prefs, BooleanSupplier fileExists) {
-        return new BuiltInExemptionsPersistence(new PreferencesBacking(prefs, fileExists));
+    /**
+     * The store's persistence over a given preference file, for the store tests.
+     *
+     * @param deleteFile removes the preference file from disk
+     */
+    static BuiltInExemptionsPersistence persistenceFor(
+            SharedPreferences prefs, BooleanSupplier fileExists, Runnable deleteFile) {
+        return new BuiltInExemptionsPersistence(new PreferencesBacking(prefs, fileExists, deleteFile));
     }
+
+    /** The prior raw values, and whether the file existed at all. */
+    private record Snapshot(Map<String, Object> raw, boolean fileExisted) {}
 
     private static final String[] RECORD_KEYS = {
             BuiltInBlockExemptions.KEY_CHROME,
@@ -99,7 +114,7 @@ public final class BuiltInBlockExemptionsStore {
             BuiltInBlockExemptions.KEY_FORMAT
     };
 
-    private record PreferencesBacking(SharedPreferences prefs, BooleanSupplier fileExists)
+    private record PreferencesBacking(SharedPreferences prefs, BooleanSupplier fileExists, Runnable deleteFile)
             implements BuiltInExemptionsPersistence.Backing {
 
         @Override
@@ -128,14 +143,25 @@ public final class BuiltInBlockExemptionsStore {
                     raw.put(key, value instanceof Set<?> set ? new LinkedHashSet<>(set) : value);
                 }
             }
-            return raw;
+            return new Snapshot(raw, fileExists.getAsBoolean());
         }
 
-        /** Exactly the prior raw values: nothing added, so an unreadable record stays unreadable. */
+        /**
+         * Exactly the prior state: the prior raw values with nothing added, so
+         * an unreadable record stays unreadable — and, when no file existed,
+         * no file, so a failed first save leaves a fresh device as it was.
+         */
         @Override
-        @SuppressWarnings("unchecked")
         public void restore(Object snapshot) {
-            Map<String, Object> raw = (Map<String, Object>) snapshot;
+            Snapshot prior = (Snapshot) snapshot;
+            writeExactly(prior.raw());
+            if (!prior.fileExisted() && prior.raw().isEmpty()) {
+                deleteFile.run();
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private void writeExactly(Map<String, Object> raw) {
             SharedPreferences.Editor editor = prefs.edit();
             for (String key : RECORD_KEYS) {
                 Object value = raw.get(key);
@@ -271,6 +297,22 @@ public final class BuiltInBlockExemptionsStore {
         } catch (RuntimeException exception) {
             return -1L;
         }
+    }
+
+    /**
+     * Records whether Chrome's link routing failed on this pass and returns the
+     * audit line for a change (first failure or recovery), or {@code null}.
+     */
+    static String routingOutcome(Context context, boolean failingNow, String detail) {
+        return routingOutcome(readbackPrefs(context), failingNow, detail);
+    }
+
+    static String routingOutcome(SharedPreferences prefs, boolean failingNow, String detail) {
+        boolean wasFailing = prefs.getBoolean(KEY_ROUTING_FAILING, false);
+        if (wasFailing != failingNow) {
+            prefs.edit().putBoolean(KEY_ROUTING_FAILING, failingNow).commit();
+        }
+        return BuiltInBlockExemptions.routingAuditTransition(wasFailing, failingNow, detail);
     }
 
     /** The last read-back, or {@code null} when none was recorded. */

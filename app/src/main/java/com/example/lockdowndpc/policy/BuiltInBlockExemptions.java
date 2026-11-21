@@ -289,6 +289,23 @@ public final class BuiltInBlockExemptions {
         return settings == null ? "unreadable" : Integer.toHexString(settings.hashCode());
     }
 
+    /**
+     * The audit line for Chrome's link routing on a pass that showed Chrome:
+     * only when the outcome changes — the first failure and the recovery — so a
+     * persistent failure cannot crowd administrator entries out of the audit log.
+     *
+     * @return the line to audit, or {@code null} when nothing changed
+     */
+    public static String routingAuditTransition(boolean wasFailing, boolean failingNow, String detail) {
+        if (failingNow && !wasFailing) {
+            return "builtin-exemption: chrome link routing unverified: " + detail;
+        }
+        if (!failingNow && wasFailing) {
+            return "builtin-exemption: chrome link routing recovered";
+        }
+        return null;
+    }
+
     /** Whether a home filter change turns the filter off or removes its CA. */
     public static boolean isFilterTeardown(HomeFilterPolicy.Settings before, HomeFilterPolicy.Settings after) {
         if (before == null || after == null || !before.configured()) {
