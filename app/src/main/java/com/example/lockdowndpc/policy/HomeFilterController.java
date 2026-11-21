@@ -107,27 +107,16 @@ public final class HomeFilterController {
         });
     }
 
-    /**
-     * Device-owner lifecycle entry point. It only reasserts saved administrator intent.
-     *
-     * @param holdTeardown a Chrome revocation is not yet confirmed: the filter
-     *                     keeps its VPN, proxy and CA rather than remove them
-     * @return whether the filter is enabled and this pass read its Android
-     *         settings back as confirmed; the Chrome exemption consumes it
-     */
-    static boolean reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
-                             List<String> errors, boolean holdTeardown) {
+    /** Device-owner lifecycle entry point. It only reasserts saved administrator intent. */
+    static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
+                          List<String> errors) {
         HomeFilterPolicy.Settings settings = readStored(context);
         if (settings == null) {
             errors.add(CORRUPT_CONFIGURATION);
-            return false;
+            return;
         }
         if (!settings.configured()) {
-            return false;
-        }
-        if (holdTeardown && (!settings.enabled() || settings.removeCa())) {
-            errors.add("home-filter:teardown-held-chrome-revocation-pending");
-            return false;
+            return;
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
@@ -144,36 +133,6 @@ public final class HomeFilterController {
         }
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
-        }
-        return settings.enabled() && verified;
-    }
-
-    /**
-     * What the home filter proves right now, for the Chrome exemption, from a
-     * read-only inspection of Android state. Every condition is one Device
-     * Guard enforces itself: the always-on VPN in lockdown on the approved,
-     * signer-verified package with no exemptions, the global PAC proxy, the
-     * profile restrictions and private DNS, and the CA when the profile has
-     * one. Anything unreadable counts as unproven.
-     */
-    static BuiltInBlockExemptions.FilterEvidence chromeFilterEvidence(
-            Context context, DevicePolicyManager dpm, ComponentName admin,
-            HomeFilterPolicy.Settings settings) {
-        if (settings == null || !settings.enabled() || !settings.configured()
-                || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
-            return BuiltInBlockExemptions.FilterEvidence.NONE;
-        }
-        try {
-            HomeFilterPolicy.Report report = HomeFilterStore.includeApplyEvidence(context, true,
-                    HomeFilterPolicy.inspect(settings, Build.VERSION.SDK_INT,
-                            new AndroidGateway(context, dpm, admin)));
-            return new BuiltInBlockExemptions.FilterEvidence(
-                    report.androidSettingsConfirmed(settings),
-                    BuiltInBlockExemptions.caSatisfied(settings.ca() != null, settings.removeCa(),
-                            report.ca() == HomeFilterPolicy.State.CONFIRMED),
-                    !BuiltInBlockExemptions.isBuiltInBlocked(settings.config().vpnPackage()));
-        } catch (RuntimeException exception) {
-            return BuiltInBlockExemptions.FilterEvidence.NONE;
         }
     }
 

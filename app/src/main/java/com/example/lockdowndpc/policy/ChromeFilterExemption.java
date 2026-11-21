@@ -4,69 +4,56 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Grant and revocation of the Chrome exemption, in a fixed, fail-closed order.
+ * The Chrome half of the exemptions, run at the start of every protected pass.
  *
- * <p>Three invariants, each covered by a JVM test against a fake gateway:
+ * <p>Order is the whole point:
+ * <ul>
+ *   <li>When Chrome may be shown, its managed configuration is written and read
+ *       back <em>here</em>, before the package pass can unhide it.</li>
+ *   <li>When it may not, it is hidden <em>here</em>, before anything else in the
+ *       pass. The one exception is Chrome acting as the WebView provider: it
+ *       keeps the existing behaviour (never hidden, suspended by the pass).</li>
+ *   <li>Any exception is a "not shown" decision.</li>
+ * </ul>
  *
- * <ol>
- *   <li><b>Grant only on read-back.</b> Chrome is granted only when it is
- *       installed, signed by Google's release key, the home filter's Android
- *       settings are confirmed, and Chrome's managed configuration has been
- *       written <em>and read back</em>. The grant is recorded durably before the
- *       package pass may show Chrome, so a pass that dies midway still leaves a
- *       record the next pass revokes from.</li>
- *   <li><b>Revoke first.</b> When any condition fails, or any call throws,
- *       Chrome is hidden — or suspended when it is the WebView provider, which
- *       is never hidden — and that state is read back before anything else in
- *       the pass. A revocation that Android did not confirm stays pending across
- *       process death and is retried on every pass, including the boot pass.</li>
- *   <li><b>No teardown under a pending revocation.</b> While a revocation is
- *       unconfirmed, {@link #teardownAllowed} is false and the home filter keeps
- *       its VPN, proxy and CA in place.</li>
- * </ol>
- *
- * <p>Nothing here is time-based: every condition is something Device Guard
- * enforces itself and reads back on each pass.
+ * <p>No state is kept between passes: each pass decides from the stored
+ * administrator choice and what Android reads back now.
  */
 public final class ChromeFilterExemption {
 
     private ChromeFilterExemption() {}
 
-    /** What the Chrome exemption resolved to on one pass. */
-    public enum State {
-        OFF(false),
-        ACTIVE(true),
+    public static final String CONFIG_UNVERIFIED_ERROR = "chrome-exemption-config-unverified";
+    public static final String HIDE_UNVERIFIED_ERROR = "chrome-exemption-hide-unverified";
+
+    /** Why Chrome is, or is not, shown on this pass. */
+    public enum Decision {
+        NOT_EXEMPTED(false),
+        PROTECTION_PAUSED(false),
+        FILTER_DISABLED(false),
         NOT_INSTALLED(false),
         SIGNER_UNVERIFIED(false),
-        FILTER_UNVERIFIED(false),
-        RESTRICTIONS_UNVERIFIED(false),
-        LINK_ROUTE_UNVERIFIED(false),
-        /** Everything holds, but an earlier revocation is not confirmed yet. */
-        REVOCATION_PENDING(false),
-        ERROR(false);
+        CONFIG_UNVERIFIED(false),
+        ERROR(false),
+        SHOWN(true);
 
-        private final boolean available;
+        private final boolean shown;
 
-        State(boolean available) {
-            this.available = available;
+        Decision(boolean shown) {
+            this.shown = shown;
         }
 
-        public boolean chromeAvailable() {
-            return available;
+        public boolean shown() {
+            return shown;
         }
     }
 
-    /** The Android side, as read-back operations. Any call may throw. */
+    /** Android, as seen by this decision. Any call may throw. */
     public interface Gateway {
         boolean installed();
 
         /** Chrome's single current signer, lower-case hex, or {@code ""}. */
         String currentSignerSha256();
-
-        BuiltInBlockExemptions.FilterEvidence filterEvidence();
-
-        /** The home filter's configured PAC URL. */
-        String pacUrl();
 
         Map<String, Object> restrictions();
 
@@ -77,158 +64,82 @@ public final class ChromeFilterExemption {
         void setHidden(boolean hidden);
 
         boolean hidden();
-
-        void setSuspended(boolean suspended);
-
-        boolean suspended();
-    }
-
-    /** Durable state that must survive process death. */
-    public interface Ledger {
-        boolean granted();
-
-        void setGranted(boolean granted);
-
-        boolean revocationPending();
-
-        void setRevocationPending(boolean pending);
     }
 
     /**
-     * The first step of every pass: decide, and revoke before anything else
-     * when the decision is not a grant.
+     * Decides, and performs the step that must come first.
      *
-     * @param requested the administrator's stored choice
+     * @param exempted         the administrator exempted Chrome
+     * @param protectionActive protection is on (not paused)
+     * @param filterEnabled    the home filter is enabled in its store
+     * @param pacUrl           the home filter's PAC URL, or {@code null}
      */
-    public static State prepare(boolean requested, Gateway gateway, Ledger ledger, List<String> errors) {
-        State state;
-        try {
-            state = evaluate(requested, gateway);
-        } catch (RuntimeException exception) {
-            errors.add("chrome-exemption:" + exception.getClass().getSimpleName());
-            state = State.ERROR;
-        }
-        // A revocation still owed from an earlier pass is completed, and read
-        // back, before any grant: never grant over an unconfirmed block.
-        if (ledger.revocationPending() && !revoke(gateway, ledger, errors)) {
-            return state == State.ACTIVE ? State.REVOCATION_PENDING : state;
-        }
-        if (state == State.ACTIVE) {
-            ledger.setGranted(true);
-        } else if (ledger.granted()) {
-            revoke(gateway, ledger, errors);
-        }
-        return state;
-    }
-
-    /**
-     * The last step of a pass that granted Chrome: the home filter's own
-     * reconcile, link routing and the configuration must all still hold.
-     * Anything else revokes.
-     */
-    public static State finish(
-            State prepared,
-            boolean filterStillConfirmed,
-            boolean linksRouted,
+    public static Decision prepare(
+            boolean exempted,
+            boolean protectionActive,
+            boolean filterEnabled,
+            String pacUrl,
             Gateway gateway,
-            Ledger ledger,
             List<String> errors
     ) {
-        if (prepared != State.ACTIVE) {
-            return prepared;
-        }
-        State state;
-        if (!filterStillConfirmed) {
-            state = State.FILTER_UNVERIFIED;
-        } else if (!linksRouted) {
-            state = State.LINK_ROUTE_UNVERIFIED;
-        } else {
-            try {
-                state = BuiltInBlockExemptions.restrictionsSatisfied(
-                        gateway.restrictions(),
-                        BuiltInBlockExemptions.chromeRestrictions(gateway.pacUrl()))
-                        ? State.ACTIVE : State.RESTRICTIONS_UNVERIFIED;
-            } catch (RuntimeException exception) {
-                errors.add("chrome-exemption:" + exception.getClass().getSimpleName());
-                state = State.ERROR;
-            }
-        }
-        if (state != State.ACTIVE) {
-            if (state == State.FILTER_UNVERIFIED) {
-                errors.add(BuiltInBlockExemptions.BROWSER_FILTER_UNVERIFIED_ERROR);
-            }
-            revoke(gateway, ledger, errors);
-        }
-        return state;
-    }
-
-    /**
-     * Blocks Chrome and reads the result back. The pending mark is written
-     * before any Android call and cleared only after Android confirmed.
-     *
-     * @return whether Android confirmed Chrome is blocked
-     */
-    public static boolean revoke(Gateway gateway, Ledger ledger, List<String> errors) {
-        ledger.setRevocationPending(true);
-        boolean blocked;
+        Decision decision;
         try {
-            if (!gateway.installed()) {
-                blocked = true;
-            } else if (gateway.webViewProvider()) {
-                gateway.setSuspended(true);
-                blocked = gateway.suspended();
-            } else {
-                gateway.setHidden(true);
-                blocked = gateway.hidden();
-            }
+            decision = decide(exempted, protectionActive, filterEnabled, pacUrl, gateway);
         } catch (RuntimeException exception) {
-            errors.add("chrome-exemption-revoke:" + exception.getClass().getSimpleName());
-            blocked = false;
+            errors.add("chrome-exemption:" + exception.getClass().getSimpleName());
+            decision = Decision.ERROR;
         }
-        if (blocked) {
-            ledger.setGranted(false);
-            ledger.setRevocationPending(false);
-        } else {
-            errors.add(BuiltInBlockExemptions.CHROME_REVOCATION_UNVERIFIED_ERROR);
+        if (decision == Decision.CONFIG_UNVERIFIED) {
+            errors.add(CONFIG_UNVERIFIED_ERROR);
         }
-        return blocked;
+        if (!decision.shown()) {
+            hideFirst(gateway, errors);
+        }
+        return decision;
     }
 
-    /** Revokes only when a grant or a pending revocation is on record. */
-    public static void revokeIfGranted(Gateway gateway, Ledger ledger, List<String> errors) {
-        if (ledger.granted() || ledger.revocationPending()) {
-            revoke(gateway, ledger, errors);
+    private static Decision decide(
+            boolean exempted,
+            boolean protectionActive,
+            boolean filterEnabled,
+            String pacUrl,
+            Gateway gateway
+    ) {
+        if (!exempted) {
+            return Decision.NOT_EXEMPTED;
         }
-    }
-
-    /** Whether the home filter may remove its VPN, proxy or CA now. */
-    public static boolean teardownAllowed(Ledger ledger) {
-        return !ledger.revocationPending();
-    }
-
-    private static State evaluate(boolean requested, Gateway gateway) {
-        if (!requested) {
-            return State.OFF;
+        if (!protectionActive) {
+            return Decision.PROTECTION_PAUSED;
+        }
+        if (!filterEnabled || pacUrl == null || pacUrl.isBlank()) {
+            return Decision.FILTER_DISABLED;
         }
         if (!gateway.installed()) {
-            return State.NOT_INSTALLED;
+            return Decision.NOT_INSTALLED;
         }
         if (!BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())) {
-            return State.SIGNER_UNVERIFIED;
+            return Decision.SIGNER_UNVERIFIED;
         }
-        BuiltInBlockExemptions.FilterEvidence evidence = gateway.filterEvidence();
-        if (evidence == null || !evidence.verified()) {
-            return State.FILTER_UNVERIFIED;
-        }
-        // Configured before Chrome can be shown, and read back.
-        Map<String, Object> required = BuiltInBlockExemptions.chromeRestrictions(gateway.pacUrl());
         Map<String, Object> current = gateway.restrictions();
-        if (!BuiltInBlockExemptions.restrictionsSatisfied(current, required)) {
-            gateway.setRestrictions(BuiltInBlockExemptions.mergeRestrictions(current, required));
+        if (!BuiltInBlockExemptions.restrictionsSatisfied(current, pacUrl)) {
+            gateway.setRestrictions(BuiltInBlockExemptions.mergeRestrictions(current, pacUrl));
         }
-        if (!BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), required)) {
-            return State.RESTRICTIONS_UNVERIFIED;
+        return BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl)
+                ? Decision.SHOWN
+                : Decision.CONFIG_UNVERIFIED;
+    }
+
+    private static void hideFirst(Gateway gateway, List<String> errors) {
+        try {
+            if (!gateway.installed() || gateway.webViewProvider()) {
+                return;
+            }
+            gateway.setHidden(true);
+            if (!gateway.hidden()) {
+                errors.add(HIDE_UNVERIFIED_ERROR);
+            }
+        } catch (RuntimeException exception) {
+            errors.add(HIDE_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
         }
-        return State.ACTIVE;
     }
 }

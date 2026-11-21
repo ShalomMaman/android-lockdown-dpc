@@ -4,7 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-import com.example.lockdowndpc.policy.ChromeFilterExemption.State;
+import com.example.lockdowndpc.policy.ChromeFilterExemption.Decision;
 
 import org.junit.Test;
 
@@ -14,64 +14,40 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Controller-level regressions for the Chrome exemption: the grant, revocation
- * and teardown order the policy pass runs, against a fake Android gateway that
- * records every call and a ledger that survives "process death".
+ * The Chrome decision against a fake Android layer that records every call.
+ * These tests exercise Device Guard's own ordering and decisions; they make no
+ * claim about what Chrome or Android does with the values.
  */
 public final class ChromeFilterExemptionTest {
 
     private static final String PAC = "https://filter.example.org/proxy.pac";
-    private static final BuiltInBlockExemptions.FilterEvidence VERIFIED =
-            new BuiltInBlockExemptions.FilterEvidence(true, true, true);
-
-    /** Durable state, shared across simulated process restarts. */
-    private static final class DurableLedger implements ChromeFilterExemption.Ledger {
-        boolean granted;
-        boolean pending;
-
-        @Override public boolean granted() { return granted; }
-        @Override public void setGranted(boolean value) { granted = value; }
-        @Override public boolean revocationPending() { return pending; }
-        @Override public void setRevocationPending(boolean value) { pending = value; }
-    }
 
     private static class FakeChrome implements ChromeFilterExemption.Gateway {
         final List<String> calls = new ArrayList<>();
         boolean installed = true;
         String signer = BuiltInBlockExemptions.CHROME_RELEASE_SIGNER_SHA256;
-        BuiltInBlockExemptions.FilterEvidence evidence = VERIFIED;
         Map<String, Object> restrictions = new LinkedHashMap<>();
-        boolean acceptRestrictions = true;
+        boolean keepRestrictions = true;
         boolean webViewProvider;
-        boolean hidden = true;
-        boolean suspended;
-        boolean refuseHide;
-        RuntimeException throwOnEvidence;
+        boolean hidden;
+        RuntimeException throwOnRead;
 
         @Override public boolean installed() { return installed; }
         @Override public String currentSignerSha256() { return signer; }
 
         @Override
-        public BuiltInBlockExemptions.FilterEvidence filterEvidence() {
-            calls.add("evidence");
-            if (throwOnEvidence != null) {
-                throw throwOnEvidence;
-            }
-            return evidence;
-        }
-
-        @Override public String pacUrl() { return PAC; }
-
-        @Override
         public Map<String, Object> restrictions() {
-            calls.add("read-restrictions");
+            calls.add("read-config");
+            if (throwOnRead != null) {
+                throw throwOnRead;
+            }
             return new LinkedHashMap<>(restrictions);
         }
 
         @Override
         public void setRestrictions(Map<String, Object> values) {
-            calls.add("set-restrictions");
-            if (acceptRestrictions) {
+            calls.add("write-config");
+            if (keepRestrictions) {
                 restrictions = new LinkedHashMap<>(values);
             }
         }
@@ -81,278 +57,138 @@ public final class ChromeFilterExemptionTest {
         @Override
         public void setHidden(boolean value) {
             calls.add("hide=" + value);
-            if (!refuseHide) {
-                hidden = value;
-            }
+            hidden = value;
         }
 
         @Override public boolean hidden() { return hidden; }
-
-        @Override
-        public void setSuspended(boolean value) {
-            calls.add("suspend=" + value);
-            suspended = value;
-        }
-
-        @Override public boolean suspended() { return suspended; }
     }
 
-    /** What the package pass does after prepare: show Chrome only when granted. */
-    private static void packagePass(FakeChrome chrome, State prepared) {
-        chrome.setHidden(prepared != State.ACTIVE);
+    private static Decision prepare(FakeChrome chrome, boolean exempted, boolean protectionActive,
+                                    boolean filterEnabled, List<String> errors) {
+        return ChromeFilterExemption.prepare(
+                exempted, protectionActive, filterEnabled, filterEnabled ? PAC : null, chrome, errors);
     }
 
-    // --- Grant ----------------------------------------------------------------
+    // --- Hidden unless every condition holds ----------------------------------------
 
     @Test
-    public void chromeStaysBlockedWhenTheExemptionIsOff() {
+    public void hiddenWithoutAnExemption() {
         FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        List<String> errors = new ArrayList<>();
-        State state = ChromeFilterExemption.prepare(false, chrome, ledger, errors);
-        assertEquals(State.OFF, state);
-        assertFalse(ledger.granted);
-        assertFalse("nothing is configured for an exemption nobody asked for",
-                chrome.calls.contains("set-restrictions"));
-        assertTrue(errors.isEmpty());
+        assertEquals(Decision.NOT_EXEMPTED, prepare(chrome, false, true, true, new ArrayList<>()));
+        assertTrue(chrome.hidden);
+        assertFalse("nothing is configured without an exemption", chrome.calls.contains("write-config"));
     }
 
     @Test
-    public void restrictionsAreWrittenAndReadBackBeforeTheGrant() {
+    public void hiddenWhileProtectionIsPaused() {
         FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        State state = ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        assertEquals(State.ACTIVE, state);
-        assertTrue("the grant is durable before the package pass shows Chrome", ledger.granted);
-        assertTrue(BuiltInBlockExemptions.restrictionsSatisfied(
-                chrome.restrictions, BuiltInBlockExemptions.chromeRestrictions(PAC)));
-        int set = chrome.calls.indexOf("set-restrictions");
-        assertTrue(set >= 0);
-        assertTrue("read back after writing", chrome.calls.lastIndexOf("read-restrictions") > set);
-        assertFalse("prepare never shows Chrome itself", chrome.calls.contains("hide=false"));
+        assertEquals(Decision.PROTECTION_PAUSED, prepare(chrome, true, false, true, new ArrayList<>()));
+        assertTrue(chrome.hidden);
     }
 
     @Test
-    public void restrictionsAndroidDidNotKeepPreventTheGrant() {
+    public void hiddenWhileTheHomeFilterIsDisabled() {
         FakeChrome chrome = new FakeChrome();
-        chrome.acceptRestrictions = false;
-        DurableLedger ledger = new DurableLedger();
-        assertEquals(State.RESTRICTIONS_UNVERIFIED,
-                ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        assertFalse(ledger.granted);
+        assertEquals(Decision.FILTER_DISABLED, prepare(chrome, true, true, false, new ArrayList<>()));
+        assertTrue(chrome.hidden);
     }
 
     @Test
-    public void aChromeNotSignedByGoogleIsNeverGranted() {
+    public void hiddenWhenTheSignerIsNotGoogles() {
         FakeChrome chrome = new FakeChrome();
         chrome.signer = "ab".repeat(32);
-        DurableLedger ledger = new DurableLedger();
-        assertEquals(State.SIGNER_UNVERIFIED,
-                ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        assertFalse(ledger.granted);
-        assertFalse(chrome.calls.contains("set-restrictions"));
-    }
-
-    @Test
-    public void anUnverifiedFilterIsNeverGranted() {
-        for (BuiltInBlockExemptions.FilterEvidence evidence : List.of(
-                new BuiltInBlockExemptions.FilterEvidence(false, true, true),
-                new BuiltInBlockExemptions.FilterEvidence(true, false, true),
-                new BuiltInBlockExemptions.FilterEvidence(true, true, false))) {
-            FakeChrome chrome = new FakeChrome();
-            chrome.evidence = evidence;
-            DurableLedger ledger = new DurableLedger();
-            assertEquals(State.FILTER_UNVERIFIED,
-                    ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-            assertFalse(ledger.granted);
-        }
-    }
-
-    // --- Fail closed, revoke first ------------------------------------------------
-
-    @Test
-    public void aLapsedFilterRevokesBeforeAnythingElseOnTheNextPass() {
-        FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        packagePass(chrome, ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        assertFalse(chrome.hidden);
-
-        chrome.calls.clear();
-        chrome.evidence = BuiltInBlockExemptions.FilterEvidence.NONE;
-        List<String> errors = new ArrayList<>();
-        State state = ChromeFilterExemption.prepare(true, chrome, ledger, errors);
-        assertEquals(State.FILTER_UNVERIFIED, state);
-        assertTrue("revoked inside prepare, before the package pass", chrome.hidden);
-        assertEquals("hide=true", chrome.calls.get(chrome.calls.size() - 1));
-        assertFalse(ledger.granted);
-        assertFalse(ledger.pending);
-        assertTrue(ChromeFilterExemption.teardownAllowed(ledger));
-    }
-
-    @Test
-    public void anExceptionRevokesAGrantedChrome() {
-        FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        packagePass(chrome, ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        chrome.throwOnEvidence = new IllegalStateException("binder");
-        List<String> errors = new ArrayList<>();
-        assertEquals(State.ERROR, ChromeFilterExemption.prepare(true, chrome, ledger, errors));
+        assertEquals(Decision.SIGNER_UNVERIFIED, prepare(chrome, true, true, true, new ArrayList<>()));
         assertTrue(chrome.hidden);
-        assertFalse(ledger.granted);
+        assertFalse(chrome.calls.contains("write-config"));
+    }
+
+    @Test
+    public void hiddenWhenTheConfigurationReadBackDoesNotMatch() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.keepRestrictions = false;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.CONFIG_UNVERIFIED, prepare(chrome, true, true, true, errors));
+        assertTrue(chrome.hidden);
+        assertTrue(errors.contains(ChromeFilterExemption.CONFIG_UNVERIFIED_ERROR));
+    }
+
+    @Test
+    public void anExceptionIsANotShownDecisionAndHides() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.throwOnRead = new IllegalStateException("binder");
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.ERROR, prepare(chrome, true, true, true, errors));
+        assertTrue(chrome.hidden);
         assertTrue(errors.get(0).startsWith("chrome-exemption:"));
     }
 
+    // --- Ordering ---------------------------------------------------------------------
+
     @Test
-    public void theFinalFilterReadBackRevokesAnEarlierGrant() {
+    public void configurationIsWrittenAndReadBackBeforeAnyUnhide() {
         FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        State prepared = ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        packagePass(chrome, prepared);
-        List<String> errors = new ArrayList<>();
-        State finished = ChromeFilterExemption.finish(prepared, false, true, chrome, ledger, errors);
-        assertEquals(State.FILTER_UNVERIFIED, finished);
-        assertTrue(chrome.hidden);
-        assertTrue(errors.contains(BuiltInBlockExemptions.BROWSER_FILTER_UNVERIFIED_ERROR));
+        chrome.hidden = true;
+        Decision decision = prepare(chrome, true, true, true, new ArrayList<>());
+        assertEquals(Decision.SHOWN, decision);
+        assertFalse("prepare never unhides; the package pass does, later",
+                chrome.calls.contains("hide=false"));
+        // The package pass that follows:
+        chrome.setHidden(!decision.shown());
+        int write = chrome.calls.indexOf("write-config");
+        int readBack = chrome.calls.lastIndexOf("read-config");
+        int unhide = chrome.calls.indexOf("hide=false");
+        assertTrue(write >= 0 && write < readBack && readBack < unhide);
+        assertTrue(BuiltInBlockExemptions.restrictionsSatisfied(chrome.restrictions, PAC));
     }
 
     @Test
-    public void aRoutingFailureRevokes() {
+    public void aMatchingConfigurationIsNotRewritten() {
         FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        State prepared = ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        packagePass(chrome, prepared);
-        assertEquals(State.LINK_ROUTE_UNVERIFIED, ChromeFilterExemption.finish(
-                prepared, true, false, chrome, ledger, new ArrayList<>()));
-        assertTrue(chrome.hidden);
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        assertEquals(Decision.SHOWN, prepare(chrome, true, true, true, new ArrayList<>()));
+        assertFalse(chrome.calls.contains("write-config"));
     }
 
     @Test
-    public void restrictionsLostDuringThePassRevoke() {
+    public void whenNotShownHidingIsTheLastStepOfPrepare() {
         FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        State prepared = ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        packagePass(chrome, prepared);
-        chrome.restrictions.remove("ProxyMode");
-        assertEquals(State.RESTRICTIONS_UNVERIFIED, ChromeFilterExemption.finish(
-                prepared, true, true, chrome, ledger, new ArrayList<>()));
-        assertTrue(chrome.hidden);
+        chrome.keepRestrictions = false;
+        prepare(chrome, true, true, true, new ArrayList<>());
+        assertEquals("hide=true", chrome.calls.get(chrome.calls.size() - 1));
     }
 
     @Test
-    public void aWebViewProviderChromeIsSuspendedNotHidden() {
+    public void theWritePutsAMandatoryPacInProxySettingsAndDropsSeparateProxyKeys() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.restrictions.put("ProxyMode", "direct");
+        chrome.restrictions.put("ProxyPacUrl", "https://other.example/p.pac");
+        assertEquals(Decision.SHOWN, prepare(chrome, true, true, true, new ArrayList<>()));
+        assertFalse(chrome.restrictions.containsKey("ProxyMode"));
+        assertFalse(chrome.restrictions.containsKey("ProxyPacUrl"));
+        assertTrue(((String) chrome.restrictions.get("ProxySettings"))
+                .contains("\"ProxyPacMandatory\":true"));
+    }
+
+    // --- WebView provider: existing behaviour ------------------------------------------
+
+    @Test
+    public void aWebViewProviderChromeIsNotHiddenHere() {
         FakeChrome chrome = new FakeChrome();
         chrome.webViewProvider = true;
-        chrome.hidden = false;
-        DurableLedger ledger = new DurableLedger();
-        ledger.granted = true;
-        chrome.evidence = BuiltInBlockExemptions.FilterEvidence.NONE;
-        ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        assertTrue(chrome.suspended);
-        assertFalse("the WebView provider is never hidden", chrome.calls.contains("hide=true"));
-        assertFalse(ledger.pending);
-    }
-
-    // --- Failed revoke, process death and boot ----------------------------------------
-
-    @Test
-    public void aFailedRevokeStaysPendingAndHoldsTheFilterTeardown() {
-        FakeChrome chrome = new FakeChrome();
-        DurableLedger ledger = new DurableLedger();
-        packagePass(chrome, ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        chrome.refuseHide = true;
-        List<String> errors = new ArrayList<>();
-        ChromeFilterExemption.prepare(false, chrome, ledger, errors);
-        assertFalse(chrome.hidden);
-        assertTrue(ledger.pending);
-        assertFalse("the VPN, proxy and CA stay while Chrome may be open",
-                ChromeFilterExemption.teardownAllowed(ledger));
-        assertTrue(errors.contains(BuiltInBlockExemptions.CHROME_REVOCATION_UNVERIFIED_ERROR));
+        prepare(chrome, false, true, true, new ArrayList<>());
+        assertFalse(chrome.calls.contains("hide=true"));
     }
 
     @Test
-    public void theBootPassRetriesAPendingRevocation() {
-        DurableLedger ledger = new DurableLedger();
-        ledger.pending = true;
-        FakeChrome afterBoot = new FakeChrome();
-        afterBoot.hidden = false;
-        // The administrator withdrew Chrome and the process died before
-        // Android confirmed; the first pass after boot completes it.
-        List<String> errors = new ArrayList<>();
-        State state = ChromeFilterExemption.prepare(false, afterBoot, ledger, errors);
-        assertEquals(State.OFF, state);
-        assertTrue(afterBoot.hidden);
-        assertFalse(ledger.pending);
-        assertTrue(ChromeFilterExemption.teardownAllowed(ledger));
-    }
-
-    @Test
-    public void theBootPassReChecksAGrantRecordedBeforeProcessDeath() {
-        DurableLedger ledger = new DurableLedger();
-        FakeChrome before = new FakeChrome();
-        ChromeFilterExemption.prepare(true, before, ledger, new ArrayList<>());
-        assertTrue(ledger.granted);
-        // The process dies after the grant was recorded; on boot the filter is
-        // not yet confirmed.
-        FakeChrome afterBoot = new FakeChrome();
-        afterBoot.hidden = false;
-        afterBoot.evidence = BuiltInBlockExemptions.FilterEvidence.NONE;
-        ChromeFilterExemption.prepare(true, afterBoot, ledger, new ArrayList<>());
-        assertTrue(afterBoot.hidden);
-        assertFalse(ledger.granted);
-    }
-
-    @Test
-    public void noGrantIsMadeOverAnUnconfirmedRevocation() {
-        DurableLedger ledger = new DurableLedger();
-        ledger.pending = true;
-        FakeChrome chrome = new FakeChrome();
-        chrome.hidden = false;
-        chrome.refuseHide = true;
-        List<String> errors = new ArrayList<>();
-        assertEquals(State.REVOCATION_PENDING,
-                ChromeFilterExemption.prepare(true, chrome, ledger, errors));
-        assertFalse(ledger.granted);
-        assertTrue(ledger.pending);
-
-        chrome.refuseHide = false;
-        assertEquals("granted only once the old block is confirmed",
-                State.ACTIVE, ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>()));
-        assertTrue(chrome.hidden);
-        assertFalse(ledger.pending);
-        assertTrue(ledger.granted);
-    }
-
-    @Test
-    public void revocationIsMarkedPendingBeforeTheFirstAndroidCall() {
-        DurableLedger ledger = new DurableLedger();
-        ledger.granted = true;
+    public void aHideAndroidDidNotKeepIsReported() {
         FakeChrome chrome = new FakeChrome() {
             @Override
             public void setHidden(boolean value) {
-                assertTrue("pending must be durable before Android is asked", ledger.pending);
-                super.setHidden(value);
+                calls.add("hide=" + value);
             }
         };
-        chrome.hidden = false;
-        assertTrue(ChromeFilterExemption.revoke(chrome, ledger, new ArrayList<>()));
-    }
-
-    @Test
-    public void anUninstalledChromeCompletesARevocation() {
-        DurableLedger ledger = new DurableLedger();
-        ledger.pending = true;
-        FakeChrome chrome = new FakeChrome();
-        chrome.installed = false;
-        ChromeFilterExemption.prepare(true, chrome, ledger, new ArrayList<>());
-        assertFalse(ledger.pending);
-        assertFalse(ledger.granted);
-    }
-
-    @Test
-    public void revokeIfGrantedDoesNothingWithoutARecord() {
-        DurableLedger ledger = new DurableLedger();
-        FakeChrome chrome = new FakeChrome();
-        ChromeFilterExemption.revokeIfGranted(chrome, ledger, new ArrayList<>());
-        assertTrue(chrome.calls.isEmpty());
+        List<String> errors = new ArrayList<>();
+        prepare(chrome, false, true, true, errors);
+        assertTrue(errors.contains(ChromeFilterExemption.HIDE_UNVERIFIED_ERROR));
     }
 }

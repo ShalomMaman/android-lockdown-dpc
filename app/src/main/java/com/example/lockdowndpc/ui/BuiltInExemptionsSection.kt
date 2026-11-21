@@ -40,10 +40,9 @@ internal sealed interface PendingExemption {
 /** Everything the section shows, read once per revision. */
 internal data class ExemptionsView(
     val settings: BuiltInBlockExemptions.Settings,
+    /** The last read-back, only when it was taken for the current decision. */
     val readback: BuiltInBlockExemptionsStore.Readback?,
     val chromeInstalled: Boolean,
-    val chromeRevocationPending: Boolean,
-    val socialRevocationsPending: Set<String>,
     val social: List<ExemptionCandidate>,
 )
 
@@ -81,67 +80,65 @@ internal fun installedExemptionCandidates(
     }
 }
 
-internal fun loadExemptionsView(context: Context): ExemptionsView = ExemptionsView(
-    settings = BuiltInBlockExemptionsStore.read(context),
-    readback = BuiltInBlockExemptionsStore.readback(context),
-    chromeInstalled = installedExemptionCandidates(
-        context,
-        setOf(BuiltInBlockExemptions.CHROME),
-    ).isNotEmpty(),
-    chromeRevocationPending = BuiltInBlockExemptionsStore.chromeRevocationPending(context),
-    socialRevocationsPending = BuiltInBlockExemptionsStore.socialRevocationsPending(context),
-    social = installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL),
-)
+internal fun loadExemptionsView(context: Context): ExemptionsView {
+    val settings = BuiltInBlockExemptionsStore.read(context)
+    return ExemptionsView(
+        settings = settings,
+        readback = BuiltInBlockExemptionsStore.readback(context)?.takeIf { it.describes(settings) },
+        chromeInstalled = installedExemptionCandidates(
+            context,
+            setOf(BuiltInBlockExemptions.CHROME),
+        ).isNotEmpty(),
+        social = installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL),
+    )
+}
 
 /**
- * The status line for Chrome, from Android's read-back only.
- *
- * A withdrawn exemption reads as pending until Android has confirmed Chrome is
- * blocked; "available" is shown only when Android confirmed Chrome is neither
- * hidden nor suspended.
+ * The status line for Chrome, from the read-back taken for the current
+ * decision only. "Available" is shown only when Android reported Chrome neither
+ * hidden nor suspended; a withdrawn exemption reads as pending until Android
+ * reports it blocked.
  */
 internal fun chromeStatusRes(view: ExemptionsView): Int {
-    if (view.chromeRevocationPending) {
-        return R.string.system_policy_exempt_chrome_state_revocation_pending
-    }
-    if (!view.settings.chromeThroughFilter()) {
-        return R.string.system_policy_exempt_chrome_state_off
-    }
     val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
-    return when (readback.chromeState()) {
-        ChromeFilterExemption.State.OFF -> R.string.system_policy_exempt_state_pending
-        ChromeFilterExemption.State.ACTIVE -> if (readback.chromeConfirmedAvailable()) {
+    if (!view.settings.chrome()) {
+        return if (readback.chromeVisible()) {
+            R.string.system_policy_exempt_chrome_state_revocation_pending
+        } else {
+            R.string.system_policy_exempt_chrome_state_off
+        }
+    }
+    return when (readback.chromeDecision()) {
+        ChromeFilterExemption.Decision.SHOWN -> if (readback.chromeVisible()) {
             R.string.system_policy_exempt_chrome_state_active
         } else {
             R.string.system_policy_exempt_chrome_state_unconfirmed
         }
-        ChromeFilterExemption.State.NOT_INSTALLED ->
+        ChromeFilterExemption.Decision.NOT_EXEMPTED -> R.string.system_policy_exempt_state_pending
+        ChromeFilterExemption.Decision.PROTECTION_PAUSED ->
+            R.string.system_policy_exempt_chrome_state_paused
+        ChromeFilterExemption.Decision.FILTER_DISABLED ->
+            R.string.system_policy_exempt_chrome_state_filter_off
+        ChromeFilterExemption.Decision.NOT_INSTALLED ->
             R.string.system_policy_exempt_chrome_state_not_installed
-        ChromeFilterExemption.State.SIGNER_UNVERIFIED ->
+        ChromeFilterExemption.Decision.SIGNER_UNVERIFIED ->
             R.string.system_policy_exempt_chrome_state_signer_unverified
-        ChromeFilterExemption.State.FILTER_UNVERIFIED ->
-            R.string.system_policy_exempt_chrome_state_filter_unverified
-        ChromeFilterExemption.State.RESTRICTIONS_UNVERIFIED ->
+        ChromeFilterExemption.Decision.CONFIG_UNVERIFIED ->
             R.string.system_policy_exempt_chrome_state_restrictions_unverified
-        ChromeFilterExemption.State.LINK_ROUTE_UNVERIFIED ->
-            R.string.system_policy_exempt_chrome_state_route_unverified
-        ChromeFilterExemption.State.REVOCATION_PENDING ->
-            R.string.system_policy_exempt_chrome_state_revocation_pending
-        ChromeFilterExemption.State.ERROR -> R.string.system_policy_exempt_chrome_state_error
+        ChromeFilterExemption.Decision.ERROR -> R.string.system_policy_exempt_chrome_state_error
     }
 }
 
 internal fun socialStatusRes(packageName: String, view: ExemptionsView): Int {
-    val readback = view.readback
+    val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
+    val approved = packageName in view.settings.socialPins()
+    val visible = packageName in readback.socialVisible()
     return when {
-        packageName in view.socialRevocationsPending ->
-            R.string.system_policy_exempt_social_revocation_pending
-        packageName !in view.settings.socialPins() -> R.string.system_policy_exempt_social_blocked
-        readback == null -> R.string.system_policy_exempt_state_pending
+        !approved && visible -> R.string.system_policy_exempt_social_revocation_pending
+        !approved -> R.string.system_policy_exempt_social_blocked
         packageName in readback.socialSignerMismatch() ->
             R.string.system_policy_exempt_social_signer_mismatch
-        packageName in readback.socialConfirmedAvailable() ->
-            R.string.system_policy_exempt_social_confirmed
+        visible -> R.string.system_policy_exempt_social_confirmed
         else -> R.string.system_policy_exempt_social_unconfirmed
     }
 }
@@ -187,11 +184,11 @@ internal fun BuiltInExemptionsSection(
             }
             Spacer(Modifier.size(16.dp))
             Switch(
-                checked = view.settings.chromeThroughFilter(),
+                checked = view.settings.chrome(),
                 onCheckedChange = { requested ->
                     if (requested) onRequestChrome() else onRemoveChrome()
                 },
-                enabled = enabled && (view.chromeInstalled || view.settings.chromeThroughFilter()),
+                enabled = enabled && (view.chromeInstalled || view.settings.chrome()),
             )
         }
         Text(

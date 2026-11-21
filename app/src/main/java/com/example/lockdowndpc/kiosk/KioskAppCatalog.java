@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.kiosk;
 
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions;
 import com.example.lockdowndpc.policy.LockdownPackages;
 import com.example.lockdowndpc.security.AppLabelSanitizer;
 
@@ -65,10 +66,26 @@ public final class KioskAppCatalog {
      * thereby make an escape surface eligible as the pinned kiosk application.
      */
     public static boolean isProtectedFromKiosk(String packageName) {
+        return isProtectedFromKiosk(packageName, Set.of());
+    }
+
+    /**
+     * The same rule, with the social and messaging applications an
+     * administrator exempted and whose pinned signer verified now. Any other
+     * package from {@link BuiltInBlockExemptions#EXEMPTABLE_SOCIAL} is built-in
+     * blocked, and kiosk is not a way around that block.
+     *
+     * @param verifiedSocialExemptions exempted social packages whose signer matched
+     */
+    public static boolean isProtectedFromKiosk(String packageName, Set<String> verifiedSocialExemptions) {
         if (packageName == null || packageName.isEmpty()) {
             return true;
         }
         if (LockdownPackages.ALWAYS_BLOCKED.contains(packageName)) {
+            return true;
+        }
+        if (BuiltInBlockExemptions.isExemptableSocial(packageName)
+                && (verifiedSocialExemptions == null || !verifiedSocialExemptions.contains(packageName))) {
             return true;
         }
         LockdownPackages.PackageClass packageClass =
@@ -80,13 +97,17 @@ public final class KioskAppCatalog {
 
     /** Whether {@code candidate} may be offered to, and chosen by, an administrator. */
     public static boolean isSelectable(Candidate candidate) {
+        return isSelectable(candidate, Set.of());
+    }
+
+    public static boolean isSelectable(Candidate candidate, Set<String> verifiedSocialExemptions) {
         return candidate != null
                 && !candidate.packageName().isEmpty()
                 && !candidate.deviceGuardItself()
                 && candidate.installed()
                 && candidate.enabled()
                 && candidate.launchable()
-                && !isProtectedFromKiosk(candidate.packageName());
+                && !isProtectedFromKiosk(candidate.packageName(), verifiedSocialExemptions);
     }
 
     /**
@@ -96,13 +117,21 @@ public final class KioskAppCatalog {
      * applications.
      */
     public static List<Candidate> selectable(List<Candidate> candidates) {
+        return selectable(candidates, Set.of());
+    }
+
+    public static List<Candidate> selectable(
+            List<Candidate> candidates,
+            Set<String> verifiedSocialExemptions
+    ) {
         if (candidates == null) {
             return List.of();
         }
         LinkedHashSet<String> seen = new LinkedHashSet<>();
         ArrayList<Candidate> eligible = new ArrayList<>();
         for (Candidate candidate : candidates) {
-            if (isSelectable(candidate) && seen.add(candidate.packageName())) {
+            if (isSelectable(candidate, verifiedSocialExemptions)
+                    && seen.add(candidate.packageName())) {
                 eligible.add(candidate);
             }
         }

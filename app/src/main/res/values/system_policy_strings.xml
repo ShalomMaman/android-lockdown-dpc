@@ -143,17 +143,18 @@
     <!-- Built-in block exemptions -->
     <string name="system_policy_section_exemptions">Exemptions from the built-in block</string>
     <string name="system_policy_exempt_chrome_row">Chrome through the home filter</string>
-    <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed. It is available only while this device confirms every protection Device Guard sets itself: the always-on VPN in lockdown on the approved VPN app, the home filter proxy, the filter certificate when your profile has one, and Chrome\'s managed settings. Chrome is set to use the filter proxy, with secure DNS, QUIC, incognito mode, sign-in and developer tools turned off, SafeSearch and strict YouTube restrictions forced, and its internal network pages blocked. These settings also cover Custom Tabs and web apps that open in Chrome. If any protection is missing, Chrome is blocked again before anything else changes. Web pages shown inside other apps are not covered by Chrome\'s settings. They are filtered only by the home network. Application stores can never be allowed.</string>
+    <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed, and only while the home filter is on and protection is active. Before Chrome is shown, Device Guard sets and checks Chrome\'s managed settings: the home filter\'s proxy script is mandatory, so Chrome never connects directly when the script is unavailable; secure DNS, incognito mode, sign-in and developer tools are turned off. These settings also cover Custom Tabs and web apps that open in Chrome. If any condition is not met, Chrome is hidden before anything else changes. Every app\'s traffic still goes through the home filter\'s always-on VPN. Web pages shown inside other apps are not covered by Chrome\'s settings; they are filtered only by the home network. Pausing protection shows every app, Chrome included. Application stores can never be allowed.</string>
     <string name="system_policy_exempt_chrome_state_off">Off. Every browser stays blocked</string>
     <string name="system_policy_exempt_chrome_state_active">On. Every protection is confirmed and Android confirmed Chrome is available</string>
     <string name="system_policy_exempt_chrome_state_unconfirmed">On, but Android has not confirmed Chrome is available yet</string>
     <string name="system_policy_exempt_chrome_state_not_installed">On, but Chrome is not installed on this device</string>
     <string name="system_policy_exempt_chrome_state_signer_unverified">On, but the installed Chrome is not signed by Google, so it stays blocked</string>
-    <string name="system_policy_exempt_chrome_state_filter_unverified">On, but the home filter protections are not all confirmed, so Chrome stays blocked</string>
     <string name="system_policy_exempt_chrome_state_restrictions_unverified">On, but Chrome did not confirm its managed settings, so it stays blocked</string>
-    <string name="system_policy_exempt_chrome_state_route_unverified">On, but links could not be routed to Chrome, so it stays blocked</string>
     <string name="system_policy_exempt_chrome_state_error">On, but the last check failed, so Chrome stays blocked</string>
     <string name="system_policy_exempt_chrome_state_revocation_pending">Turned off. Waiting for Android to confirm Chrome is blocked</string>
+    <string name="system_policy_exempt_chrome_state_paused">On, but protection is paused, so every app is shown</string>
+    <string name="system_policy_exempt_chrome_state_filter_off">On, but the home filter is off, so Chrome stays hidden</string>
+    <string name="system_policy_exempt_audit_not_saved">The change was saved and applied, but its audit entry could not be written.</string>
     <string name="system_policy_exempt_state_pending">Saved, not applied yet</string>
     <string name="system_policy_exempt_social_title">Approved social and messaging applications</string>
     <string name="system_policy_exempt_social_body">These applications are blocked by the built-in list. Turn one on to keep it available while protection is on. Each approval is tied to the developer signature the app has now; an app with a different signature stays blocked. Turning it off blocks it again at once.</string>
@@ -166,7 +167,7 @@
     <string name="system_policy_exempt_social_signer_unreadable">The app\'s signature could not be read, so it cannot be approved.</string>
     <string name="system_policy_exempt_change_refused">The change was not saved. Check the details and try again.</string>
     <string name="system_policy_exempt_confirm_chrome_title">Allow Chrome through the home filter?</string>
-    <string name="system_policy_exempt_confirm_chrome_body">Chrome will be available only while this device confirms the home filter protections and Chrome\'s managed settings. If any of them is missing, Chrome is blocked again automatically. Links and web apps will open in Chrome instead of the blocked page. Every other browser stays blocked.</string>
+    <string name="system_policy_exempt_confirm_chrome_body">Chrome will be shown only while the home filter is on, protection is active and Chrome confirms its managed settings, including the mandatory filter proxy. If any condition is not met, Chrome is hidden again automatically. Links and web apps will open in Chrome instead of the blocked page. Every other browser stays blocked.</string>
     <string name="system_policy_exempt_confirm_social_title">Allow this application?</string>
     <string name="system_policy_exempt_confirm_social_body">%1$s will no longer be blocked by the built-in social and messaging list while protection is on. The approval is tied to the app\'s current signature. Turning it off later blocks it again at once.</string>
     <!-- Audit -->

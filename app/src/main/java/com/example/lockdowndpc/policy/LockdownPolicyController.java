@@ -47,12 +47,7 @@ public final class LockdownPolicyController {
 
     public static synchronized PolicyResult apply(Context context) {
         HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
-        if (homeFilter == null) {
-            // Unreadable filter settings cannot back a Chrome grant. Quarantine
-            // first, then report the corruption exactly as before.
-            quarantineChrome(context);
-            return corruptHomeFilter();
-        }
+        if (homeFilter == null) return corruptHomeFilter();
         AllowedAppsStore.markApplyStarted(context);
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -61,35 +56,20 @@ public final class LockdownPolicyController {
             AllowedAppsStore.markApplyFailed(context, error);
             return new PolicyResult(false, false, 0, 0, List.of(error));
         }
-        ChromeFilterExemption.Gateway chrome = new AndroidChromeGateway(context, dpm, admin, homeFilter);
-        ChromeFilterExemption.Ledger ledger = BuiltInBlockExemptionsStore.ledger(context);
-        try {
-            return applyAsOwner(context, dpm, admin, homeFilter, chrome, ledger);
-        } catch (RuntimeException exception) {
-            // Whatever failed, a granted Chrome must not outlive the pass that
-            // could no longer vouch for it.
-            ChromeFilterExemption.revokeIfGranted(chrome, ledger, new ArrayList<>());
-            throw exception;
-        }
-    }
 
-    private static PolicyResult applyAsOwner(
-            Context context,
-            DevicePolicyManager dpm,
-            ComponentName admin,
-            HomeFilterPolicy.Settings homeFilter,
-            ChromeFilterExemption.Gateway chrome,
-            ChromeFilterExemption.Ledger ledger
-    ) {
         ArrayList<String> errors = new ArrayList<>();
-        // First: the Chrome exemption. It is granted only on this pass's
-        // read-back, and anything less revokes it, verified, before any other
-        // part of the pass runs, the home filter's teardown included.
+        // First: Chrome. When it may be shown, its managed configuration is
+        // written and read back here, before the package pass can unhide it;
+        // when it may not, it is hidden here, before anything else runs.
         BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
-        ChromeFilterExemption.State chromeState = ChromeFilterExemption.prepare(
-                exemptions.chromeThroughFilter(), chrome, ledger, errors);
-        boolean chromeGranted = chromeState == ChromeFilterExemption.State.ACTIVE;
-
+        ChromeFilterExemption.Decision chrome = ChromeFilterExemption.prepare(
+                exemptions.chrome(),
+                AllowedAppsStore.isProtectionEnabled(context),
+                homeFilter.enabled(),
+                homeFilter.configured() ? homeFilter.config().pacUrl() : null,
+                new AndroidChromeGateway(context, dpm, admin),
+                errors);
+        boolean chromeShown = chrome.shown();
         SystemPolicyPass systemPolicy = applySystemPolicy(context, dpm, admin, errors);
         // Resolved from this pass's read-back evidence, never from the stored
         // switch: a compatibility mode whose install lock the device did not
@@ -106,26 +86,21 @@ public final class LockdownPolicyController {
         // every persistent preferred activity of this package, and
         // routeLinks below re-registers the managed-filtering ones.
         KioskController.reconcile(context, dpm, admin, errors);
-        if (!chromeGranted) {
+        if (!chromeShown) {
             routeLinks(context, dpm, admin, false, errors);
         }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         SocialPass social = new SocialPass(context, exemptions);
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
-                playCompatibility, homeFilter, social, chromeGranted, errors);
-        boolean linksRouted = !chromeGranted || routeLinks(context, dpm, admin, true, errors);
-        boolean filterConfirmed = HomeFilterController.reconcile(context, dpm, admin, errors,
-                !ChromeFilterExemption.teardownAllowed(ledger));
-        ChromeFilterExemption.State finalChrome = ChromeFilterExemption.finish(
-                chromeState, filterConfirmed, linksRouted, chrome, ledger, errors);
-        boolean chromeStillGranted = finalChrome == ChromeFilterExemption.State.ACTIVE;
-        if (chromeGranted && !chromeStillGranted) {
-            routeLinks(context, dpm, admin, false, errors);
+                playCompatibility, homeFilter, social, chromeShown, errors);
+        if (chromeShown) {
+            // Routed only after the package pass: a hidden Chrome has no
+            // activity to resolve. A failure falls back to the blocked page.
+            routeLinks(context, dpm, admin, true, errors);
         }
-        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, chromeStillGranted, errors);
-        verifySocialRevocations(context, dpm, admin, errors);
-        recordExemptionReadback(context, dpm, admin, social, finalChrome, chromeStillGranted);
-        flushExemptionChangeAudit(context, errors);
+        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, chromeShown, errors);
+        HomeFilterController.reconcile(context, dpm, admin, errors);
+        recordExemptionReadback(context, dpm, admin, exemptions, social, chrome, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             if (homeFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
@@ -225,7 +200,7 @@ public final class LockdownPolicyController {
         // keeps its lock task allowlist and re-registers the HOME preference that
         // clearPackagePersistentPreferredActivities() above removed.
         KioskController.reconcile(context, dpm, admin, errors);
-        HomeFilterController.reconcile(context, dpm, admin, errors, false);
+        HomeFilterController.reconcile(context, dpm, admin, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
             AllowedAppsStore.markPauseSucceeded(context);
@@ -452,7 +427,7 @@ public final class LockdownPolicyController {
                 }
             }
             errors.addAll(routeErrors);
-            errors.add(BuiltInBlockExemptions.BROWSER_ROUTE_UNRESOLVED_ERROR);
+            errors.add("browser-route-unresolved");
         }
         clearChromeRouting(dpm, admin, errors);
         setBlockedBrowserComponentEnabled(context, true, errors);
@@ -760,7 +735,7 @@ public final class LockdownPolicyController {
             PlayStoreCompatibility.State playCompatibility,
             HomeFilterPolicy.Settings homeFilter,
             SocialPass social,
-            boolean chromeGranted,
+            boolean chromeShown,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -783,7 +758,7 @@ public final class LockdownPolicyController {
         String requestedKioskTarget = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
                 ? kiosk.config().targetPackage()
                 : "";
-        String kioskTarget = KioskAppCatalog.isProtectedFromKiosk(requestedKioskTarget)
+        String kioskTarget = KioskAppCatalog.isProtectedFromKiosk(requestedKioskTarget, social.verified())
                 ? ""
                 : requestedKioskTarget;
         int blockedCount = 0;
@@ -837,7 +812,7 @@ public final class LockdownPolicyController {
             packageNames.add(homeFilter.config().vpnPackage());
         }
         packageNames.addAll(social.approved());
-        if (chromeGranted) {
+        if (chromeShown) {
             packageNames.add(BuiltInBlockExemptions.CHROME);
         }
 
@@ -885,8 +860,8 @@ public final class LockdownPolicyController {
             // applications whose current signer is the one pinned at approval.
             // Never an application store. Kiosk containment below and the
             // lock-task allowlist are unaffected.
-            boolean exempted = (chromeGranted && BuiltInBlockExemptions.CHROME.equals(packageName))
-                    || social.keepsAvailable(packageName);
+            boolean exempted = (chromeShown && BuiltInBlockExemptions.CHROME.equals(packageName))
+                    || social.visible(packageName);
             if (exempted) {
                 shouldBlock = false;
             }
@@ -1028,7 +1003,7 @@ public final class LockdownPolicyController {
             DevicePolicyManager dpm,
             ComponentName admin,
             HomeFilterPolicy.Settings homeFilter,
-            boolean chromeGranted,
+            boolean chromeShown,
             List<String> errors
     ) {
         String provider = resolveWebViewProvider(context.getPackageManager());
@@ -1037,7 +1012,7 @@ public final class LockdownPolicyController {
         }
         // A granted Chrome is the browser this device uses, so it must run.
         boolean suspend = !homeFilter.keepsVpnVisible(provider)
-                && !(chromeGranted && BuiltInBlockExemptions.CHROME.equals(provider));
+                && !(chromeShown && BuiltInBlockExemptions.CHROME.equals(provider));
         try {
             String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, suspend);
             if (failed.length > 0) {
@@ -1082,32 +1057,14 @@ public final class LockdownPolicyController {
     }
 
     /**
-     * Revokes a recorded Chrome grant when the pass cannot run normally, for
-     * example because the home filter settings are unreadable.
-     */
-    private static void quarantineChrome(Context context) {
-        try {
-            DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
-            if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
-                return;
-            }
-            ChromeFilterExemption.revokeIfGranted(
-                    new AndroidChromeGateway(context, dpm,
-                            LockdownAdminReceiver.componentName(context), null),
-                    BuiltInBlockExemptionsStore.ledger(context),
-                    new ArrayList<>());
-        } catch (RuntimeException exception) {
-            Log.e(TAG, "Could not quarantine the Chrome exemption", exception);
-        }
-    }
-
-    /**
      * The social half of the exemptions for one pass: each approved package's
-     * current signer, read once, against the digest pinned at approval.
+     * single current signer, read once with the hidden-package query, against
+     * the digest pinned at approval. An unreadable signer is not verified, so
+     * the package stays hidden.
      */
     private static final class SocialPass {
         private final BuiltInBlockExemptions.Settings settings;
-        private final LinkedHashSet<String> available = new LinkedHashSet<>();
+        private final LinkedHashSet<String> verified = new LinkedHashSet<>();
         private final LinkedHashSet<String> signerMismatch = new LinkedHashSet<>();
 
         SocialPass(Context context, BuiltInBlockExemptions.Settings settings) {
@@ -1118,8 +1075,8 @@ public final class LockdownPolicyController {
                     continue;
                 }
                 String signer = PackageIdentity.currentSignerSha256IncludingHidden(pm, packageName);
-                if (BuiltInBlockExemptions.keepsSocialAvailable(packageName, settings, signer)) {
-                    available.add(packageName);
+                if (BuiltInBlockExemptions.socialVisible(packageName, settings, signer)) {
+                    verified.add(packageName);
                 } else {
                     signerMismatch.add(packageName);
                 }
@@ -1130,8 +1087,12 @@ public final class LockdownPolicyController {
             return settings.socialPins().keySet();
         }
 
-        boolean keepsAvailable(String packageName) {
-            return available.contains(packageName);
+        boolean visible(String packageName) {
+            return verified.contains(packageName);
+        }
+
+        Set<String> verified() {
+            return verified;
         }
 
         Set<String> signerMismatch() {
@@ -1140,91 +1101,44 @@ public final class LockdownPolicyController {
     }
 
     /**
-     * Clears each pending social revocation once Android confirms the package
-     * is blocked, and reports the rest so the pass stays unverified.
-     */
-    private static void verifySocialRevocations(
-            Context context,
-            DevicePolicyManager dpm,
-            ComponentName admin,
-            List<String> errors
-    ) {
-        Set<String> pending = BuiltInBlockExemptionsStore.socialRevocationsPending(context);
-        if (pending.isEmpty()) {
-            return;
-        }
-        PackageManager pm = context.getPackageManager();
-        LinkedHashSet<String> remaining = new LinkedHashSet<>();
-        for (String packageName : pending) {
-            if (isAvailable(pm, dpm, admin, packageName)) {
-                remaining.add(packageName);
-                errors.add(BuiltInBlockExemptions.SOCIAL_REVOCATION_UNVERIFIED_ERROR + ":" + packageName);
-            }
-        }
-        if (!remaining.equals(pending)) {
-            BuiltInBlockExemptionsStore.setSocialRevocationsPending(context, remaining);
-        }
-    }
-
-    /**
-     * Reads back from Android whether each exempt package is actually available
-     * — neither hidden nor suspended — stores it as the console's evidence, and
-     * audits automatic transitions: a Chrome grant or revocation, and an
-     * approved application whose signer no longer matches.
+     * Reads back from Android what the pass left visible, stores it for the
+     * console bound to the decision it describes, and audits a Chrome
+     * visibility change with the observed Android result. A read that throws
+     * is recorded as "not visible" for display only; it never changes state.
      */
     private static void recordExemptionReadback(
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            BuiltInBlockExemptions.Settings exemptions,
             SocialPass social,
-            ChromeFilterExemption.State chromeState,
-            boolean chromeGranted
+            ChromeFilterExemption.Decision chrome,
+            List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
-        boolean chromeAvailable = chromeGranted
-                && isAvailable(pm, dpm, admin, BuiltInBlockExemptions.CHROME);
-        LinkedHashSet<String> socialAvailable = new LinkedHashSet<>();
+        boolean chromeVisible = observedVisible(pm, dpm, admin, BuiltInBlockExemptions.CHROME);
+        LinkedHashSet<String> socialVisible = new LinkedHashSet<>();
         for (String packageName : social.approved()) {
-            if (social.keepsAvailable(packageName) && isAvailable(pm, dpm, admin, packageName)) {
-                socialAvailable.add(packageName);
+            if (observedVisible(pm, dpm, admin, packageName)) {
+                socialVisible.add(packageName);
             }
         }
         BuiltInBlockExemptionsStore.Readback previous = BuiltInBlockExemptionsStore.readback(context);
-        BuiltInBlockExemptionsStore.Readback current = new BuiltInBlockExemptionsStore.Readback(
-                chromeState, chromeAvailable, socialAvailable, social.signerMismatch());
-        if (previous == null || previous.chromeConfirmedAvailable() != chromeAvailable
-                || previous.chromeState() != chromeState) {
-            if (chromeAvailable || (previous != null && previous.chromeConfirmedAvailable())) {
-                AuditLog.append(context, "builtin-exemption:chrome:"
-                        + (chromeAvailable ? "granted" : "revoked") + ":" + chromeState.name());
-            }
+        if (previous != null && previous.chromeVisible() != chromeVisible) {
+            AuditLog.append(context, "builtin-exemption: chrome "
+                    + (chromeVisible ? "shown" : "hidden") + " (decision=" + chrome.name()
+                    + ", android hidden=" + !chromeVisible + ")");
         }
-        for (String packageName : social.signerMismatch()) {
-            if (previous == null || !previous.socialSignerMismatch().contains(packageName)) {
-                AuditLog.append(context, "builtin-exemption:signer-mismatch:" + packageName);
-            }
+        boolean saved = BuiltInBlockExemptionsStore.saveReadback(context,
+                new BuiltInBlockExemptionsStore.Readback(exemptions.auditText(), chrome,
+                        chromeVisible, socialVisible, social.signerMismatch()));
+        if (!saved) {
+            errors.add("builtin-exemption-readback-not-saved");
         }
-        BuiltInBlockExemptionsStore.saveReadback(context, current);
     }
 
-    /**
-     * Writes the audited outcome of an accepted exemption change, once, under
-     * its change ID. Called by the pass that enforced it, or by the next pass
-     * when the process died in between.
-     */
-    public static void flushExemptionChangeAudit(Context context, List<String> errors) {
-        String change = BuiltInBlockExemptionsStore.takePendingChange(context);
-        if (change == null) {
-            return;
-        }
-        String[] parts = change.split("\\|", -1);
-        String outcome = errors.isEmpty() ? "verified" : "unverified:" + summarizeErrors(errors);
-        AuditLog.append(context, "builtin-exemption:change:" + parts[0]
-                + (parts.length == 4 ? ":" + parts[1] + ":" + parts[2] + " -> " + parts[3] : "")
-                + ":" + outcome);
-    }
-
-    private static boolean isAvailable(
+    /** Installed, neither hidden nor suspended. Anything unreadable is not visible. */
+    private static boolean observedVisible(
             PackageManager pm,
             DevicePolicyManager dpm,
             ComponentName admin,
@@ -1237,29 +1151,20 @@ public final class LockdownPolicyController {
             return !dpm.isApplicationHidden(admin, packageName)
                     && !dpm.isPackageSuspended(admin, packageName);
         } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
-            // Unreadable is not proof of availability; a pending revocation
-            // that cannot be read stays pending through the caller's check.
             return false;
         }
     }
 
-    /** Chrome as seen through DevicePolicyManager, every operation read back by the caller. */
+    /** Chrome as seen through DevicePolicyManager. */
     private static final class AndroidChromeGateway implements ChromeFilterExemption.Gateway {
         private final Context context;
         private final DevicePolicyManager dpm;
         private final ComponentName admin;
-        private final HomeFilterPolicy.Settings homeFilter;
 
-        AndroidChromeGateway(
-                Context context,
-                DevicePolicyManager dpm,
-                ComponentName admin,
-                HomeFilterPolicy.Settings homeFilter
-        ) {
+        AndroidChromeGateway(Context context, DevicePolicyManager dpm, ComponentName admin) {
             this.context = context;
             this.dpm = dpm;
             this.admin = admin;
-            this.homeFilter = homeFilter;
         }
 
         @Override
@@ -1274,21 +1179,8 @@ public final class LockdownPolicyController {
         }
 
         @Override
-        public BuiltInBlockExemptions.FilterEvidence filterEvidence() {
-            return HomeFilterController.chromeFilterEvidence(context, dpm, admin, homeFilter);
-        }
-
-        @Override
-        public String pacUrl() {
-            if (homeFilter == null || !homeFilter.configured()) {
-                throw new IllegalStateException("home-filter-not-configured");
-            }
-            return homeFilter.config().pacUrl();
-        }
-
-        @Override
         @SuppressWarnings("deprecation")
-        public java.util.Map<String, Object> restrictions() {
+        public Map<String, Object> restrictions() {
             android.os.Bundle bundle = dpm.getApplicationRestrictions(admin, BuiltInBlockExemptions.CHROME);
             java.util.LinkedHashMap<String, Object> values = new java.util.LinkedHashMap<>();
             if (bundle != null) {
@@ -1300,14 +1192,16 @@ public final class LockdownPolicyController {
         }
 
         @Override
-        public void setRestrictions(java.util.Map<String, Object> values) {
+        public void setRestrictions(Map<String, Object> values) {
             android.os.Bundle bundle = new android.os.Bundle();
-            for (java.util.Map.Entry<String, Object> entry : values.entrySet()) {
+            for (Map.Entry<String, Object> entry : values.entrySet()) {
                 Object value = entry.getValue();
                 if (value instanceof Boolean flag) {
                     bundle.putBoolean(entry.getKey(), flag);
                 } else if (value instanceof Integer number) {
                     bundle.putInt(entry.getKey(), number);
+                } else if (value instanceof Long number) {
+                    bundle.putLong(entry.getKey(), number);
                 } else if (value instanceof String text) {
                     bundle.putString(entry.getKey(), text);
                 } else if (value instanceof String[] list) {
@@ -1316,10 +1210,9 @@ public final class LockdownPolicyController {
                     bundle.putBundle(entry.getKey(), nested);
                 } else if (value instanceof android.os.Parcelable[] parcels) {
                     bundle.putParcelableArray(entry.getKey(), parcels);
-                } else if (value instanceof Long number) {
-                    bundle.putLong(entry.getKey(), number);
                 }
-                // Other value types are not used by Chrome's policy reader.
+                // An administrator-set value of another type is not carried over;
+                // the read-back below only checks the required keys.
             }
             dpm.setApplicationRestrictions(admin, BuiltInBlockExemptions.CHROME, bundle);
         }
@@ -1337,24 +1230,6 @@ public final class LockdownPolicyController {
         @Override
         public boolean hidden() {
             return dpm.isApplicationHidden(admin, BuiltInBlockExemptions.CHROME);
-        }
-
-        @Override
-        public void setSuspended(boolean suspended) {
-            String[] failed = dpm.setPackagesSuspended(
-                    admin, new String[]{BuiltInBlockExemptions.CHROME}, suspended);
-            if (failed != null && failed.length > 0) {
-                throw new IllegalStateException("suspension-refused");
-            }
-        }
-
-        @Override
-        public boolean suspended() {
-            try {
-                return dpm.isPackageSuspended(admin, BuiltInBlockExemptions.CHROME);
-            } catch (PackageManager.NameNotFoundException exception) {
-                throw new IllegalStateException("chrome-missing", exception);
-            }
         }
     }
 

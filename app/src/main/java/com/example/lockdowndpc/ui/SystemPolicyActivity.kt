@@ -345,14 +345,20 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             }
             working = false
             revision++
-            val result = outcome.getOrNull()?.result()
+            val changed = outcome.getOrNull()
+            val result = changed?.result()
             message = when {
                 outcome.exceptionOrNull() is SecurityException -> UiMessage(
                     context.getString(R.string.system_policy_error_auth),
                     isError = true,
                 )
-                outcome.isFailure -> UiMessage(
+                outcome.isFailure ||
+                    changed?.status() == BuiltInExemptionsController.Status.NOT_SAVED -> UiMessage(
                     context.getString(R.string.system_policy_exempt_change_refused),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_audit_not_saved),
                     isError = true,
                 )
                 result == null -> null

@@ -62,6 +62,7 @@ import com.example.lockdowndpc.kiosk.KioskController
 import com.example.lockdowndpc.kiosk.KioskLabels
 import com.example.lockdowndpc.kiosk.KioskMode
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
+import com.example.lockdowndpc.policy.BuiltInExemptionsController
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.LockdownPackages
 import com.example.lockdowndpc.security.AppLabelSanitizer
@@ -946,7 +947,10 @@ private fun loadKioskAppRows(context: Context): List<KioskAppRow> {
             packageName == context.packageName,
         )
     }
-    return KioskAppCatalog.selectable(candidates)
+    return KioskAppCatalog.selectable(
+        candidates,
+        BuiltInExemptionsController.verifiedSocial(context),
+    )
         .map { KioskAppRow(it.packageName(), it.label()) }
 }
 
