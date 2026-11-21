@@ -20,15 +20,18 @@ import androidx.activity.OnBackPressedCallback;
 import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.lockdowndpc.R;
+import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
+
+import java.util.function.IntConsumer;
 
 /**
  * Applies the local Device Owner baseline before returning to the setup wizard.
  *
  * <p>The pass runs through {@link PolicyReconciliationCoordinator#reconcileForProvisioning},
  * so it shares the policy thread, the reconciliation record and the failure
- * handling of every other pass. The wizard receives {@code RESULT_OK} only for a
- * verified pass.
+ * handling of every other pass. The wizard receives {@code RESULT_OK} when the
+ * pass is verified or the request meets the baseline skip criteria.
  */
 public final class PolicyComplianceActivity extends AppCompatActivity {
     private static final String TAG = "PolicyCompliance";
@@ -44,7 +47,10 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
      * relaunched activity waits for the same pass instead of starting a second
      * one.
      */
-    private static PendingCompliance pending;
+    private static final ProvisioningFlow.PendingCompliance PENDING =
+            new ProvisioningFlow.PendingCompliance(MAIN::post);
+
+    private final IntConsumer deliverResult = this::deliver;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -57,44 +63,28 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
             return;
         }
 
-        showProgress();
-        // Back would hand the wizard a cancelled result while the baseline is
-        // still being applied, so it is ignored until the pass reports.
-        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                // Swallowed: this screen closes itself when the pass completes.
-            }
-        });
-
-        if (pending == null) {
-            pending = new PendingCompliance();
-            Context appContext = getApplicationContext();
-            boolean applyBaseline = ProvisioningFlow.shouldApplyBaseline(
-                    isUserSetupComplete(appContext), isComplianceDone(appContext));
-            PendingCompliance started = pending;
-            ProvisioningFlow.completeCompliance(
-                    applyBaseline,
-                    report -> PolicyReconciliationCoordinator.reconcileForProvisioning(
-                            appContext,
-                            verified -> {
-                                if (Boolean.TRUE.equals(verified)) {
-                                    markComplianceDone(appContext);
-                                } else {
-                                    Log.e(TAG, "Baseline policy was not verified");
-                                }
-                                report.accept(verified);
-                            }),
-                    resultCode -> MAIN.post(() -> started.complete(resultCode)));
-        }
-        pending.attach(this);
+        Context appContext = getApplicationContext();
+        PENDING.request(
+                () -> ProvisioningFlow.shouldApplyBaseline(
+                        isUserSetupComplete(appContext), isComplianceDone(appContext),
+                        AllowedAppsStore.isProtectionEnabled(appContext)),
+                this::showProgress,
+                report -> PolicyReconciliationCoordinator.reconcileForProvisioning(
+                        appContext,
+                        verified -> {
+                            if (Boolean.TRUE.equals(verified)) {
+                                markComplianceDone(appContext);
+                            } else {
+                                Log.e(TAG, "Baseline policy was not verified");
+                            }
+                            report.accept(verified);
+                        }),
+                deliverResult);
     }
 
     @Override
     protected void onDestroy() {
-        if (pending != null) {
-            pending.detach(this);
-        }
+        PENDING.detach(deliverResult);
         super.onDestroy();
     }
 
@@ -107,6 +97,15 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
     }
 
     private void showProgress() {
+        // Back would hand the wizard a cancelled result while the baseline is
+        // still being applied, so it is ignored until the pass reports.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // This screen closes itself when the pass completes.
+            }
+        });
+
         int padding = Math.round(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, 24, getResources().getDisplayMetrics()));
         LinearLayout root = new LinearLayout(this);
@@ -135,8 +134,8 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         try {
             return Settings.Secure.getInt(context.getContentResolver(), USER_SETUP_COMPLETE, 0) == 1;
         } catch (SecurityException exception) {
-            // Unreadable: rely on the stored flag, and apply the baseline when
-            // neither says setup is over. Applying is the protective default.
+            // An unreadable setup state leaves the stored compliance flag as
+            // the only reason to skip the baseline.
             Log.w(TAG, "Setup state is not readable", exception);
             return false;
         }
@@ -151,40 +150,5 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                 .putBoolean(KEY_COMPLIANCE_DONE, true)
                 .commit();
-    }
-
-    /** One compliance pass and the activity, if any, waiting for its result. Main thread only. */
-    private static final class PendingCompliance {
-        private PolicyComplianceActivity host;
-
-        void attach(PolicyComplianceActivity activity) {
-            host = activity;
-        }
-
-        void detach(PolicyComplianceActivity activity) {
-            if (host == activity) {
-                host = null;
-            }
-        }
-
-        void complete(int code) {
-            if (host == null) {
-                // Nobody is waiting: the wizard abandoned this request. Drop the
-                // result so a later request decides afresh rather than receiving
-                // a stale answer. A verified pass is remembered by the stored
-                // flag, so that request still succeeds without re-applying.
-                if (pending == this) {
-                    pending = null;
-                }
-                return;
-            }
-            PolicyComplianceActivity activity = host;
-            // The pass is over: the next request decides afresh.
-            if (pending == this) {
-                pending = null;
-            }
-            host = null;
-            activity.deliver(code);
-        }
     }
 }

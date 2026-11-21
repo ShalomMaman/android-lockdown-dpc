@@ -10,10 +10,15 @@ import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 
 public final class ProvisioningFlowTest {
     @Test
@@ -46,7 +51,7 @@ public final class ProvisioningFlowTest {
         AtomicInteger passes = new AtomicInteger();
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(true, report -> {
+        ProvisioningFlow.completeCompliance(report -> {
             passes.incrementAndGet();
             report.accept(true);
         }, results::add);
@@ -59,7 +64,7 @@ public final class ProvisioningFlowTest {
     public void unverifiedPassReturnsCanceled() {
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(true, report -> report.accept(false), results::add);
+        ProvisioningFlow.completeCompliance(report -> report.accept(false), results::add);
 
         assertEquals(List.of(RESULT_CANCELED), results);
     }
@@ -68,7 +73,7 @@ public final class ProvisioningFlowTest {
     public void missingVerificationIsTreatedAsFailure() {
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(true, report -> report.accept(null), results::add);
+        ProvisioningFlow.completeCompliance(report -> report.accept(null), results::add);
 
         assertEquals(List.of(RESULT_CANCELED), results);
     }
@@ -77,7 +82,7 @@ public final class ProvisioningFlowTest {
     public void passThatCannotStartReturnsCanceled() {
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(true, report -> {
+        ProvisioningFlow.completeCompliance(report -> {
             throw new IllegalStateException("Policy queue unavailable");
         }, results::add);
 
@@ -88,7 +93,7 @@ public final class ProvisioningFlowTest {
     public void resultIsReportedOnlyOnce() {
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(true, report -> {
+        ProvisioningFlow.completeCompliance(report -> {
             report.accept(true);
             report.accept(false);
         }, results::add);
@@ -97,21 +102,77 @@ public final class ProvisioningFlowTest {
     }
 
     @Test
-    public void baselineNotDueReturnsOkWithoutRunningAPass() {
+    public void baselineNotDueReturnsOkInlineWithoutShowingProgressOrStartingAPass() {
+        Queue<Runnable> main = new ArrayDeque<>();
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
         List<Integer> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(false, report -> {
-            throw new AssertionError("must not run");
+        pending.request(() -> false, () -> {
+            throw new AssertionError("progress must not be shown");
+        }, report -> {
+            throw new AssertionError("a pass must not start");
         }, results::add);
 
         assertEquals(List.of(RESULT_OK), results);
+        assertTrue(main.isEmpty());
     }
 
     @Test
-    public void baselineIsAppliedOnlyDuringFirstSetup() {
-        assertTrue(ProvisioningFlow.shouldApplyBaseline(false, false));
-        assertFalse(ProvisioningFlow.shouldApplyBaseline(true, false));
-        assertFalse(ProvisioningFlow.shouldApplyBaseline(false, true));
-        assertFalse(ProvisioningFlow.shouldApplyBaseline(true, true));
+    public void duplicateLaunchesShareOnePassAndEveryLiveRequestReceivesTheResult() {
+        Queue<Runnable> main = new ArrayDeque<>();
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
+        AtomicReference<Consumer<Boolean>> verify = new AtomicReference<>();
+        AtomicInteger progress = new AtomicInteger();
+        List<Integer> first = new ArrayList<>();
+        List<Integer> second = new ArrayList<>();
+
+        pending.request(() -> true, progress::incrementAndGet, verify::set, first::add);
+        pending.request(() -> false, progress::incrementAndGet, report -> {
+            throw new AssertionError("a duplicate must not start another pass");
+        }, second::add);
+        assertEquals(2, progress.get());
+        assertTrue(first.isEmpty());
+        assertTrue(second.isEmpty());
+
+        verify.get().accept(true);
+        main.remove().run();
+
+        assertEquals(List.of(RESULT_OK), first);
+        assertEquals(List.of(RESULT_OK), second);
+        assertTrue(main.isEmpty());
+    }
+
+    @Test
+    public void destroyingALaterLaunchLeavesTheEarlierRequestWaitingForTheSameResult() {
+        Queue<Runnable> main = new ArrayDeque<>();
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
+        AtomicReference<Consumer<Boolean>> verify = new AtomicReference<>();
+        List<Integer> first = new ArrayList<>();
+        List<Integer> destroyed = new ArrayList<>();
+        IntConsumer deliverDestroyed = destroyed::add;
+
+        pending.request(() -> true, () -> {}, verify::set, first::add);
+        pending.request(() -> true, () -> {}, report -> {
+            throw new AssertionError("a duplicate must not start another pass");
+        }, deliverDestroyed);
+        pending.detach(deliverDestroyed);
+
+        verify.get().accept(false);
+        main.remove().run();
+
+        assertEquals(List.of(RESULT_CANCELED), first);
+        assertTrue(destroyed.isEmpty());
+    }
+
+    @Test
+    public void baselineIsSkippedOnlyAfterRecordedComplianceOrCompletedSetupWithProtection() {
+        assertTrue(ProvisioningFlow.shouldApplyBaseline(false, false, false));
+        assertTrue(ProvisioningFlow.shouldApplyBaseline(false, false, true));
+        assertTrue(ProvisioningFlow.shouldApplyBaseline(true, false, false));
+        assertFalse(ProvisioningFlow.shouldApplyBaseline(true, false, true));
+        assertFalse(ProvisioningFlow.shouldApplyBaseline(false, true, false));
+        assertFalse(ProvisioningFlow.shouldApplyBaseline(false, true, true));
+        assertFalse(ProvisioningFlow.shouldApplyBaseline(true, true, false));
+        assertFalse(ProvisioningFlow.shouldApplyBaseline(true, true, true));
     }
 }

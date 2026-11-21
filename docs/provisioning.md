@@ -204,12 +204,12 @@ passphrase, the administrator PIN or a recovery code.
 > console uses, recorded as `provisioning-compliance`. Protection is switched
 > on by that pass. The wizard continues only when Android has read the whole
 > policy back; an unverified or crashed pass cancels setup, and the failure is
-> kept in the policy status and the audit log. A compliance request that
-> arrives after setup has finished, or after a verified pass, is acknowledged
-> without applying the baseline again, so it never overrides a protection
-> state an administrator has since changed. Both handlers require
-> `BIND_DEVICE_ADMIN`. After setup, check ownership and policy read-back as
-> described below. QR enrolment on physical devices is pending in
+> kept in the policy status and the audit log. A later compliance request
+> returns immediately when a verified compliance pass was recorded or when
+> setup is complete and protection is already enabled. The recorded flag
+> preserves an administrator's later decision to pause protection. Both
+> handlers require `BIND_DEVICE_ADMIN`. After setup, check ownership and policy
+> read-back as described below. QR enrolment on physical devices is pending in
 > [Group Q](hardware-validation.md#group-q--android-12-qr-enrolment).
 
 ## Home filter
@@ -346,19 +346,21 @@ three:
 2. **The console.** Open Device Guard. The status surface reads
    `isDeviceOwnerApp` directly, so it shows ownership rather than an assumption.
 
-3. **A verified policy apply.** On Android 12 or later with QR enrolment, the
-   baseline was already applied during setup: confirm the console reports it
-   as applied and that the device health report names
-   `provisioning-compliance` as the last verified reconciliation.
-   Otherwise, apply the intended protection profile and confirm the console
-   reports it as applied. Device Guard never reports a requested policy as
-   active until it has read the value back from the platform, so an "applied"
-   state is evidence and a "failed" state is a real OEM refusal to
-   investigate — not a display defect. Once the baseline is applied, the
-   Settings reset entry is gone; see
+3. **A verified policy apply.** After Android 12+ QR enrolment, check the
+   baseline before changing policy in the console. Confirm the status reads
+   **Protection is active and verified**. In Device Health, check that
+   **Policy verification** reads **Verified against the platform** and that
+   **Last reconciliation** shows **Result: Verified** and a **When** timestamp.
+   The clipboard export includes the latest trigger. Once protection is on,
+   a later pass such as `device-admin-service-started` can replace the
+   `provisioning-compliance` record. The result and timestamp describe the
+   most recent pass. For other enrolment methods, apply
+   the intended protection profile before checking the console. Investigate
+   a failed verification before handing over the device. Confirm the
+   Settings factory-reset option is unavailable. See
    [the recovery section](#recovering-a-device-with-the-wrong-component-or-identity).
-   On production builds USB debugging is disabled by the baseline, so take
-   this evidence from the console, not from ADB.
+   On production builds, the baseline disables USB debugging. Use the console
+   for policy evidence and Settings for the factory-reset check.
 
 An enrolment that satisfies 1 and 2 but not 3 is an OEM policy problem on a
 correctly owned device. Record which restriction failed before continuing; that

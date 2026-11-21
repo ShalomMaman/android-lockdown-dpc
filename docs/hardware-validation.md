@@ -234,13 +234,16 @@ containing both handlers.
    applied baseline.
 4. Confirm Device Owner status using the platform and console checks in
    [Prove Device Owner took effect](provisioning.md#prove-device-owner-took-effect).
-5. Before any console action, record the policy status and confirm the device
-   health report names `provisioning-compliance` as the last reconciliation,
-   with a verified outcome. Confirm the
-   Settings reset entry is disabled. On a pilot build, also check the managed
-   user's restrictions with `adb shell dumpsys user` and confirm
-   `no_factory_reset` is present. On a production build USB debugging is
-   disabled, so take this evidence from the console only.
+5. Before changing policy in the console, record **Protection is active and
+   verified**. In Device Health, confirm **Policy verification** reads
+   **Verified against the platform** and **Last reconciliation** shows
+   **Result: Verified** and a **When** timestamp. The clipboard export shows
+   the latest trigger, which can be `device-admin-service-started` if that
+   pass replaced the `provisioning-compliance` record. Confirm the Settings
+   factory-reset option is unavailable. On a pilot build, also check the
+   managed user's restrictions with `adb shell dumpsys user` and confirm
+   `no_factory_reset` is present. On a production build, use the console and
+   Settings because the baseline disables USB debugging.
 
 **Expected:** setup completes with Device Guard as Device Owner, with no work
 profile or app interaction during the two callbacks. The baseline policy is

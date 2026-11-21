@@ -4,13 +4,16 @@ import static android.app.Activity.RESULT_CANCELED;
 import static android.app.Activity.RESULT_OK;
 import static android.app.admin.DevicePolicyManager.PROVISIONING_MODE_FULLY_MANAGED_DEVICE;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
-/** Platform-free decisions behind the two setup wizard handlers. */
+/** Platform-free logic behind the two setup wizard handlers. */
 final class ProvisioningFlow {
     private ProvisioningFlow() {}
 
@@ -30,37 +33,74 @@ final class ProvisioningFlow {
     /**
      * Whether a compliance request still has to apply the baseline.
      *
-     * <p>The wizard asks once, during setup. A request that arrives after setup
-     * finished, or after an earlier request was verified, must not re-apply the
-     * baseline: that would override protection an administrator has since
-     * paused.
+     * <p>Some setup wizards can mark setup complete before they request compliance.
+     * Skip only when a verified compliance pass was recorded or when setup is
+     * complete and protection is already enabled. The recorded flag also preserves
+     * an administrator's decision to pause protection after provisioning.
      */
-    static boolean shouldApplyBaseline(boolean userSetupComplete, boolean complianceDone) {
-        return !userSetupComplete && !complianceDone;
+    static boolean shouldApplyBaseline(
+            boolean userSetupComplete, boolean complianceDone, boolean protectionEnabled
+    ) {
+        return !complianceDone && !(userSetupComplete && protectionEnabled);
+    }
+
+    /** Shares one pass among all live requests. All state is accessed on the main thread. */
+    static final class PendingCompliance {
+        private final Consumer<Runnable> postToMain;
+        // Null means no pass is in flight. An empty set still has a pass running.
+        private Set<IntConsumer> waiters;
+
+        PendingCompliance(Consumer<Runnable> postToMain) {
+            this.postToMain = postToMain;
+        }
+
+        void request(
+                BooleanSupplier baselineDue, Runnable showProgress, CompliancePass pass,
+                IntConsumer deliver
+        ) {
+            boolean start = waiters == null;
+            if (start) {
+                if (!baselineDue.getAsBoolean()) {
+                    deliver.accept(RESULT_OK);
+                    return;
+                }
+                waiters = new LinkedHashSet<>();
+            }
+            waiters.add(deliver);
+            showProgress.run();
+            if (start) {
+                completeCompliance(pass, code -> postToMain.accept(() -> finish(code)));
+            }
+        }
+
+        void detach(IntConsumer deliver) {
+            if (waiters != null) {
+                waiters.remove(deliver);
+            }
+        }
+
+        private void finish(int code) {
+            Set<IntConsumer> completed = waiters;
+            waiters = null;
+            for (IntConsumer deliver : completed) {
+                deliver.accept(code);
+            }
+        }
     }
 
     /**
      * Runs the compliance step and reports the activity result exactly once.
      *
-     * <p>{@code RESULT_OK} is returned only for a verified pass, or when the
-     * baseline is not due any more. An unverified pass, a pass that threw, or a
-     * pass that could not be started returns {@code RESULT_CANCELED}.
+     * <p>A verified pass returns {@code RESULT_OK}. An unverified pass, a pass
+     * that threw, or a pass that could not be started returns {@code RESULT_CANCELED}.
      */
-    static void completeCompliance(
-            boolean applyBaseline,
-            CompliancePass pass,
-            IntConsumer result
-    ) {
+    static void completeCompliance(CompliancePass pass, IntConsumer result) {
         AtomicBoolean reported = new AtomicBoolean();
         IntConsumer once = code -> {
             if (reported.compareAndSet(false, true)) {
                 result.accept(code);
             }
         };
-        if (!applyBaseline) {
-            once.accept(RESULT_OK);
-            return;
-        }
         try {
             pass.start(verified -> once.accept(complianceResult(verified)));
         } catch (RuntimeException exception) {
