@@ -55,6 +55,11 @@ public final class HomeFilterController {
             if (settings.configured()) {
                 throw new IllegalStateException("Home filter configuration is already present");
             }
+            if (BuiltInBlockExemptions.isBuiltInBlocked(config.vpnPackage())) {
+                // A blocked browser, store or social application entered as the
+                // VPN would inherit the VPN's visibility override.
+                throw new IllegalArgumentException("A built-in blocked package cannot be the VPN");
+            }
             return new HomeFilterPolicy.Settings(config, true, ca, false);
         });
     }
@@ -91,9 +96,6 @@ public final class HomeFilterController {
             HomeFilterPolicy.Settings after = operation.apply(before);
             if (!before.equals(after)) {
                 HomeFilterStore.write(context, after);
-                // A canary result describes the configuration it ran against.
-                // The browser exemption must not outlive that configuration.
-                BuiltInBlockExemptionsStore.clearCanary(context);
                 AuditLog.append(context, "Home filter settings changed by administrator");
             }
             if (AllowedAppsStore.isProtectionEnabled(context)) {
@@ -108,17 +110,23 @@ public final class HomeFilterController {
     /**
      * Device-owner lifecycle entry point. It only reasserts saved administrator intent.
      *
+     * @param holdTeardown a Chrome revocation is not yet confirmed: the filter
+     *                     keeps its VPN, proxy and CA rather than remove them
      * @return whether the filter is enabled and this pass read its Android
-     *         settings back as confirmed; the browser exemption consumes it
+     *         settings back as confirmed; the Chrome exemption consumes it
      */
     static boolean reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
-                             List<String> errors) {
+                             List<String> errors, boolean holdTeardown) {
         HomeFilterPolicy.Settings settings = readStored(context);
         if (settings == null) {
             errors.add(CORRUPT_CONFIGURATION);
             return false;
         }
         if (!settings.configured()) {
+            return false;
+        }
+        if (holdTeardown && (!settings.enabled() || settings.removeCa())) {
+            errors.add("home-filter:teardown-held-chrome-revocation-pending");
             return false;
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(settings, Build.VERSION.SDK_INT,
@@ -141,26 +149,31 @@ public final class HomeFilterController {
     }
 
     /**
-     * A read-only check, made before the package pass, of whether the filter's
-     * Android settings are confirmed right now. It lets a pass keep an exempt
-     * browser available without hiding and re-showing it; {@link #reconcile}
-     * remains the final word, and a pass re-blocks the browser when the two
-     * disagree.
+     * What the home filter proves right now, for the Chrome exemption, from a
+     * read-only inspection of Android state. Every condition is one Device
+     * Guard enforces itself: the always-on VPN in lockdown on the approved,
+     * signer-verified package with no exemptions, the global PAC proxy, the
+     * profile restrictions and private DNS, and the CA when the profile has
+     * one. Anything unreadable counts as unproven.
      */
-    static boolean androidSettingsConfirmedNow(Context context, DevicePolicyManager dpm,
-                                               ComponentName admin,
-                                               HomeFilterPolicy.Settings settings) {
+    static BuiltInBlockExemptions.FilterEvidence chromeFilterEvidence(
+            Context context, DevicePolicyManager dpm, ComponentName admin,
+            HomeFilterPolicy.Settings settings) {
         if (settings == null || !settings.enabled() || !settings.configured()
                 || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
-            return false;
+            return BuiltInBlockExemptions.FilterEvidence.NONE;
         }
         try {
             HomeFilterPolicy.Report report = HomeFilterStore.includeApplyEvidence(context, true,
                     HomeFilterPolicy.inspect(settings, Build.VERSION.SDK_INT,
                             new AndroidGateway(context, dpm, admin)));
-            return report.androidSettingsConfirmed(settings);
+            return new BuiltInBlockExemptions.FilterEvidence(
+                    report.androidSettingsConfirmed(settings),
+                    BuiltInBlockExemptions.caSatisfied(settings.ca() != null, settings.removeCa(),
+                            report.ca() == HomeFilterPolicy.State.CONFIRMED),
+                    !BuiltInBlockExemptions.isBuiltInBlocked(settings.config().vpnPackage()));
         } catch (RuntimeException exception) {
-            return false;
+            return BuiltInBlockExemptions.FilterEvidence.NONE;
         }
     }
 

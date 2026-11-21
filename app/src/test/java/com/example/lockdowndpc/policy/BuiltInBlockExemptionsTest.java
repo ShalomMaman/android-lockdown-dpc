@@ -1,270 +1,201 @@
 package com.example.lockdowndpc.policy;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import com.example.lockdowndpc.policy.BuiltInBlockExemptions.BrowserState;
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions.FilterEvidence;
-import com.example.lockdowndpc.policy.BuiltInBlockExemptions.LinkRoute;
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Settings;
 
 import org.junit.Test;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 
+/** Pure rules of the exemptions: catalogues, signer binding and Chrome's configuration. */
 public final class BuiltInBlockExemptionsTest {
 
-    private static final String CHROME = "com.android.chrome";
-    private static final String FIREFOX = "org.mozilla.firefox";
     private static final String WHATSAPP = "com.whatsapp";
     private static final String TELEGRAM = "org.telegram.messenger";
-    private static final String PLAY_STORE = "com.android.vending";
-
-    private static final FilterEvidence CONFIRMED_NO_CANARY = new FilterEvidence(true, false, false);
-    private static final FilterEvidence CONFIRMED_CANARY_PASSED = new FilterEvidence(true, true, true);
-    private static final FilterEvidence CONFIRMED_CANARY_FAILED = new FilterEvidence(true, true, false);
-    private static final FilterEvidence FILTER_OFF = new FilterEvidence(false, false, false);
-    private static final FilterEvidence FILTER_FAILING_CANARY_PASSED = new FilterEvidence(false, true, true);
-
-    private static String exemptBrowserFor(Settings settings, FilterEvidence evidence) {
-        return BuiltInBlockExemptions.exemptBrowser(
-                settings, BuiltInBlockExemptions.browserState(settings, true, evidence));
-    }
-
-    // --- Defaults -----------------------------------------------------------
+    private static final String SIGNER_A = "aa".repeat(32);
+    private static final String SIGNER_B = "bb".repeat(32);
+    private static final String PAC = "https://filter.example.org/proxy.pac";
 
     @Test
     public void nothingIsExemptByDefault() {
-        Settings none = Settings.NONE;
-        assertFalse(none.any());
-        assertEquals(BrowserState.OFF,
-                BuiltInBlockExemptions.browserState(none, true, CONFIRMED_NO_CANARY));
-        for (String packageName : LockdownPackages.ALWAYS_BLOCKED) {
-            assertFalse(packageName, BuiltInBlockExemptions.keepsAvailable(packageName, none, null));
-        }
-        for (String packageName : LockdownPackages.KNOWN_BROWSER_AND_SOCIAL) {
-            assertFalse(packageName, BuiltInBlockExemptions.keepsAvailable(packageName, none, null));
+        assertFalse(Settings.NONE.any());
+        assertFalse(Settings.NONE.chromeThroughFilter());
+        for (String packageName : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
+            assertFalse(packageName,
+                    BuiltInBlockExemptions.keepsSocialAvailable(packageName, Settings.NONE, SIGNER_A));
         }
     }
 
-    // --- Browser through the filter -----------------------------------------
+    // --- Catalogues -------------------------------------------------------------
 
     @Test
-    public void browserIsBlockedWhenTheHomeFilterIsOff() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        assertEquals(BrowserState.FILTER_UNVERIFIED,
-                BuiltInBlockExemptions.browserState(settings, true, FILTER_OFF));
-        assertNull(exemptBrowserFor(settings, FILTER_OFF));
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(CHROME, settings, null));
-    }
-
-    @Test
-    public void browserIsBlockedWhenTheHomeFilterFailsReadBackEvenIfTheCanaryPassed() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        assertEquals(BrowserState.FILTER_UNVERIFIED,
-                BuiltInBlockExemptions.browserState(settings, true, FILTER_FAILING_CANARY_PASSED));
-        assertNull(exemptBrowserFor(settings, FILTER_FAILING_CANARY_PASSED));
-    }
-
-    @Test
-    public void browserIsBlockedWhileAConfiguredCanaryHasNotPassed() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        assertEquals(BrowserState.CANARY_UNVERIFIED,
-                BuiltInBlockExemptions.browserState(settings, true, CONFIRMED_CANARY_FAILED));
-        assertNull(exemptBrowserFor(settings, CONFIRMED_CANARY_FAILED));
-    }
-
-    @Test
-    public void browserIsAvailableOnlyWhenTheFilterIsConfirmed() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        assertEquals(BrowserState.ACTIVE,
-                BuiltInBlockExemptions.browserState(settings, true, CONFIRMED_NO_CANARY));
-        assertEquals(CHROME, exemptBrowserFor(settings, CONFIRMED_NO_CANARY));
-        assertEquals(CHROME, exemptBrowserFor(settings, CONFIRMED_CANARY_PASSED));
-        assertTrue(BuiltInBlockExemptions.keepsAvailable(
-                CHROME, settings, exemptBrowserFor(settings, CONFIRMED_NO_CANARY)));
-    }
-
-    @Test
-    public void browserIsBlockedAgainOnTheFirstPassAfterTheFilterLapses() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        String before = exemptBrowserFor(settings, CONFIRMED_CANARY_PASSED);
-        String after = exemptBrowserFor(settings, CONFIRMED_CANARY_FAILED);
-        assertEquals(CHROME, before);
-        assertNull(after);
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(CHROME, settings, after));
-    }
-
-    @Test
-    public void aMissingBrowserIsReportedAndNotExempted() {
-        Settings settings = Settings.NONE.withBrowser(FIREFOX);
-        BrowserState state = BuiltInBlockExemptions.browserState(settings, false, CONFIRMED_NO_CANARY);
-        assertEquals(BrowserState.NOT_INSTALLED, state);
-        assertNull(BuiltInBlockExemptions.exemptBrowser(settings, state));
-    }
-
-    @Test
-    public void onlyOneBrowserIsEverAvailable() {
-        Settings settings = Settings.NONE.withBrowser(CHROME).withBrowser(FIREFOX);
-        assertEquals(FIREFOX, settings.browserPackage());
-        String exempt = exemptBrowserFor(settings, CONFIRMED_NO_CANARY);
-        int available = 0;
-        for (String browser : BuiltInBlockExemptions.FILTERABLE_BROWSERS) {
-            if (BuiltInBlockExemptions.keepsAvailable(browser, settings, exempt)) {
-                available++;
-                assertEquals(FIREFOX, browser);
-            }
+    public void theSocialCatalogueIsPositiveAndExcludesBrowsersAndStores() {
+        for (String social : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
+            assertTrue(social, LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(social));
+            assertFalse(social, LockdownPackages.ALWAYS_BLOCKED.contains(social));
+            assertFalse(social, BuiltInBlockExemptions.isAppStore(social));
+            assertFalse(social, BuiltInBlockExemptions.CHROME.equals(social));
         }
-        assertEquals(1, available);
+        for (String browser : new String[]{"org.mozilla.firefox", "com.brave.browser",
+                "com.microsoft.emmx", "com.opera.browser", BuiltInBlockExemptions.CHROME}) {
+            assertFalse(browser, BuiltInBlockExemptions.isExemptableSocial(browser));
+        }
     }
-
-    @Test
-    public void aBrowserCannotBeExemptedThroughTheSocialList() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new Settings(null, Set.of(FIREFOX)));
-        assertThrows(IllegalArgumentException.class,
-                () -> Settings.NONE.withSocial(CHROME, true));
-    }
-
-    @Test
-    public void aPackageOutsideTheBrowserCatalogueIsRefusedAsBrowser() {
-        IllegalArgumentException refused = assertThrows(IllegalArgumentException.class,
-                () -> Settings.NONE.withBrowser("org.example.notabrowser"));
-        assertEquals("browser-not-filterable", refused.getMessage());
-        assertThrows(IllegalArgumentException.class, () -> Settings.NONE.withBrowser(WHATSAPP));
-        assertThrows(IllegalArgumentException.class,
-                () -> Settings.NONE.withBrowser("com.google.android.googlequicksearchbox"));
-    }
-
-    // --- Stores -------------------------------------------------------------
 
     @Test
     public void storesAreNeverExemptable() {
         for (String store : BuiltInBlockExemptions.APP_STORES) {
             assertTrue(store, LockdownPackages.ALWAYS_BLOCKED.contains(store));
-            assertFalse(store, BuiltInBlockExemptions.isFilterableBrowser(store));
             assertFalse(store, BuiltInBlockExemptions.isExemptableSocial(store));
-            assertThrows(IllegalArgumentException.class, () -> Settings.NONE.withBrowser(store));
-            assertThrows(IllegalArgumentException.class, () -> Settings.NONE.withSocial(store, true));
-            // Even a caller that passed the store as "the exempt browser" gets nothing.
-            assertFalse(store, BuiltInBlockExemptions.keepsAvailable(store, Settings.NONE, store));
-        }
-        assertTrue(BuiltInBlockExemptions.isAppStore(PLAY_STORE));
-    }
-
-    @Test
-    public void catalogueHalvesAreDisjointAndCoverTheBuiltInLists() {
-        for (String browser : BuiltInBlockExemptions.FILTERABLE_BROWSERS) {
-            assertTrue(browser, LockdownPackages.ALWAYS_BLOCKED.contains(browser)
-                    || LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(browser));
-            assertFalse(browser, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL.contains(browser));
-            assertFalse(browser, BuiltInBlockExemptions.APP_STORES.contains(browser));
-        }
-        for (String social : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
-            assertTrue(social, LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(social));
-        }
-        for (String known : LockdownPackages.KNOWN_BROWSER_AND_SOCIAL) {
-            assertTrue(known, BuiltInBlockExemptions.isFilterableBrowser(known)
-                    || BuiltInBlockExemptions.isExemptableSocial(known));
-        }
-        for (String essential : LockdownPackages.ESSENTIAL_SYSTEM) {
-            assertFalse(essential, BuiltInBlockExemptions.isFilterableBrowser(essential));
-            assertFalse(essential, BuiltInBlockExemptions.isExemptableSocial(essential));
+            assertThrows(IllegalArgumentException.class, () -> Settings.NONE.withSocial(store, SIGNER_A));
+            assertFalse(store, BuiltInBlockExemptions.keepsSocialAvailable(store, Settings.NONE, SIGNER_A));
         }
     }
 
-    // --- Social and messaging -----------------------------------------------
-
     @Test
-    public void socialPackageIsExemptOnlyWhenListed() {
-        Settings settings = Settings.NONE.withSocial(WHATSAPP, true);
-        assertTrue(BuiltInBlockExemptions.keepsAvailable(WHATSAPP, settings, null));
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(TELEGRAM, settings, null));
-        assertFalse(BuiltInBlockExemptions.keepsAvailable("com.instagram.android", settings, null));
-        // A social exemption never opens a browser.
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(CHROME, settings, null));
+    public void builtInBlockedPackagesCannotServeAsTheVpn() {
+        assertTrue(BuiltInBlockExemptions.isBuiltInBlocked(BuiltInBlockExemptions.CHROME));
+        assertTrue(BuiltInBlockExemptions.isBuiltInBlocked("org.mozilla.firefox"));
+        assertTrue(BuiltInBlockExemptions.isBuiltInBlocked("com.android.vending"));
+        assertFalse(BuiltInBlockExemptions.isBuiltInBlocked(HomeFilterPolicy.DEFAULT_VPN_PACKAGE));
     }
 
     @Test
-    public void aSocialExemptionDoesNotDependOnTheHomeFilter() {
-        Settings settings = Settings.NONE.withSocial(WHATSAPP, true).withBrowser(CHROME);
-        String exempt = exemptBrowserFor(settings, FILTER_OFF);
-        assertNull(exempt);
-        assertTrue(BuiltInBlockExemptions.keepsAvailable(WHATSAPP, settings, exempt));
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(CHROME, settings, exempt));
+    public void aBuiltInBlockedVpnPackageDoesNotInheritVpnVisibility() {
+        HomeFilterPolicy.Settings chromeAsVpn = new HomeFilterPolicy.Settings(
+                new HomeFilterPolicy.Config(BuiltInBlockExemptions.CHROME, PAC), true, null, false);
+        assertFalse(chromeAsVpn.keepsVpnVisible(BuiltInBlockExemptions.CHROME));
+        assertTrue(chromeAsVpn.packageShouldBeHidden(BuiltInBlockExemptions.CHROME, true));
+    }
+
+    // --- Social exemptions: signer binding ---------------------------------------
+
+    @Test
+    public void socialPackageIsExemptOnlyWhenListedAndSignedByThePinnedSigner() {
+        Settings settings = Settings.NONE.withSocial(WHATSAPP, SIGNER_A);
+        assertTrue(BuiltInBlockExemptions.keepsSocialAvailable(WHATSAPP, settings, SIGNER_A));
+        assertTrue("digest format is normalized",
+                BuiltInBlockExemptions.keepsSocialAvailable(WHATSAPP, settings, SIGNER_A.toUpperCase()));
+        assertFalse("another signer under the same name is not the approved app",
+                BuiltInBlockExemptions.keepsSocialAvailable(WHATSAPP, settings, SIGNER_B));
+        assertFalse("an unreadable signer fails closed",
+                BuiltInBlockExemptions.keepsSocialAvailable(WHATSAPP, settings, ""));
+        assertFalse(BuiltInBlockExemptions.keepsSocialAvailable(TELEGRAM, settings, SIGNER_A));
     }
 
     @Test
-    public void packagesOutsideTheSocialCatalogueAreRefused() {
+    public void approvalsRequireAPinnedSignerAndACataloguePackage() {
+        assertThrows(IllegalArgumentException.class, () -> Settings.NONE.withSocial(WHATSAPP, ""));
         assertThrows(IllegalArgumentException.class,
-                () -> Settings.NONE.withSocial("org.example.reader", true));
-    }
-
-    // --- Removal ------------------------------------------------------------
-
-    @Test
-    public void removalIsImmediate() {
-        Settings with = Settings.NONE.withSocial(WHATSAPP, true).withBrowser(CHROME);
-        Settings without = with.withSocial(WHATSAPP, false).withBrowser(null);
-        assertFalse(BuiltInBlockExemptions.keepsAvailable(WHATSAPP, without, null));
-        assertNull(exemptBrowserFor(without, CONFIRMED_NO_CANARY));
-        assertEquals(BrowserState.OFF,
-                BuiltInBlockExemptions.browserState(without, true, CONFIRMED_NO_CANARY));
-        assertFalse(without.any());
+                () -> Settings.NONE.withSocial("org.example.reader", SIGNER_A));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Settings(false, Map.of("com.whatsapp.evil", SIGNER_A)));
     }
 
     @Test
-    public void onlyAddingAnExemptionIsLoosening() {
+    public void onlyAddingOrRepinningIsLoosening() {
         Settings none = Settings.NONE;
-        Settings whatsapp = none.withSocial(WHATSAPP, true);
-        Settings chrome = whatsapp.withBrowser(CHROME);
+        Settings whatsapp = none.withSocial(WHATSAPP, SIGNER_A);
+        Settings chrome = whatsapp.withChrome(true);
         assertTrue(none.loosensTo(whatsapp));
         assertTrue(whatsapp.loosensTo(chrome));
-        assertTrue("switching browsers opens a new one", chrome.loosensTo(chrome.withBrowser(FIREFOX)));
+        assertTrue("re-pinning to another signer", whatsapp.loosensTo(none.withSocial(WHATSAPP, SIGNER_B)));
         assertFalse(chrome.loosensTo(whatsapp));
         assertFalse(whatsapp.loosensTo(none));
         assertFalse(chrome.loosensTo(chrome));
     }
 
-    // --- Link routing and Trusted Web Activities ------------------------------
+    @Test
+    public void removalsAreListedForDurableRevocation() {
+        Settings both = Settings.NONE.withSocial(WHATSAPP, SIGNER_A).withChrome(true);
+        assertEquals(Set.of(BuiltInBlockExemptions.CHROME, WHATSAPP),
+                both.revokedBy(Settings.NONE));
+        assertEquals(Set.of(WHATSAPP), both.revokedBy(both.withSocial(WHATSAPP, SIGNER_B)));
+        assertEquals(Set.of(), both.revokedBy(both));
+    }
+
+    // --- Chrome --------------------------------------------------------------------
 
     @Test
-    public void linksGoToTheBlockedScreenWithoutAnExemptBrowser() {
-        assertEquals(LinkRoute.BLOCKED_BROWSER, BuiltInBlockExemptions.route(null, null));
-        assertEquals(LinkRoute.BLOCKED_BROWSER, BuiltInBlockExemptions.route(CHROME, null));
+    public void onlyGooglesChromeSignerIsAccepted() {
+        assertTrue(BuiltInBlockExemptions.chromeSignerVerified(
+                BuiltInBlockExemptions.CHROME_RELEASE_SIGNER_SHA256));
+        assertFalse(BuiltInBlockExemptions.chromeSignerVerified(SIGNER_A));
+        assertFalse(BuiltInBlockExemptions.chromeSignerVerified(""));
+        assertFalse(BuiltInBlockExemptions.chromeSignerVerified(null));
     }
 
     @Test
-    public void aTrustedWebActivityBackedByTheExemptBrowserIsNotRoutedToTheBlockedScreen() {
-        Settings settings = Settings.NONE.withBrowser(CHROME);
-        String exempt = exemptBrowserFor(settings, CONFIRMED_NO_CANARY);
-        assertEquals(LinkRoute.EXEMPT_BROWSER, BuiltInBlockExemptions.route(CHROME, exempt));
-        assertEquals(LinkRoute.EXEMPT_BROWSER, BuiltInBlockExemptions.route(null, exempt));
+    public void filterEvidenceNeedsEveryCondition() {
+        assertTrue(new FilterEvidence(true, true, true).verified());
+        assertFalse(new FilterEvidence(false, true, true).verified());
+        assertFalse(new FilterEvidence(true, false, true).verified());
+        assertFalse(new FilterEvidence(true, true, false).verified());
+        assertFalse(FilterEvidence.NONE.verified());
     }
 
     @Test
-    public void aTrustedWebActivityBackedByAnotherBrowserStaysBlocked() {
-        String exempt = exemptBrowserFor(Settings.NONE.withBrowser(CHROME), CONFIRMED_NO_CANARY);
-        assertEquals(LinkRoute.BLOCKED_BROWSER, BuiltInBlockExemptions.route(FIREFOX, exempt));
+    public void theCaConditionRejectsAPendingRemoval() {
+        assertTrue("no CA in the profile", BuiltInBlockExemptions.caSatisfied(false, false, false));
+        assertTrue(BuiltInBlockExemptions.caSatisfied(true, false, true));
+        assertFalse(BuiltInBlockExemptions.caSatisfied(true, false, false));
+        assertFalse("a confirmed removal is not a present CA",
+                BuiltInBlockExemptions.caSatisfied(true, true, true));
     }
 
     @Test
-    public void aTrustedWebActivityIsBlockedAgainWhenTheFilterLapses() {
-        String exempt = exemptBrowserFor(Settings.NONE.withBrowser(CHROME), FILTER_OFF);
-        assertEquals(LinkRoute.BLOCKED_BROWSER, BuiltInBlockExemptions.route(CHROME, exempt));
+    public void chromeConfigurationForcesTheFilterAndClosesBypasses() {
+        Map<String, Object> required = BuiltInBlockExemptions.chromeRestrictions(PAC);
+        assertEquals("pac_script", required.get("ProxyMode"));
+        assertEquals(PAC, required.get("ProxyPacUrl"));
+        assertEquals(Boolean.FALSE, required.get("QuicAllowed"));
+        assertEquals("off", required.get("DnsOverHttpsMode"));
+        assertEquals(1, required.get("IncognitoModeAvailability"));
+        assertEquals(Boolean.TRUE, required.get("ForceGoogleSafeSearch"));
+        assertEquals(2, required.get("ForceYouTubeRestrict"));
+        assertEquals(0, required.get("BrowserSignin"));
+        assertEquals(2, required.get("DeveloperToolsAvailability"));
+        assertArrayEquals(new String[]{"chrome://flags", "chrome://net-internals", "chrome://proxy"},
+                (String[]) required.get("URLBlocklist"));
+        assertThrows(IllegalArgumentException.class, () -> BuiltInBlockExemptions.chromeRestrictions(""));
     }
 
-    // --- WebView provider -----------------------------------------------------
+    @Test
+    public void readBackMustMatchValuesAndTypes() {
+        Map<String, Object> required = BuiltInBlockExemptions.chromeRestrictions(PAC);
+        LinkedHashMap<String, Object> readBack = new LinkedHashMap<>(required);
+        assertTrue(BuiltInBlockExemptions.restrictionsSatisfied(readBack, required));
+        readBack.put("IncognitoModeAvailability", "1");
+        assertFalse("a string is not the integer Chrome expects",
+                BuiltInBlockExemptions.restrictionsSatisfied(readBack, required));
+        readBack.put("IncognitoModeAvailability", 1);
+        readBack.put("ProxyPacUrl", "https://other.example.org/proxy.pac");
+        assertFalse(BuiltInBlockExemptions.restrictionsSatisfied(readBack, required));
+        readBack.put("ProxyPacUrl", PAC);
+        readBack.put("URLBlocklist", new String[]{"chrome://flags"});
+        assertFalse(BuiltInBlockExemptions.restrictionsSatisfied(readBack, required));
+        readBack.remove("URLBlocklist");
+        assertFalse(BuiltInBlockExemptions.restrictionsSatisfied(readBack, required));
+        assertFalse(BuiltInBlockExemptions.restrictionsSatisfied(null, required));
+    }
 
     @Test
-    public void theExemptBrowserIsNotSuspendedAsWebViewProvider() {
-        String exempt = exemptBrowserFor(Settings.NONE.withBrowser(CHROME), CONFIRMED_NO_CANARY);
-        assertTrue(BuiltInBlockExemptions.keepsWebViewProviderUnsuspended(CHROME, exempt));
-        assertFalse(BuiltInBlockExemptions.keepsWebViewProviderUnsuspended(CHROME, null));
-        assertFalse(BuiltInBlockExemptions.keepsWebViewProviderUnsuspended(CHROME, FIREFOX));
-        assertFalse(BuiltInBlockExemptions.keepsWebViewProviderUnsuspended(null, null));
+    public void mergingKeepsStricterAdministratorEntries() {
+        Map<String, Object> required = BuiltInBlockExemptions.chromeRestrictions(PAC);
+        LinkedHashMap<String, Object> current = new LinkedHashMap<>();
+        current.put("URLBlocklist", new String[]{"example.org"});
+        current.put("PasswordManagerEnabled", Boolean.FALSE);
+        Map<String, Object> merged = BuiltInBlockExemptions.mergeRestrictions(current, required);
+        assertTrue(BuiltInBlockExemptions.restrictionsSatisfied(merged, required));
+        assertEquals(Boolean.FALSE, merged.get("PasswordManagerEnabled"));
+        assertTrue(Set.of((String[]) merged.get("URLBlocklist")).contains("example.org"));
     }
 }

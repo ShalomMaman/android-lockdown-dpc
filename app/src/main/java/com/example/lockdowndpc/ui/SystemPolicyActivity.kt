@@ -43,7 +43,8 @@ import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
-import com.example.lockdowndpc.policy.BuiltInBlockExemptionsStore
+import com.example.lockdowndpc.policy.BuiltInExemptionsController
+import com.example.lockdowndpc.policy.PackageIdentity
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.HomeFilterPolicy
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -183,14 +184,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     val playCompatibilityRequested =
         remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
     val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
-    val exemptions = remember(revision) { BuiltInBlockExemptionsStore.read(context) }
-    val exemptionReadback = remember(revision) { BuiltInBlockExemptionsStore.readback(context) }
-    val exemptBrowsers = remember(revision) {
-        installedExemptionCandidates(context, BuiltInBlockExemptions.FILTERABLE_BROWSERS)
-    }
-    val exemptSocial = remember(revision) {
-        installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL)
-    }
+    val exemptionsView = remember(revision) { loadExemptionsView(context) }
     var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
 
     fun requireSession(): Boolean {
@@ -311,39 +305,92 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     }
 
     /**
-     * Records a change to the built-in block exemptions.
+     * Submits a change to the built-in block exemptions at the policy boundary.
      *
-     * Adding anything is loosening: it needs the live administrator session and
-     * takes effect on the next apply, like every other loosening change here.
-     * Removing is tightening: it is written and applied at once, so an
-     * administrator who withdraws an approval never has to remember a second
-     * step for the application to be blocked again.
+     * Authorization is decided there, not here: a loosening change needs the
+     * live administrator session when it is written, while a removal is a
+     * tightening and is accepted without one. The change is committed durably,
+     * applied at once and audited with its verified outcome; until Android
+     * confirms a removal, its row reads as pending.
      */
-    fun commitExemption(next: BuiltInBlockExemptions.Settings, auditDetail: String) {
-        val current = BuiltInBlockExemptionsStore.read(context)
-        val loosening = current.loosensTo(next)
-        if (loosening && !requireSession()) {
+    fun submitExemption(
+        trigger: String,
+        operation: (BuiltInBlockExemptions.Settings) -> BuiltInBlockExemptions.Settings,
+    ) {
+        if (working) {
             return
         }
-        BuiltInBlockExemptionsStore.write(context, next)
-        AuditLog.append(
-            context,
-            context.getString(R.string.audit_builtin_exemption_changed, auditDetail.bidiIsolated()),
+        if (AdminSession.isUnlocked()) {
+            AdminSession.extend()
+        }
+        working = true
+        message = null
+        coroutineScope.launch {
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    Result.success(
+                        BuiltInExemptionsController.change(
+                            context.applicationContext,
+                            { settings -> operation(settings) },
+                            trigger,
+                        )
+                    )
+                } catch (exception: SecurityException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                } catch (exception: IllegalArgumentException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                } catch (exception: IllegalStateException) {
+                    Result.failure<BuiltInExemptionsController.Outcome>(exception)
+                }
+            }
+            working = false
+            revision++
+            val result = outcome.getOrNull()?.result()
+            message = when {
+                outcome.exceptionOrNull() is SecurityException -> UiMessage(
+                    context.getString(R.string.system_policy_error_auth),
+                    isError = true,
+                )
+                outcome.isFailure -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_change_refused),
+                    isError = true,
+                )
+                result == null -> null
+                !protectionEnabled -> UiMessage(
+                    context.getString(R.string.system_policy_paused_note),
+                    isError = false,
+                )
+                !result.applied() -> UiMessage(
+                    context.getString(
+                        R.string.system_policy_applied_failed,
+                        (result.errors().firstOrNull()
+                            ?: context.getString(R.string.error_unknown)).bidiIsolated(),
+                    ),
+                    isError = true,
+                )
+                else -> UiMessage(
+                    context.getString(R.string.system_policy_applied_ok),
+                    isError = false,
+                )
+            }
+        }
+    }
+
+    /** Pins the application to the signer it has right now, then submits. */
+    fun approveSocial(candidate: ExemptionCandidate) {
+        val signer = PackageIdentity.currentSignerSha256IncludingHidden(
+            context.packageManager,
+            candidate.packageName,
         )
-        revision++
-        if (loosening || !protectionEnabled) {
+        if (signer.isEmpty()) {
             message = UiMessage(
-                context.getString(
-                    if (protectionEnabled) {
-                        R.string.system_policy_pending_note
-                    } else {
-                        R.string.system_policy_paused_note
-                    }
-                ),
-                isError = false,
+                context.getString(R.string.system_policy_exempt_social_signer_unreadable),
+                isError = true,
             )
-        } else {
-            applyNow()
+            return
+        }
+        submitExemption("approve:${candidate.packageName}") { settings ->
+            settings.withSocial(candidate.packageName, signer)
         }
     }
 
@@ -415,29 +462,19 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         key(revision) {
             BuiltInExemptionsSection(
-                settings = exemptions,
-                readback = exemptionReadback,
-                browsers = exemptBrowsers,
-                social = exemptSocial,
+                view = exemptionsView,
                 enabled = !working,
-                onRequestBrowser = { candidate ->
-                    pendingExemption = PendingExemption.Browser(candidate)
-                },
-                onRemoveBrowser = {
-                    commitExemption(
-                        BuiltInBlockExemptionsStore.read(context).withBrowser(null),
-                        "browser=none",
-                    )
+                onRequestChrome = { pendingExemption = PendingExemption.Chrome },
+                onRemoveChrome = {
+                    submitExemption("remove:chrome") { settings -> settings.withChrome(false) }
                 },
                 onRequestSocial = { candidate ->
                     pendingExemption = PendingExemption.Social(candidate)
                 },
                 onRemoveSocial = { candidate ->
-                    commitExemption(
-                        BuiltInBlockExemptionsStore.read(context)
-                            .withSocial(candidate.packageName, false),
-                        "social:${candidate.packageName}=false",
-                    )
+                    submitExemption("remove:${candidate.packageName}") { settings ->
+                        settings.withoutSocial(candidate.packageName)
+                    }
                 },
             )
         }
@@ -470,16 +507,11 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             pending = change,
             onConfirm = {
                 pendingExemption = null
-                val latest = BuiltInBlockExemptionsStore.read(context)
                 when (change) {
-                    is PendingExemption.Browser -> commitExemption(
-                        latest.withBrowser(change.candidate.packageName),
-                        "browser=${change.candidate.packageName}",
-                    )
-                    is PendingExemption.Social -> commitExemption(
-                        latest.withSocial(change.candidate.packageName, true),
-                        "social:${change.candidate.packageName}=true",
-                    )
+                    PendingExemption.Chrome -> submitExemption("approve:chrome") { settings ->
+                        settings.withChrome(true)
+                    }
+                    is PendingExemption.Social -> approveSocial(change.candidate)
                 }
             },
             onDismiss = { pendingExemption = null },

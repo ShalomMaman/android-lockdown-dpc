@@ -134,7 +134,10 @@ public final class HomeFilterPolicy {
         }
 
         boolean keepsVpnVisible(String packageName) {
-            return enabled && configured() && config.vpnPackage().equals(packageName);
+            // A built-in blocked browser, store or social application never
+            // inherits the VPN's visibility, whatever was entered as the VPN.
+            return enabled && configured() && config.vpnPackage().equals(packageName)
+                    && !BuiltInBlockExemptions.isBuiltInBlocked(packageName);
         }
 
         boolean packageShouldBeHidden(String packageName, boolean blockedByPackagePolicy) {

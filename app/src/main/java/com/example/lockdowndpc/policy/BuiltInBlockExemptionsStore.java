@@ -1,36 +1,40 @@
 package com.example.lockdowndpc.policy;
 
+import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.UUID;
 
 /**
- * Stored administrator exemptions from the built-in block catalogues, the last
- * home filter canary result they depend on, and the last read-back.
+ * Stored exemptions from the built-in block catalogues, the durable Chrome
+ * grant ledger, pending revocations, the change awaiting its audited outcome,
+ * and the last read-back.
  *
  * <p>A separate preference file defaulting to "no exemptions", so a device that
- * never touches the feature, and a pilot upgraded into this build, behaves
- * exactly as before. Writes use {@code commit()} because a boot reconciliation
- * reads them before the process is guaranteed to survive. Nothing infers an
- * exemption: it is written only where an authenticated administrator confirmed
- * it, and a stored value that no longer validates is read as no exemption.
+ * never touches the feature behaves exactly as before. Every write that a
+ * later pass depends on uses {@code commit()}: a boot reconciliation reads it
+ * before the process is guaranteed to survive. A stored value that no longer
+ * validates is read as no exemption.
  */
+@SuppressLint("ApplySharedPref")
 public final class BuiltInBlockExemptionsStore {
 
     private static final String PREFS = "builtin_block_exemptions";
-    private static final String KEY_BROWSER = "browser_package";
-    private static final String KEY_SOCIAL = "social_packages";
-    private static final String KEY_CHANGED_AT = "changed_at";
-    private static final String KEY_CANARY_URL = "canary_url";
-    private static final String KEY_CANARY_BODY = "canary_body";
-    private static final String KEY_CANARY_PASSED = "canary_passed";
-    private static final String KEY_CANARY_AT = "canary_at";
-    private static final String KEY_READBACK_BROWSER_STATE = "readback_browser_state";
-    private static final String KEY_READBACK_BROWSER_VISIBLE = "readback_browser_visible";
-    private static final String KEY_READBACK_SOCIAL_VISIBLE = "readback_social_visible";
-    private static final String KEY_READBACK_AT = "readback_at";
+    private static final String KEY_CHROME = "chrome_through_filter";
+    private static final String KEY_SOCIAL_PINS = "social_pins";
+    private static final String KEY_CHROME_GRANTED = "chrome_granted";
+    private static final String KEY_CHROME_REVOCATION_PENDING = "chrome_revocation_pending";
+    private static final String KEY_SOCIAL_REVOCATIONS = "social_revocations_pending";
+    private static final String KEY_PENDING_CHANGE = "pending_change";
+    private static final String KEY_READBACK_CHROME_STATE = "readback_chrome_state";
+    private static final String KEY_READBACK_CHROME_AVAILABLE = "readback_chrome_available";
+    private static final String KEY_READBACK_SOCIAL_AVAILABLE = "readback_social_available";
+    private static final String KEY_READBACK_SOCIAL_MISMATCH = "readback_social_signer_mismatch";
 
     private BuiltInBlockExemptionsStore() {}
 
@@ -38,118 +42,154 @@ public final class BuiltInBlockExemptionsStore {
     public static BuiltInBlockExemptions.Settings read(Context context) {
         SharedPreferences prefs = prefs(context);
         try {
-            String browser = prefs.getString(KEY_BROWSER, null);
-            Set<String> social = prefs.getStringSet(KEY_SOCIAL, Set.of());
-            return new BuiltInBlockExemptions.Settings(browser, new LinkedHashSet<>(social));
+            LinkedHashMap<String, String> pins = new LinkedHashMap<>();
+            for (String entry : prefs.getStringSet(KEY_SOCIAL_PINS, Set.of())) {
+                int split = entry.indexOf('=');
+                if (split <= 0) {
+                    return BuiltInBlockExemptions.Settings.NONE;
+                }
+                pins.put(entry.substring(0, split), entry.substring(split + 1));
+            }
+            return new BuiltInBlockExemptions.Settings(prefs.getBoolean(KEY_CHROME, false), pins);
         } catch (IllegalArgumentException | ClassCastException exception) {
-            // Fail closed: a corrupt or out-of-catalogue value never loosens.
             return BuiltInBlockExemptions.Settings.NONE;
         }
     }
 
     /**
-     * Records the decision and drops the read-back that described the previous
-     * one, so the console never shows yesterday's confirmation for a choice that
-     * has just changed. The caller owns authentication and the audit line.
+     * Records an accepted change in one commit: the new decision, every
+     * revocation it implies as pending, and the change record whose audited
+     * outcome a policy pass writes. The caller owns authorization.
+     *
+     * @return the change ID
      */
-    public static synchronized void write(Context context, BuiltInBlockExemptions.Settings settings) {
-        boolean saved = prefs(context).edit()
-                .putString(KEY_BROWSER, settings.browserPackage())
-                .putStringSet(KEY_SOCIAL, new LinkedHashSet<>(settings.socialExemptions()))
-                .putLong(KEY_CHANGED_AT, System.currentTimeMillis())
-                .remove(KEY_READBACK_BROWSER_STATE)
-                .remove(KEY_READBACK_BROWSER_VISIBLE)
-                .remove(KEY_READBACK_SOCIAL_VISIBLE)
-                .remove(KEY_READBACK_AT)
-                .commit();
-        if (!saved) {
+    static synchronized String writeChange(
+            Context context,
+            BuiltInBlockExemptions.Settings before,
+            BuiltInBlockExemptions.Settings after,
+            String trigger
+    ) {
+        String changeId = UUID.randomUUID().toString().substring(0, 8);
+        Set<String> revoked = before.revokedBy(after);
+        LinkedHashSet<String> socialRevocations = new LinkedHashSet<>(socialRevocationsPending(context));
+        for (String packageName : revoked) {
+            if (!BuiltInBlockExemptions.CHROME.equals(packageName)) {
+                socialRevocations.add(packageName);
+            }
+        }
+        socialRevocations.removeAll(after.socialPins().keySet());
+        LinkedHashSet<String> pins = new LinkedHashSet<>();
+        after.socialPins().forEach((name, digest) -> pins.add(name + "=" + digest));
+        SharedPreferences.Editor editor = prefs(context).edit()
+                .putBoolean(KEY_CHROME, after.chromeThroughFilter())
+                .putStringSet(KEY_SOCIAL_PINS, pins)
+                .putStringSet(KEY_SOCIAL_REVOCATIONS, socialRevocations)
+                .putString(KEY_PENDING_CHANGE, String.join("|", changeId, trigger,
+                        before.auditText(), after.auditText()));
+        if (revoked.contains(BuiltInBlockExemptions.CHROME)) {
+            editor.putBoolean(KEY_CHROME_REVOCATION_PENDING, true);
+        }
+        if (!editor.commit()) {
             throw new IllegalStateException("Could not persist built-in block exemptions");
         }
+        return changeId;
     }
 
-    /**
-     * Records the outcome of a canary check for exactly this canary.
-     *
-     * <p>The result counts only while the configured canary is the same one; a
-     * changed URL or expected body is a different check that has not run.
-     */
-    public static void recordCanary(Context context, HomeFilterPolicy.Canary canary, boolean passed) {
-        if (canary == null) {
-            clearCanary(context);
-            return;
-        }
-        prefs(context).edit()
-                .putString(KEY_CANARY_URL, canary.url())
-                .putString(KEY_CANARY_BODY, canary.expectedBody())
-                .putBoolean(KEY_CANARY_PASSED, passed)
-                .putLong(KEY_CANARY_AT, System.currentTimeMillis())
-                .commit();
-    }
-
-    /** Whether the last recorded canary check is for {@code canary} and passed. */
-    public static boolean canaryPassed(Context context, HomeFilterPolicy.Canary canary) {
-        if (canary == null) {
-            return false;
-        }
+    /** The durable Chrome grant ledger. */
+    static ChromeFilterExemption.Ledger ledger(Context context) {
         SharedPreferences prefs = prefs(context);
+        return new ChromeFilterExemption.Ledger() {
+            @Override
+            public boolean granted() {
+                return prefs.getBoolean(KEY_CHROME_GRANTED, false);
+            }
+
+            @Override
+            public void setGranted(boolean granted) {
+                if (granted() != granted) {
+                    prefs.edit().putBoolean(KEY_CHROME_GRANTED, granted).commit();
+                }
+            }
+
+            @Override
+            public boolean revocationPending() {
+                return prefs.getBoolean(KEY_CHROME_REVOCATION_PENDING, false);
+            }
+
+            @Override
+            public void setRevocationPending(boolean pending) {
+                if (revocationPending() != pending) {
+                    prefs.edit().putBoolean(KEY_CHROME_REVOCATION_PENDING, pending).commit();
+                }
+            }
+        };
+    }
+
+    public static boolean chromeRevocationPending(Context context) {
+        return prefs(context).getBoolean(KEY_CHROME_REVOCATION_PENDING, false);
+    }
+
+    /** Social packages whose removal Android has not yet confirmed. */
+    public static Set<String> socialRevocationsPending(Context context) {
         try {
-            return prefs.getBoolean(KEY_CANARY_PASSED, false)
-                    && canary.url().equals(prefs.getString(KEY_CANARY_URL, null))
-                    && canary.expectedBody().equals(prefs.getString(KEY_CANARY_BODY, null));
+            return Collections.unmodifiableSet(new LinkedHashSet<>(
+                    prefs(context).getStringSet(KEY_SOCIAL_REVOCATIONS, Set.of())));
         } catch (ClassCastException exception) {
-            return false;
+            return Set.of();
         }
     }
 
-    /** Drops any canary evidence, e.g. when the home filter settings change. */
-    public static void clearCanary(Context context) {
-        prefs(context).edit()
-                .remove(KEY_CANARY_URL)
-                .remove(KEY_CANARY_BODY)
-                .remove(KEY_CANARY_PASSED)
-                .remove(KEY_CANARY_AT)
-                .commit();
+    static void setSocialRevocationsPending(Context context, Set<String> pending) {
+        prefs(context).edit().putStringSet(KEY_SOCIAL_REVOCATIONS, new LinkedHashSet<>(pending)).commit();
+    }
+
+    /** Takes the change awaiting its audited outcome, or {@code null}. */
+    static synchronized String takePendingChange(Context context) {
+        SharedPreferences prefs = prefs(context);
+        String change = prefs.getString(KEY_PENDING_CHANGE, null);
+        if (change != null) {
+            prefs.edit().remove(KEY_PENDING_CHANGE).commit();
+        }
+        return change;
     }
 
     /** What the last policy pass read back from Android. */
     public record Readback(
-            BuiltInBlockExemptions.BrowserState browserState,
-            boolean browserConfirmedAvailable,
+            ChromeFilterExemption.State chromeState,
+            boolean chromeConfirmedAvailable,
             Set<String> socialConfirmedAvailable,
-            long at
+            Set<String> socialSignerMismatch
     ) {
         public Readback {
             socialConfirmedAvailable = Set.copyOf(socialConfirmedAvailable);
+            socialSignerMismatch = Set.copyOf(socialSignerMismatch);
         }
     }
 
-    static void saveReadback(
-            Context context,
-            BuiltInBlockExemptions.BrowserState browserState,
-            boolean browserConfirmedAvailable,
-            Set<String> socialConfirmedAvailable
-    ) {
+    static void saveReadback(Context context, Readback readback) {
         prefs(context).edit()
-                .putString(KEY_READBACK_BROWSER_STATE, browserState.name())
-                .putBoolean(KEY_READBACK_BROWSER_VISIBLE, browserConfirmedAvailable)
-                .putStringSet(KEY_READBACK_SOCIAL_VISIBLE, new LinkedHashSet<>(socialConfirmedAvailable))
-                .putLong(KEY_READBACK_AT, System.currentTimeMillis())
-                .apply();
+                .putString(KEY_READBACK_CHROME_STATE, readback.chromeState().name())
+                .putBoolean(KEY_READBACK_CHROME_AVAILABLE, readback.chromeConfirmedAvailable())
+                .putStringSet(KEY_READBACK_SOCIAL_AVAILABLE,
+                        new LinkedHashSet<>(readback.socialConfirmedAvailable()))
+                .putStringSet(KEY_READBACK_SOCIAL_MISMATCH,
+                        new LinkedHashSet<>(readback.socialSignerMismatch()))
+                .commit();
     }
 
-    /** The last read-back, or {@code null} when no pass has run since the last change. */
+    /** The last read-back, or {@code null} when no pass has recorded one. */
     public static Readback readback(Context context) {
         SharedPreferences prefs = prefs(context);
         try {
-            String state = prefs.getString(KEY_READBACK_BROWSER_STATE, null);
+            String state = prefs.getString(KEY_READBACK_CHROME_STATE, null);
             if (state == null) {
                 return null;
             }
             return new Readback(
-                    BuiltInBlockExemptions.BrowserState.valueOf(state),
-                    prefs.getBoolean(KEY_READBACK_BROWSER_VISIBLE, false),
-                    prefs.getStringSet(KEY_READBACK_SOCIAL_VISIBLE, Set.of()),
-                    prefs.getLong(KEY_READBACK_AT, 0L));
+                    ChromeFilterExemption.State.valueOf(state),
+                    prefs.getBoolean(KEY_READBACK_CHROME_AVAILABLE, false),
+                    prefs.getStringSet(KEY_READBACK_SOCIAL_AVAILABLE, Set.of()),
+                    prefs.getStringSet(KEY_READBACK_SOCIAL_MISMATCH, Set.of()));
         } catch (IllegalArgumentException | ClassCastException exception) {
             return null;
         }

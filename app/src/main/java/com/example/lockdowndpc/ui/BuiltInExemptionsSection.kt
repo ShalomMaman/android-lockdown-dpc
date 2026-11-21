@@ -11,29 +11,21 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
 import com.example.lockdowndpc.policy.BuiltInBlockExemptionsStore
+import com.example.lockdowndpc.policy.ChromeFilterExemption
 import com.example.lockdowndpc.security.AppLabelSanitizer
 
 /** One installed package from an exemptable catalogue, with its display label. */
@@ -41,9 +33,19 @@ internal data class ExemptionCandidate(val packageName: String, val label: Strin
 
 /** A pending loosening change, held until the administrator confirms it. */
 internal sealed interface PendingExemption {
-    data class Browser(val candidate: ExemptionCandidate) : PendingExemption
+    data object Chrome : PendingExemption
     data class Social(val candidate: ExemptionCandidate) : PendingExemption
 }
+
+/** Everything the section shows, read once per revision. */
+internal data class ExemptionsView(
+    val settings: BuiltInBlockExemptions.Settings,
+    val readback: BuiltInBlockExemptionsStore.Readback?,
+    val chromeInstalled: Boolean,
+    val chromeRevocationPending: Boolean,
+    val socialRevocationsPending: Set<String>,
+    val social: List<ExemptionCandidate>,
+)
 
 /**
  * Installed packages from [catalogue], including ones this device has hidden:
@@ -79,77 +81,87 @@ internal fun installedExemptionCandidates(
     }
 }
 
+internal fun loadExemptionsView(context: Context): ExemptionsView = ExemptionsView(
+    settings = BuiltInBlockExemptionsStore.read(context),
+    readback = BuiltInBlockExemptionsStore.readback(context),
+    chromeInstalled = installedExemptionCandidates(
+        context,
+        setOf(BuiltInBlockExemptions.CHROME),
+    ).isNotEmpty(),
+    chromeRevocationPending = BuiltInBlockExemptionsStore.chromeRevocationPending(context),
+    socialRevocationsPending = BuiltInBlockExemptionsStore.socialRevocationsPending(context),
+    social = installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL),
+)
+
 /**
- * The status line for the browser exemption, from the last read-back.
+ * The status line for Chrome, from Android's read-back only.
  *
- * A saved choice with no read-back yet is reported as exactly that; "available"
- * is shown only when Android itself confirmed the browser is neither hidden
- * nor suspended.
+ * A withdrawn exemption reads as pending until Android has confirmed Chrome is
+ * blocked; "available" is shown only when Android confirmed Chrome is neither
+ * hidden nor suspended.
  */
-internal fun exemptBrowserStatusRes(
-    settings: BuiltInBlockExemptions.Settings,
-    readback: BuiltInBlockExemptionsStore.Readback?,
-): Int {
-    if (settings.browserPackage() == null) {
-        return R.string.system_policy_exempt_browser_state_off
+internal fun chromeStatusRes(view: ExemptionsView): Int {
+    if (view.chromeRevocationPending) {
+        return R.string.system_policy_exempt_chrome_state_revocation_pending
     }
-    if (readback == null) {
-        return R.string.system_policy_exempt_state_pending
+    if (!view.settings.chromeThroughFilter()) {
+        return R.string.system_policy_exempt_chrome_state_off
     }
-    return when (readback.browserState()) {
-        BuiltInBlockExemptions.BrowserState.OFF -> R.string.system_policy_exempt_state_pending
-        BuiltInBlockExemptions.BrowserState.ACTIVE -> if (readback.browserConfirmedAvailable()) {
-            R.string.system_policy_exempt_browser_state_active
+    val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
+    return when (readback.chromeState()) {
+        ChromeFilterExemption.State.OFF -> R.string.system_policy_exempt_state_pending
+        ChromeFilterExemption.State.ACTIVE -> if (readback.chromeConfirmedAvailable()) {
+            R.string.system_policy_exempt_chrome_state_active
         } else {
-            R.string.system_policy_exempt_browser_state_unconfirmed
+            R.string.system_policy_exempt_chrome_state_unconfirmed
         }
-        BuiltInBlockExemptions.BrowserState.FILTER_UNVERIFIED ->
-            R.string.system_policy_exempt_browser_state_filter_unverified
-        BuiltInBlockExemptions.BrowserState.CANARY_UNVERIFIED ->
-            R.string.system_policy_exempt_browser_state_canary_unverified
-        BuiltInBlockExemptions.BrowserState.NOT_INSTALLED ->
-            R.string.system_policy_exempt_browser_state_not_installed
-        BuiltInBlockExemptions.BrowserState.LINK_ROUTE_UNVERIFIED ->
-            R.string.system_policy_exempt_browser_state_route_unverified
+        ChromeFilterExemption.State.NOT_INSTALLED ->
+            R.string.system_policy_exempt_chrome_state_not_installed
+        ChromeFilterExemption.State.SIGNER_UNVERIFIED ->
+            R.string.system_policy_exempt_chrome_state_signer_unverified
+        ChromeFilterExemption.State.FILTER_UNVERIFIED ->
+            R.string.system_policy_exempt_chrome_state_filter_unverified
+        ChromeFilterExemption.State.RESTRICTIONS_UNVERIFIED ->
+            R.string.system_policy_exempt_chrome_state_restrictions_unverified
+        ChromeFilterExemption.State.LINK_ROUTE_UNVERIFIED ->
+            R.string.system_policy_exempt_chrome_state_route_unverified
+        ChromeFilterExemption.State.REVOCATION_PENDING ->
+            R.string.system_policy_exempt_chrome_state_revocation_pending
+        ChromeFilterExemption.State.ERROR -> R.string.system_policy_exempt_chrome_state_error
     }
 }
 
-internal fun exemptSocialStatusRes(
-    packageName: String,
-    settings: BuiltInBlockExemptions.Settings,
-    readback: BuiltInBlockExemptionsStore.Readback?,
-): Int = when {
-    packageName !in settings.socialExemptions() -> R.string.system_policy_exempt_social_blocked
-    readback == null -> R.string.system_policy_exempt_state_pending
-    packageName in readback.socialConfirmedAvailable() ->
-        R.string.system_policy_exempt_social_confirmed
-    else -> R.string.system_policy_exempt_social_unconfirmed
+internal fun socialStatusRes(packageName: String, view: ExemptionsView): Int {
+    val readback = view.readback
+    return when {
+        packageName in view.socialRevocationsPending ->
+            R.string.system_policy_exempt_social_revocation_pending
+        packageName !in view.settings.socialPins() -> R.string.system_policy_exempt_social_blocked
+        readback == null -> R.string.system_policy_exempt_state_pending
+        packageName in readback.socialSignerMismatch() ->
+            R.string.system_policy_exempt_social_signer_mismatch
+        packageName in readback.socialConfirmedAvailable() ->
+            R.string.system_policy_exempt_social_confirmed
+        else -> R.string.system_policy_exempt_social_unconfirmed
+    }
 }
 
 private fun ExemptionCandidate.displayName(): String =
     "${label.bidiIsolated()} · ${packageName.bidiIsolated()}"
 
 /**
- * The administrator's exemptions from the built-in browser and social
- * catalogues: what each does, what Android confirmed, and the controls.
+ * The administrator's exemptions from the built-in block catalogues: what each
+ * does, what Android confirmed, and the controls.
  */
 @Composable
 internal fun BuiltInExemptionsSection(
-    settings: BuiltInBlockExemptions.Settings,
-    readback: BuiltInBlockExemptionsStore.Readback?,
-    browsers: List<ExemptionCandidate>,
-    social: List<ExemptionCandidate>,
+    view: ExemptionsView,
     enabled: Boolean,
-    onRequestBrowser: (ExemptionCandidate) -> Unit,
-    onRemoveBrowser: () -> Unit,
+    onRequestChrome: () -> Unit,
+    onRemoveChrome: () -> Unit,
     onRequestSocial: (ExemptionCandidate) -> Unit,
     onRemoveSocial: (ExemptionCandidate) -> Unit,
 ) {
-    var choosingBrowser by remember { mutableStateOf(false) }
-    val chosen = settings.browserPackage()
-    val chosenName = browsers.firstOrNull { it.packageName == chosen }?.displayName()
-        ?: chosen?.bidiIsolated()
-
     SectionCard(title = stringResource(R.string.system_policy_section_exemptions)) {
         Row(
             modifier = Modifier
@@ -160,33 +172,30 @@ internal fun BuiltInExemptionsSection(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = stringResource(R.string.system_policy_exempt_browser_row),
+                    text = stringResource(R.string.system_policy_exempt_chrome_row),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = chosenName?.let {
-                        stringResource(R.string.system_policy_exempt_browser_choice, it)
-                    } ?: stringResource(R.string.system_policy_exempt_browser_none),
-                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Text(
                     text = stringResource(
                         R.string.system_policy_status_line,
-                        stringResource(exemptBrowserStatusRes(settings, readback)),
+                        stringResource(chromeStatusRes(view)),
                     ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Spacer(Modifier.size(16.dp))
-            TextButton(onClick = { choosingBrowser = true }, enabled = enabled) {
-                Text(stringResource(R.string.system_policy_exempt_browser_choose))
-            }
+            Switch(
+                checked = view.settings.chromeThroughFilter(),
+                onCheckedChange = { requested ->
+                    if (requested) onRequestChrome() else onRemoveChrome()
+                },
+                enabled = enabled && (view.chromeInstalled || view.settings.chromeThroughFilter()),
+            )
         }
         Text(
-            text = stringResource(R.string.system_policy_exempt_browser_body),
+            text = stringResource(R.string.system_policy_exempt_chrome_body),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
@@ -208,7 +217,7 @@ internal fun BuiltInExemptionsSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
-        if (social.isEmpty()) {
+        if (view.social.isEmpty()) {
             Text(
                 text = stringResource(R.string.system_policy_exempt_social_none_installed),
                 style = MaterialTheme.typography.bodySmall,
@@ -216,8 +225,8 @@ internal fun BuiltInExemptionsSection(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
             )
         }
-        social.forEach { candidate ->
-            val exempt = candidate.packageName in settings.socialExemptions()
+        view.social.forEach { candidate ->
+            val approved = candidate.packageName in view.settings.socialPins()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -232,16 +241,14 @@ internal fun BuiltInExemptionsSection(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     Text(
-                        text = stringResource(
-                            exemptSocialStatusRes(candidate.packageName, settings, readback)
-                        ),
+                        text = stringResource(socialStatusRes(candidate.packageName, view)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 Spacer(Modifier.size(16.dp))
                 Switch(
-                    checked = exempt,
+                    checked = approved,
                     onCheckedChange = { requested ->
                         if (requested) onRequestSocial(candidate) else onRemoveSocial(candidate)
                     },
@@ -249,85 +256,6 @@ internal fun BuiltInExemptionsSection(
                 )
             }
         }
-    }
-
-    if (choosingBrowser) {
-        BrowserChoiceDialog(
-            browsers = browsers,
-            current = chosen,
-            onChoose = { candidate ->
-                choosingBrowser = false
-                when {
-                    candidate == null -> if (chosen != null) onRemoveBrowser()
-                    candidate.packageName != chosen -> onRequestBrowser(candidate)
-                }
-            },
-            onDismiss = { choosingBrowser = false },
-        )
-    }
-}
-
-@Composable
-private fun BrowserChoiceDialog(
-    browsers: List<ExemptionCandidate>,
-    current: String?,
-    onChoose: (ExemptionCandidate?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var selected by remember { mutableStateOf(current) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.system_policy_exempt_browser_choose)) },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                ChoiceRow(
-                    text = stringResource(R.string.system_policy_exempt_browser_none),
-                    selected = selected == null,
-                    onSelect = { selected = null },
-                )
-                if (browsers.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.system_policy_exempt_browser_no_candidates),
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                }
-                browsers.forEach { candidate ->
-                    ChoiceRow(
-                        text = candidate.displayName(),
-                        selected = selected == candidate.packageName,
-                        onSelect = { selected = candidate.packageName },
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                onChoose(browsers.firstOrNull { it.packageName == selected })
-            }) {
-                Text(stringResource(R.string.system_policy_confirm_apply))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
-}
-
-@Composable
-private fun ChoiceRow(text: String, selected: Boolean, onSelect: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 48.dp)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        RadioButton(selected = selected, onClick = null)
-        Spacer(Modifier.size(12.dp))
-        Text(text = text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -338,22 +266,21 @@ internal fun ExemptionConfirmDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val (titleRes, bodyRes, candidate) = when (pending) {
-        is PendingExemption.Browser -> Triple(
-            R.string.system_policy_exempt_confirm_browser_title,
-            R.string.system_policy_exempt_confirm_browser_body,
-            pending.candidate,
-        )
-        is PendingExemption.Social -> Triple(
-            R.string.system_policy_exempt_confirm_social_title,
+    val title = when (pending) {
+        PendingExemption.Chrome -> R.string.system_policy_exempt_confirm_chrome_title
+        is PendingExemption.Social -> R.string.system_policy_exempt_confirm_social_title
+    }
+    val body = when (pending) {
+        PendingExemption.Chrome -> stringResource(R.string.system_policy_exempt_confirm_chrome_body)
+        is PendingExemption.Social -> stringResource(
             R.string.system_policy_exempt_confirm_social_body,
-            pending.candidate,
+            pending.candidate.displayName(),
         )
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(titleRes)) },
-        text = { Text(stringResource(bodyRes, candidate.displayName())) },
+        title = { Text(stringResource(title)) },
+        text = { Text(body) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text(stringResource(R.string.system_policy_confirm_apply))

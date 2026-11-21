@@ -298,6 +298,52 @@ and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
 [Tailscale Android managed configuration schema]: https://github.com/tailscale/tailscale-android/blob/main/android/src/main/res/xml/app_restrictions.xml
 [Tailscale system policies]: https://tailscale.com/kb/1315/mdm-keys
 
+### Chrome and approved apps through the home filter
+
+With protection on, every browser, application store and well-known social or
+messaging app is hidden. **System policy → Exemptions from the built-in block**
+offers two narrow, default-off exceptions. Adding either needs the
+administrator PIN session; removing either is accepted without it, applied at
+once, and shown as pending until Android confirms the app is blocked again.
+Every change is audited once, with its change ID and verified outcome.
+
+**Chrome.** Only `com.android.chrome`, and only when its current signer is
+Google's release certificate. On every pass, boot included, Device Guard
+grants Chrome only when all of these were read back from Android in that pass:
+
+- the always-on VPN in lockdown, with no exemptions, on the approved VPN
+  package whose signer is pinned and verified;
+- the global PAC proxy, profile restrictions and private DNS of the home
+  filter, and the filter CA when the profile carries one (a pending CA removal
+  does not count);
+- Chrome's managed configuration, written with `setApplicationRestrictions`
+  and read back: `ProxyMode=pac_script`, `ProxyPacUrl` (the filter's PAC),
+  `QuicAllowed=false`, `DnsOverHttpsMode=off`, `IncognitoModeAvailability=1`,
+  `ForceGoogleSafeSearch=true`, `ForceYouTubeRestrict=2`, `BrowserSignin=0`,
+  `DeveloperToolsAvailability=2`, and `URLBlocklist` covering
+  `chrome://flags`, `chrome://net-internals` and `chrome://proxy`.
+
+Nothing is time-based. If any condition fails, or any call throws, Chrome is
+hidden (or suspended when it is the WebView provider) and that is read back
+*before* the rest of the pass runs. A revocation Android does not confirm is
+persisted and retried on every pass, and while it is pending the home filter
+keeps its VPN, proxy and CA rather than tear them down. While Chrome is
+granted, `http`/`https` links route to Chrome. Custom Tabs and Trusted Web
+Activities that open in Chrome run inside the Chrome package, so Chrome's
+managed configuration governs them as well.
+
+**Known limit.** Web content that another app renders itself (its own
+WebView or an in-app browser) is not governed by Chrome's policies; it is
+filtered only at the network boundary, which is the same gap described above
+for browsers that ignore the PAC proxy. Constrain it at the gateway.
+
+**Approved social and messaging apps.** Only packages in a fixed, reviewed
+list (`BuiltInBlockExemptions.EXEMPTABLE_SOCIAL`). Each approval pins the
+app's current signer digest; a different signer under the same name stays
+blocked, and every package change triggers a re-check. Application stores and
+browsers can never be approved this way. A built-in blocked package cannot be
+configured as the home filter's VPN either.
+
 ## Runbook B — ADB fallback
 
 Use when there is no camera path, when the OEM wizard has no QR entry point, or

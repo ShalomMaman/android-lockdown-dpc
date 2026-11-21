@@ -134,33 +134,34 @@
 
     <!-- החרגות מהחסימה המובנית -->
     <string name="system_policy_section_exemptions">החרגות מהחסימה המובנית</string>
-    <string name="system_policy_exempt_browser_row">דפדפן דרך סינון הבית</string>
-    <string name="system_policy_exempt_browser_choice">נבחר: %1$s</string>
-    <string name="system_policy_exempt_browser_none">ללא דפדפן. כל הדפדפנים נשארים חסומים</string>
-    <string name="system_policy_exempt_browser_choose">בחירת דפדפן</string>
-    <string name="system_policy_exempt_browser_no_candidates">לא מותקן במכשיר הזה דפדפן נתמך.</string>
-    <string name="system_policy_exempt_browser_body">אפשר להשאיר דפדפן אחד זמין, אבל רק כל עוד סינון הבית פועל. הוא זמין רק כל עוד Android מאשר את הגדרות סינון הבית, וכאשר מוגדרת בדיקת סינון, רק אם הבדיקה הזו עברה. אם סינון הבית כבוי או לא מאושר, הדפדפן נחסם שוב באופן אוטומטי. כל עוד הוא זמין, קישורים ויישומי אינטרנט נפתחים בו במקום בדף החסימה. הסינון רואה רק תעבורה שעוברת דרך חיבור הבית. דפדפן שמשתמש ב-DNS מאובטח משלו או מתעלם משירות התיווך חייב להיות מוגבל בשער הבית. אי אפשר להחריג חנויות יישומים.</string>
-    <string name="system_policy_exempt_browser_state_off">כבוי. כל הדפדפנים נשארים חסומים</string>
-    <string name="system_policy_exempt_browser_state_active">פועל. סינון הבית מאושר ו-Android אישר שהדפדפן זמין</string>
-    <string name="system_policy_exempt_browser_state_unconfirmed">פועל, אך Android עדיין לא אישר שהדפדפן זמין</string>
-    <string name="system_policy_exempt_browser_state_filter_unverified">נבחר, אך הגדרות סינון הבית אינן מאושרות, ולכן הדפדפן נשאר חסום</string>
-    <string name="system_policy_exempt_browser_state_canary_unverified">נבחר, אך בדיקת סינון הבית לא עברה, ולכן הדפדפן נשאר חסום</string>
-    <string name="system_policy_exempt_browser_state_not_installed">נבחר, אך הדפדפן הזה אינו מותקן במכשיר</string>
-    <string name="system_policy_exempt_browser_state_route_unverified">נבחר, אך לא ניתן היה לנתב קישורים לדפדפן הזה, ולכן הוא נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_row">Chrome דרך סינון הבית</string>
+    <string name="system_policy_exempt_chrome_body">אפשר לאשר רק את Google Chrome החתום על ידי Google. הוא זמין רק כל עוד המכשיר מאשר כל הגנה ש-Device Guard מגדיר בעצמו: ה-VPN הקבוע במצב נעילה ביישום ה-VPN המאושר, שירות התיווך של סינון הבית, אישור הסינון כאשר הפרופיל כולל אותו, וההגדרות המנוהלות של Chrome. ‏Chrome מוגדר להשתמש בשירות התיווך של הסינון, כאשר DNS מאובטח, QUIC, גלישה בסתר, כניסה לחשבון וכלי הפיתוח כבויים, חיפוש בטוח והגבלה מחמירה ב-YouTube נאכפים, ודפי הרשת הפנימיים שלו חסומים. ההגדרות האלה חלות גם על כרטיסיות מותאמות ועל יישומי אינטרנט שנפתחים ב-Chrome. אם הגנה כלשהי חסרה, Chrome נחסם שוב לפני שמשהו אחר משתנה. דפי אינטרנט שמוצגים בתוך יישומים אחרים אינם מכוסים בהגדרות של Chrome, והם מסוננים רק ברשת הבית. אי אפשר לאשר חנויות יישומים.</string>
+    <string name="system_policy_exempt_chrome_state_off">כבוי. כל הדפדפנים נשארים חסומים</string>
+    <string name="system_policy_exempt_chrome_state_active">פועל. כל ההגנות מאושרות ו-Android אישר ש-Chrome זמין</string>
+    <string name="system_policy_exempt_chrome_state_unconfirmed">פועל, אך Android עדיין לא אישר ש-Chrome זמין</string>
+    <string name="system_policy_exempt_chrome_state_not_installed">פועל, אך Chrome אינו מותקן במכשיר</string>
+    <string name="system_policy_exempt_chrome_state_signer_unverified">פועל, אך Chrome המותקן אינו חתום על ידי Google, ולכן הוא נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_state_filter_unverified">פועל, אך לא כל ההגנות של סינון הבית מאושרות, ולכן Chrome נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_state_restrictions_unverified">פועל, אך Chrome לא אישר את ההגדרות המנוהלות שלו, ולכן הוא נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_state_route_unverified">פועל, אך לא ניתן היה לנתב קישורים ל-Chrome, ולכן הוא נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_state_error">פועל, אך הבדיקה האחרונה נכשלה, ולכן Chrome נשאר חסום</string>
+    <string name="system_policy_exempt_chrome_state_revocation_pending">כובה. ממתין לאישור של Android ש-Chrome חסום</string>
     <string name="system_policy_exempt_state_pending">נשמר, עדיין לא הוחל</string>
     <string name="system_policy_exempt_social_title">יישומי רשתות חברתיות והודעות שאושרו</string>
-    <string name="system_policy_exempt_social_body">היישומים האלה חסומים ברשימה המובנית. הפעלה של יישום משאירה אותו זמין כל עוד ההגנה פועלת. כיבוי חוסם אותו שוב מיד.</string>
+    <string name="system_policy_exempt_social_body">היישומים האלה חסומים ברשימה המובנית. הפעלה של יישום משאירה אותו זמין כל עוד ההגנה פועלת. כל אישור קשור לחתימת המפתח שיש ליישום עכשיו, ויישום עם חתימה אחרת נשאר חסום. כיבוי חוסם אותו שוב מיד.</string>
     <string name="system_policy_exempt_social_none_installed">לא מותקן במכשיר הזה יישום רשת חברתית או הודעות מהרשימה המובנית.</string>
     <string name="system_policy_exempt_social_blocked">חסום ברשימה המובנית</string>
     <string name="system_policy_exempt_social_confirmed">מותר. Android אישר שהיישום זמין</string>
     <string name="system_policy_exempt_social_unconfirmed">מותר, אך Android עדיין לא אישר שהיישום זמין</string>
-    <string name="system_policy_exempt_confirm_browser_title">לאפשר את הדפדפן הזה דרך סינון הבית?</string>
-    <string name="system_policy_exempt_confirm_browser_body">%1$s יהיה זמין רק כל עוד Android מאשר את סינון הבית, וכאשר מוגדרת בדיקת סינון, רק אם הבדיקה עברה. אם סינון הבית כבוי או לא מאושר, הדפדפן נחסם שוב באופן אוטומטי. קישורים ויישומי אינטרנט ייפתחו בדפדפן הזה במקום בדף החסימה. כל שאר הדפדפנים נשארים חסומים.</string>
+    <string name="system_policy_exempt_social_signer_mismatch">מותר, אך ליישום המותקן יש חתימה אחרת, ולכן הוא נשאר חסום</string>
+    <string name="system_policy_exempt_social_revocation_pending">כובה. ממתין לאישור של Android שהיישום חסום</string>
+    <string name="system_policy_exempt_social_signer_unreadable">לא ניתן היה לקרוא את חתימת היישום, ולכן אי אפשר לאשר אותו.</string>
+    <string name="system_policy_exempt_change_refused">השינוי לא נשמר. בדקו את הפרטים ונסו שוב.</string>
+    <string name="system_policy_exempt_confirm_chrome_title">לאפשר את Chrome דרך סינון הבית?</string>
+    <string name="system_policy_exempt_confirm_chrome_body">‏Chrome יהיה זמין רק כל עוד המכשיר מאשר את ההגנות של סינון הבית ואת ההגדרות המנוהלות של Chrome. אם אחת מהן חסרה, Chrome נחסם שוב באופן אוטומטי. קישורים ויישומי אינטרנט ייפתחו ב-Chrome במקום בדף החסימה. כל שאר הדפדפנים נשארים חסומים.</string>
     <string name="system_policy_exempt_confirm_social_title">לאפשר את היישום הזה?</string>
-    <string name="system_policy_exempt_confirm_social_body">%1$s לא ייחסם עוד ברשימה המובנית של רשתות חברתיות והודעות, ויישאר זמין כל עוד ההגנה פועלת. כיבוי שלו בהמשך יחסום אותו שוב מיד.</string>
-
+    <string name="system_policy_exempt_confirm_social_body">%1$s לא ייחסם עוד ברשימה המובנית של רשתות חברתיות והודעות כל עוד ההגנה פועלת. האישור קשור לחתימה הנוכחית של היישום. כיבוי שלו בהמשך יחסום אותו שוב מיד.</string>
     <!-- יומן ביקורת -->
-    <string name="audit_builtin_exemption_changed">החרגה מהחסימה המובנית שונתה: %1$s</string>
     <string name="audit_play_compatibility_changed">תאימות ל-Google Play שונתה: %1$s</string>
     <string name="audit_system_policy_unverified">מדיניות מערכת לא אומתה: %1$s</string>
     <string name="audit_system_policy_changed">בקרת מדיניות מערכת שונתה: %1$s</string>
