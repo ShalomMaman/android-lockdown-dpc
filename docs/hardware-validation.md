@@ -210,6 +210,40 @@ spurious error.
 
 ---
 
+## Group Q — Android 12+ QR enrolment
+
+**Status:** pending hardware validation.
+
+### Q-1 Fully managed setup through both provisioning handlers
+
+**Applies to:** Android 12 (API 31) or later on each firmware family with a QR
+entry point in the setup wizard. Start with a factory-reset test device and a
+signed APK containing both handlers.
+
+**Steps**
+
+1. Prepare the QR payload for the exact APK and enrol from the welcome screen
+   using [Runbook A](provisioning.md#runbook-a--qr-enrolment-on-the-setup-wizard).
+2. Finish setup. Confirm Device Owner status using the platform and console
+   checks in [Prove Device Owner took effect](provisioning.md#prove-device-owner-took-effect).
+3. Before applying any policy from the console, record its initial policy
+   status. Check the device's user restrictions with `adb shell dumpsys user`
+   once ADB is available. Confirm the default `no_factory_reset` restriction
+   is present for the managed user.
+
+**Expected:** setup completes with Device Guard as Device Owner, with no work
+profile or app interaction during the two callbacks. The existing baseline
+policy is in effect before any console action.
+
+**Fail action:** stop and record which stage failed. Capture available setup
+wizard or Device Guard errors before factory resetting for a retry.
+
+**Evidence:** record the wizard outcome, owner read-back, initial policy status
+and restriction read-back in [`device-matrix.md`](device-matrix.md). Keep the QR
+image, device serial and any private enrolment data out of the public record.
+
+---
+
 ## Group F — Managed app filtering
 
 Kiosk stays `OFF` for this whole group.

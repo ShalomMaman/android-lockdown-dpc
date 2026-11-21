@@ -196,16 +196,14 @@ Record for each device: model, Android build number, serial, payload SHA-256,
 APK version code, the operator, and the outcome. Never record the Wi-Fi
 passphrase, the administrator PIN or a recovery code.
 
-> **Known gap before the first QR attempt.** Device Guard's manifest declares
-> the admin receiver with `DEVICE_ADMIN_ENABLED` and
-> `PROFILE_PROVISIONING_COMPLETE`, and `LockdownAdminReceiver` implements
-> `onProfileProvisioningComplete`. It declares no activity for
-> `android.app.action.GET_PROVISIONING_MODE` or
-> `android.app.action.ADMIN_POLICY_COMPLIANCE`, which recent platform versions
-> hand to the DPC to finish setup-wizard provisioning. Expect the first QR
-> attempt on Android 11 or newer to expose this, and treat the hardware
-> rehearsal as the test that decides it. The ADB path in Runbook B does not use
-> those intents and is unaffected.
+> **Android 12 (API 31) and later.** Use an APK that includes both setup wizard
+> handlers. Device Guard selects fully managed device mode and cancels setup
+> if Android supplies an allowed-mode list that excludes it. After Android
+> grants Device Owner, the compliance handler runs Device Guard's existing
+> local policy pass and returns control to the wizard. Both handlers require
+> `BIND_DEVICE_ADMIN`. After setup, check ownership and policy read-back as
+> described below. QR enrolment on physical devices is pending in
+> [Group Q](hardware-validation.md#group-q--android-12-qr-enrolment).
 
 ## Home filter
 
@@ -360,7 +358,7 @@ not try to repair it in place.
 | --- | --- | --- |
 | Wizard cannot download the APK | Download location unreachable, HTTP redirect, captive portal | Fix the host and network; re-scan. The URL must be clean HTTPS end to end. |
 | "Package checksum does not match" or a signature error | The URL serves an APK signed with a different key, or `--signer-sha256` was wrong | Rebuild the payload with `--apk` so the digest is read from the artifact. |
-| Wizard installs the DPC but does not hand over | The mode/compliance intents above are unresolved, or the DPC crashed on the callback | Factory reset. Capture `adb logcat` from the next attempt before resetting if possible. |
+| Wizard installs the DPC but does not hand over | The APK lacks a provisioning handler, fully managed mode is unavailable, or the compliance callback could not complete | Check the APK version and capture `adb logcat` where available. Factory reset before retrying. |
 | "Already provisioned" / owner already set | The device was not fully wiped | Factory reset. |
 | Enrolment ends with no management consent screen | Wizard was already completed once | Factory reset. |
 | Device reboots into the wizard repeatedly | Encryption or wizard step interrupted | Factory reset; do not use `--skip-encryption` as a workaround. |
@@ -412,13 +410,14 @@ Proven by `tools/test_provisioning_payload.py` (JVM-free Python unit tests):
 payload structure and key set, digest normalisation across hexadecimal and
 Base64, every refusal path, the environment-variable-only handling of the Wi-Fi
 passphrase, the restricted file mode when a passphrase is embedded, and the
-non-zero exit on validation failure.
+non-zero exit on validation failure. `tools/test_manifest_permissions.py` checks
+the exported provisioning handlers, their intent filters and their permission.
 
 Not proven anywhere in this repository: that a printed QR scans on any specific
-OEM setup wizard, that the wizard completes the handover to
-`LockdownAdminReceiver` on Android 11 or newer, that the download location is
-reachable from a device before policy exists, and that a provisioned device then
-reports a verified policy apply. Those are hardware acceptance items and they
+OEM setup wizard, that the wizard completes both provisioning callbacks on
+Android 12 or later, that the download location is reachable from a device
+before policy exists, and that a provisioned device then reports a verified
+policy apply. Those are hardware acceptance items and they
 belong to the physical validation gate in
 [`docs/production-roadmap.md`](production-roadmap.md).
 
