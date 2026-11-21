@@ -354,11 +354,20 @@ counts as saved) and, while protection is on, Android reports Chrome hidden,
 suspended or not installed right now. `HomeFilterController` checks this live,
 before any change; the home filter screen explains a refusal. A teardown that
 was requested earlier and is still pending is held the same way on every pass,
-including boot: the filter stays on with its CA and the pass reports why.
+including boot: each pass settles once, after containment, which filter
+settings it enforces, and a held teardown is "on" to every step — system
+policy (its required restrictions stay), packages and the filter's own
+reconciliation — while the pass reports why.
 Chrome can be approved only while the filter is on, nothing is pending, and its
-CA (if the profile has one) is installed. While Chrome is approved,
-`DISALLOW_CONFIG_CREDENTIALS` keeps the CA from being removed in Android
-Settings; it is released when the approval is removed. A Chrome that is
+CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
+keeps the CA from being removed in Android Settings for the approval's whole
+life: it is set and read back before a Chrome approval is saved (also while
+protection is paused; no lock, no save), each pass confirms it before the CA
+check that Chrome's release relies on, and it is released only when the
+teardown guard would allow a teardown, so a refused hide keeps it. If the
+stored exemption record cannot be read, no exemption applies, ordinary edits
+are refused, and only an explicit "Clear all approvals" replaces it; a failed
+save restores the exact stored record. A Chrome that is
 disabled in Android is never shown. A home filter save that
 fails to persist restores the previous settings in memory and still runs a
 pass. Every Android state the console shows is read live when the screen opens

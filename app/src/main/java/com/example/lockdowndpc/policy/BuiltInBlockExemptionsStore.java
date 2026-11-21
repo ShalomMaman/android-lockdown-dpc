@@ -103,6 +103,47 @@ public final class BuiltInBlockExemptionsStore {
         }
 
         @Override
+        public Object snapshot() {
+            java.util.Map<String, ?> all = prefs.getAll();
+            java.util.HashMap<String, Object> raw = new java.util.HashMap<>();
+            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS}) {
+                if (all.containsKey(key)) {
+                    Object value = all.get(key);
+                    raw.put(key, value instanceof Set<?> set ? new LinkedHashSet<>(set) : value);
+                }
+            }
+            return raw;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public void restore(Object snapshot) {
+            java.util.Map<String, Object> raw = (java.util.Map<String, Object>) snapshot;
+            SharedPreferences.Editor editor = prefs.edit();
+            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS}) {
+                Object value = raw.get(key);
+                if (!raw.containsKey(key)) {
+                    editor.remove(key);
+                } else if (value instanceof Boolean flag) {
+                    editor.putBoolean(key, flag);
+                } else if (value instanceof String text) {
+                    editor.putString(key, text);
+                } else if (value instanceof Set<?> set) {
+                    editor.putStringSet(key, (Set<String>) set);
+                } else if (value instanceof Integer number) {
+                    editor.putInt(key, number);
+                } else if (value instanceof Long number) {
+                    editor.putLong(key, number);
+                } else if (value instanceof Float number) {
+                    editor.putFloat(key, number);
+                } else {
+                    editor.remove(key);
+                }
+            }
+            editor.commit();
+        }
+
+        @Override
         public boolean commit(BuiltInBlockExemptions.Settings settings) {
             LinkedHashSet<String> pins = new LinkedHashSet<>();
             settings.socialPins().forEach((name, digest) -> pins.add(name + "=" + digest));

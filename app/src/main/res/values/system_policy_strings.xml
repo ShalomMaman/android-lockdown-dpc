@@ -152,7 +152,6 @@
     <string name="system_policy_exempt_observed_not_installed">not installed</string>
     <string name="system_policy_exempt_observed_unknown">state could not be read</string>
     <string name="system_policy_exempt_chrome_reason_shown">Allowed on the last pass</string>
-    <string name="system_policy_exempt_chrome_reason_not_available">Not available on this device: Chrome provides the system WebView</string>
     <string name="system_policy_exempt_chrome_reason_not_exempted">Not allowed</string>
     <string name="system_policy_exempt_chrome_reason_paused">Protection is paused</string>
     <string name="system_policy_exempt_chrome_reason_filter_off">The home filter is off or its settings could not be read</string>
@@ -165,6 +164,12 @@
     <string name="system_policy_exempt_observed_disabled">disabled</string>
     <string name="system_policy_exempt_chrome_reason_hide_refused">Chrome had to be hidden, but Android did not confirm the hide</string>
     <string name="system_policy_exempt_chrome_reason_disabled">Chrome is disabled in Android</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview">Not available on this device: Android reports Chrome as the system WebView</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">Not available on this device: Chrome may serve as the system WebView here</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_android_version">Not available on this Android version</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">Approved, but the app\'s signer could not be read, so it stays hidden</string>
+    <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
+    <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
     <string name="system_policy_exempt_social_approved">Approved</string>
     <string name="system_policy_exempt_social_not_approved">Not approved</string>

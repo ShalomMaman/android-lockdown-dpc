@@ -319,7 +319,8 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
      */
     fun submitExemption(
         trigger: String,
-        operation: (BuiltInBlockExemptions.Settings) -> BuiltInBlockExemptions.Settings,
+        clearApprovals: Boolean = false,
+        operation: (BuiltInBlockExemptions.Settings) -> BuiltInBlockExemptions.Settings = { it },
     ) {
         if (working) {
             return
@@ -333,11 +334,15 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             val outcome = withContext(Dispatchers.IO) {
                 try {
                     Result.success(
-                        BuiltInExemptionsController.change(
-                            context.applicationContext,
-                            { settings -> operation(settings) },
-                            trigger,
-                        )
+                        if (clearApprovals) {
+                            BuiltInExemptionsController.clearApprovals(context.applicationContext)
+                        } else {
+                            BuiltInExemptionsController.change(
+                                context.applicationContext,
+                                { settings -> operation(settings) },
+                                trigger,
+                            )
+                        }
                     )
                 } catch (exception: SecurityException) {
                     Result.failure<BuiltInExemptionsController.Outcome>(exception)
@@ -490,6 +495,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                         settings.withoutSocial(candidate.packageName)
                     }
                 },
+                onClearApprovals = { submitExemption("clear-approvals", clearApprovals = true) },
             )
         }
 

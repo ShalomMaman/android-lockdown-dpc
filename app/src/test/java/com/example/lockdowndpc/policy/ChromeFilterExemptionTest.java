@@ -128,6 +128,18 @@ public final class ChromeFilterExemptionTest {
         assertTrue(ChromeFilterExemption.inScope(34, null));
     }
 
+    @Test
+    public void theNotAvailableReasonClaimsOnlyWhatTheProviderCheckFound() {
+        assertEquals(Decision.NOT_AVAILABLE_WEBVIEW_PROVIDER,
+                ChromeFilterExemption.unavailableReason(28, BuiltInBlockExemptions.CHROME));
+        assertEquals(Decision.NOT_AVAILABLE_WEBVIEW_PROVIDER,
+                ChromeFilterExemption.unavailableReason(33, BuiltInBlockExemptions.CHROME));
+        assertEquals(Decision.NOT_AVAILABLE_ANDROID_VERSION,
+                ChromeFilterExemption.unavailableReason(28, "com.google.android.webview"));
+        assertEquals(Decision.NOT_AVAILABLE_ANDROID_VERSION, ChromeFilterExemption.unavailableReason(26, null));
+        assertEquals(Decision.NOT_AVAILABLE_WEBVIEW_UNCONFIRMED, ChromeFilterExemption.unavailableReason(33, null));
+    }
+
     // --- Contained unless every condition holds --------------------------------------
 
     @Test

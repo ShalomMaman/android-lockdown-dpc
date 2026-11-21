@@ -8,7 +8,7 @@ import java.util.Map;
  *
  * <p><b>Scope.</b> It applies only on Android 10 and later and only while
  * Chrome is not the WebView provider ({@link #inScope}). Otherwise the
- * exemption is inert ({@link Decision#NOT_AVAILABLE}) and Chrome is handled
+ * exemption is inert (one of the {@code NOT_AVAILABLE_*} decisions) and Chrome is handled
  * by the existing package sweep and WebView suspension, unchanged.
  *
  * <p><b>Order</b> within a protected pass:
@@ -40,8 +40,15 @@ public final class ChromeFilterExemption {
 
     /** Why Chrome is, or is not, shown on this pass. */
     public enum Decision {
-        /** Chrome is or may be the WebView provider, or Android is too old: inert. */
-        NOT_AVAILABLE(false),
+        /** Inert: Android reports Chrome as the system WebView provider. */
+        NOT_AVAILABLE_WEBVIEW_PROVIDER(false),
+        /**
+         * Inert: Chrome is not confirmed as the WebView provider, but Device
+         * Guard's provider fallback would treat it as one on this device.
+         */
+        NOT_AVAILABLE_WEBVIEW_UNCONFIRMED(false),
+        /** Inert: Android is older than 10 and Chrome is not confirmed as the provider. */
+        NOT_AVAILABLE_ANDROID_VERSION(false),
         NOT_EXEMPTED(false),
         PROTECTION_PAUSED(false),
         FILTER_DISABLED(false),
@@ -115,6 +122,20 @@ public final class ChromeFilterExemption {
      */
     public static boolean inScope(int sdk, String webViewProvider) {
         return sdk >= MIN_SDK && !BuiltInBlockExemptions.CHROME.equals(webViewProvider);
+    }
+
+    /**
+     * Why the exemption is out of scope, claiming only what the provider check
+     * established.
+     *
+     * @param currentProvider the package Android reports as the current WebView
+     *                        provider, or {@code null} when it reports none
+     */
+    public static Decision unavailableReason(int sdk, String currentProvider) {
+        if (BuiltInBlockExemptions.CHROME.equals(currentProvider)) {
+            return Decision.NOT_AVAILABLE_WEBVIEW_PROVIDER;
+        }
+        return sdk < MIN_SDK ? Decision.NOT_AVAILABLE_ANDROID_VERSION : Decision.NOT_AVAILABLE_WEBVIEW_UNCONFIRMED;
     }
 
     /**

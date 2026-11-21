@@ -144,7 +144,6 @@
     <string name="system_policy_exempt_observed_not_installed">לא מותקן</string>
     <string name="system_policy_exempt_observed_unknown">לא ניתן היה לקרוא את המצב</string>
     <string name="system_policy_exempt_chrome_reason_shown">אושר במעבר האחרון</string>
-    <string name="system_policy_exempt_chrome_reason_not_available">לא זמין במכשיר הזה: Chrome מספק את רכיב WebView של המערכת</string>
     <string name="system_policy_exempt_chrome_reason_not_exempted">לא מאושר</string>
     <string name="system_policy_exempt_chrome_reason_paused">ההגנה מושהית</string>
     <string name="system_policy_exempt_chrome_reason_filter_off">סינון הבית כבוי או שלא ניתן היה לקרוא את ההגדרות שלו</string>
@@ -157,6 +156,12 @@
     <string name="system_policy_exempt_observed_disabled">מושבת</string>
     <string name="system_policy_exempt_chrome_reason_hide_refused">היה צריך להסתיר את Chrome, אך Android לא אישר את ההסתרה</string>
     <string name="system_policy_exempt_chrome_reason_disabled">‏Chrome מושבת ב-Android</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview">לא זמין במכשיר הזה: Android מדווח ש-Chrome הוא רכיב WebView של המערכת</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">לא זמין במכשיר הזה: ייתכן ש-Chrome משמש כאן כרכיב WebView של המערכת</string>
+    <string name="system_policy_exempt_chrome_reason_not_available_android_version">לא זמין בגרסת Android הזו</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">מאושר, אך לא ניתן היה לקרוא את חתימת היישום, ולכן הוא נשאר מוסתר</string>
+    <string name="system_policy_exempt_record_unreadable">לא ניתן היה לקרוא את ההחרגות השמורות. עד שהן ינוקו, אף החרגה לא חלה ושינויים רגילים נדחים.</string>
+    <string name="system_policy_exempt_clear_approvals">ניקוי כל האישורים</string>
     <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>
     <string name="system_policy_exempt_social_approved">מאושר</string>
     <string name="system_policy_exempt_social_not_approved">לא מאושר</string>

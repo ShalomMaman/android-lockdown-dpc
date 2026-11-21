@@ -232,6 +232,12 @@ public final class HomeFilterPolicy {
                 ? PackageState.INSTALLED : PackageState.UNTRUSTED;
     }
 
+    /** The base choices a pass enforces for a home filter in this (effective) state. */
+    public static Map<SystemPolicyControl, Boolean> choicesFor(
+            Map<SystemPolicyControl, Boolean> base, boolean filterEnabled) {
+        return filterEnabled ? requireControls(base) : base;
+    }
+
     static Map<SystemPolicyControl, Boolean> requireControls(Map<SystemPolicyControl, Boolean> base) {
         Map<SystemPolicyControl, Boolean> choices = new LinkedHashMap<>(base);
         for (SystemPolicyControl control : REQUIRED_CONTROLS) {

@@ -26,6 +26,8 @@ public final class BuiltInExemptionsControllerTest {
         boolean protectionActive = true;
         boolean untrusted;
         boolean filterSteady = true;
+        boolean lockSucceeds = true;
+        BuiltInBlockExemptions.ChromeFlag flag = BuiltInBlockExemptions.ChromeFlag.ABSENT;
         Settings written;
 
         @Override
@@ -54,6 +56,17 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
+        public BuiltInBlockExemptions.ChromeFlag chromeFlag() {
+            return flag;
+        }
+
+        @Override
+        public boolean lockCredentials() {
+            calls.add("lock");
+            return lockSucceeds;
+        }
+
+        @Override
         public boolean protectionActive() {
             return protectionActive;
         }
@@ -73,7 +86,9 @@ public final class BuiltInExemptionsControllerTest {
                 Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink);
         assertEquals(Status.NOT_SAVED, outcome.status());
         assertNull(outcome.result());
-        assertEquals("no audit and no pass after a failed write", List.of("write"), sink.calls);
+        // The credentials lock is set before the write and stays set after a
+        // failed one; a later pass releases it only when the guard allows.
+        assertEquals("no audit and no pass after a failed write", List.of("lock", "write"), sink.calls);
     }
 
     @Test
@@ -168,6 +183,16 @@ public final class BuiltInExemptionsControllerTest {
             disk = settings;
             return true;
         }
+
+        @Override
+        public Object snapshot() {
+            return memory;
+        }
+
+        @Override
+        public void restore(Object snapshot) {
+            memory = (Settings) snapshot;
+        }
     }
 
     @Test
@@ -229,6 +254,50 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals(Status.APPLIED, BuiltInExemptionsController.change(Settings.NONE,
                 settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
                 sink).status());
+    }
+
+    @Test
+    public void theCredentialsLockIsSetBeforeAChromeApprovalIsSavedEvenWhilePaused() {
+        RecordingSink sink = new RecordingSink();
+        sink.protectionActive = false;
+        assertEquals(Status.SAVED, BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink).status());
+        assertTrue(sink.calls.toString(), sink.calls.indexOf("lock") >= 0
+                && sink.calls.indexOf("lock") < sink.calls.indexOf("write"));
+    }
+
+    @Test
+    public void noLockNoChromeApproval() {
+        RecordingSink sink = new RecordingSink();
+        sink.lockSucceeds = false;
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(
+                Settings.NONE, settings -> settings.withChrome(true), true, "approve:chrome", sink).status());
+        assertNull(sink.written);
+        assertFalse(sink.calls.contains("write"));
+    }
+
+    @Test
+    public void anUnreadableRecordRefusesOrdinaryEditsAndWritesNothing() {
+        RecordingSink sink = new RecordingSink();
+        sink.flag = BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(Settings.NONE,
+                settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
+                sink).status());
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(Settings.NONE,
+                settings -> settings.withChrome(false), true, "remove:chrome", sink).status());
+        assertTrue(sink.calls.isEmpty());
+    }
+
+    @Test
+    public void onlyAnExplicitClearMayOverwriteAnUnreadableRecord() {
+        RecordingSink sink = new RecordingSink();
+        sink.flag = BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
+        assertThrows(SecurityException.class, () -> BuiltInExemptionsController.clear(false, sink));
+        assertTrue(sink.calls.isEmpty());
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.clear(true, sink).status());
+        assertEquals(Settings.NONE, sink.written);
+        assertFalse("clearing does not touch the lock; the pass releases it under the guard",
+                sink.calls.contains("lock"));
     }
 
     @Test

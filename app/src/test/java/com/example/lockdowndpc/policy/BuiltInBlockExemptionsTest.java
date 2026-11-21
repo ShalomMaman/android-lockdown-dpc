@@ -2,6 +2,7 @@ package com.example.lockdowndpc.policy;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -265,6 +266,39 @@ public final class BuiltInBlockExemptionsTest {
         assertFalse(BuiltInBlockExemptions.filterSteadyForChrome(HomeFilterPolicy.Settings.OFF, null));
     }
 
+    // --- One settled filter for the whole pass -----------------------------------------
+
+    @Test
+    public void aHeldDisableLooksEnabledAndKeepsTheRequiredControls() {
+        HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
+        BuiltInBlockExemptions.PassFilter pass = BuiltInBlockExemptions.PassFilter.forPass(
+                pendingDisable, () -> BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED);
+        assertTrue(pass.held());
+        assertTrue(pass.effective().enabled());
+        Map<SystemPolicyControl, Boolean> choices = HomeFilterPolicy.choicesFor(Map.of(), pass.effective().enabled());
+        for (SystemPolicyControl required : HomeFilterPolicy.REQUIRED_CONTROLS) {
+            assertEquals(required.name(), Boolean.TRUE, choices.get(required));
+        }
+        assertEquals("install lock (DISALLOW_INSTALL_APPS) stays required",
+                Boolean.TRUE, choices.get(SystemPolicyControl.APP_STORES_AND_INSTALLERS));
+    }
+
+    @Test
+    public void anAllowedTeardownIsEnforcedAsStored() {
+        HomeFilterPolicy.Settings pendingDisable = enabledFilter("MIIB").requestDisable();
+        BuiltInBlockExemptions.PassFilter pass = BuiltInBlockExemptions.PassFilter.forPass(
+                pendingDisable, () -> BuiltInBlockExemptions.TeardownVerdict.ALLOWED);
+        assertFalse(pass.held());
+        assertFalse(pass.effective().enabled());
+        int[] asked = {0};
+        BuiltInBlockExemptions.PassFilter steady = BuiltInBlockExemptions.PassFilter.forPass(enabledFilter(null), () -> {
+            asked[0]++;
+            return BuiltInBlockExemptions.TeardownVerdict.CHROME_APPROVED;
+        });
+        assertFalse(steady.held());
+        assertEquals("the guard is consulted only for a pending teardown", 0, asked[0]);
+    }
+
     // --- Credentials lock -------------------------------------------------------------
 
     private static final class FakeLock implements BuiltInBlockExemptions.CredentialsLock {
@@ -282,10 +316,17 @@ public final class BuiltInBlockExemptionsTest {
     }
 
     @Test
-    public void theCredentialsLockFollowsTheChromeApprovalBothWays() {
-        assertTrue(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.PRESENT));
-        assertTrue(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.UNREADABLE));
-        assertFalse(BuiltInBlockExemptions.credentialsLockRequired(BuiltInBlockExemptions.ChromeFlag.ABSENT));
+    public void theCredentialsLockFollowsTheApprovalAndIsReleasedOnlyWhenTheGuardAllows() {
+        BuiltInBlockExemptions.TeardownVerdict allowed = BuiltInBlockExemptions.TeardownVerdict.ALLOWED;
+        BuiltInBlockExemptions.TeardownVerdict notContained = BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED;
+        assertEquals(Boolean.TRUE, BuiltInBlockExemptions.credentialsLockTarget(
+                BuiltInBlockExemptions.ChromeFlag.PRESENT, allowed));
+        assertEquals(Boolean.TRUE, BuiltInBlockExemptions.credentialsLockTarget(
+                BuiltInBlockExemptions.ChromeFlag.UNREADABLE, allowed));
+        assertEquals(Boolean.FALSE, BuiltInBlockExemptions.credentialsLockTarget(
+                BuiltInBlockExemptions.ChromeFlag.ABSENT, allowed));
+        assertNull("a refused hide keeps the lock as it is", BuiltInBlockExemptions.credentialsLockTarget(
+                BuiltInBlockExemptions.ChromeFlag.ABSENT, notContained));
         FakeLock lock = new FakeLock();
         java.util.List<String> errors = new java.util.ArrayList<>();
         assertTrue(BuiltInBlockExemptions.reconcileCredentialsLock(true, lock, errors));

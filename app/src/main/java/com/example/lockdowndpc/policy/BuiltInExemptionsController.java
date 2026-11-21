@@ -56,6 +56,15 @@ public final class BuiltInExemptionsController {
         /** The home filter is on, with nothing pending, and its CA (if any) installed. */
         boolean filterSteadyForChrome();
 
+        /** The stored approval record, read raw: an unreadable record refuses ordinary edits. */
+        BuiltInBlockExemptions.ChromeFlag chromeFlag();
+
+        /**
+         * Sets {@code DISALLOW_CONFIG_CREDENTIALS} and reads it back, before a
+         * Chrome approval is saved, so the lock covers the approval's whole life.
+         */
+        boolean lockCredentials();
+
         boolean protectionActive();
 
         LockdownPolicyController.PolicyResult applyPass();
@@ -71,43 +80,67 @@ public final class BuiltInExemptionsController {
                 operation,
                 AdminSession.isUnlocked(),
                 trigger,
-                new Sink() {
-                    @Override
-                    public boolean write(BuiltInBlockExemptions.Settings settings) {
-                        return BuiltInBlockExemptionsStore.write(context, settings);
-                    }
+                androidSink(context)));
+    }
 
-                    @Override
-                    public boolean audit(String entry) {
-                        return AuditLog.appendCommitted(context, entry);
-                    }
+    /**
+     * The explicit administrator action for an unreadable approval record:
+     * replaces it with "no exemptions". The credentials lock stays until a
+     * pass finds the teardown guard would allow its release.
+     */
+    public static Outcome clearApprovals(Context context) {
+        return PolicyReconciliationCoordinator.callOnPolicyThread(() -> clear(
+                AdminSession.isUnlocked(), androidSink(context)));
+    }
 
-                    @Override
-                    public boolean exemptionsUntrusted() {
-                        return BuiltInBlockExemptionsStore.untrusted(context);
-                    }
+    private static Sink androidSink(Context context) {
+        return new Sink() {
+            @Override
+            public boolean write(BuiltInBlockExemptions.Settings settings) {
+                return BuiltInBlockExemptionsStore.write(context, settings);
+            }
 
-                    @Override
-                    public boolean filterSteadyForChrome() {
-                        try {
-                            HomeFilterController.Snapshot filter = HomeFilterController.read(context);
-                            return BuiltInBlockExemptions.filterSteadyForChrome(
-                                    filter.settings(), filter.report().ca());
-                        } catch (RuntimeException exception) {
-                            return false;
-                        }
-                    }
+            @Override
+            public boolean audit(String entry) {
+                return AuditLog.appendCommitted(context, entry);
+            }
 
-                    @Override
-                    public boolean protectionActive() {
-                        return AllowedAppsStore.isProtectionEnabled(context);
-                    }
+            @Override
+            public boolean exemptionsUntrusted() {
+                return BuiltInBlockExemptionsStore.untrusted(context);
+            }
 
-                    @Override
-                    public LockdownPolicyController.PolicyResult applyPass() {
-                        return LockdownPolicyController.apply(context);
-                    }
-                }));
+            @Override
+            public BuiltInBlockExemptions.ChromeFlag chromeFlag() {
+                return BuiltInBlockExemptionsStore.chromeFlag(context);
+            }
+
+            @Override
+            public boolean lockCredentials() {
+                return LockdownPolicyController.lockCredentials(context);
+            }
+
+            @Override
+            public boolean filterSteadyForChrome() {
+                try {
+                    HomeFilterController.Snapshot filter = HomeFilterController.read(context);
+                    return BuiltInBlockExemptions.filterSteadyForChrome(
+                            filter.settings(), filter.report().ca());
+                } catch (RuntimeException exception) {
+                    return false;
+                }
+            }
+
+            @Override
+            public boolean protectionActive() {
+                return AllowedAppsStore.isProtectionEnabled(context);
+            }
+
+            @Override
+            public LockdownPolicyController.PolicyResult applyPass() {
+                return LockdownPolicyController.apply(context);
+            }
+        };
     }
 
     /**
@@ -135,6 +168,12 @@ public final class BuiltInExemptionsController {
             String trigger,
             Sink sink
     ) {
+        if (sink.chromeFlag() == BuiltInBlockExemptions.ChromeFlag.UNREADABLE) {
+            // The edit baseline of an unreadable record is "none", so an ordinary
+            // edit would silently drop whatever it holds. Only clearApprovals
+            // may overwrite it.
+            return new Outcome(Status.NOT_SAVED, null);
+        }
         BuiltInBlockExemptions.Settings after = operation.apply(before);
         if (before.equals(after)) {
             return new Outcome(Status.UNCHANGED, null);
@@ -147,6 +186,28 @@ public final class BuiltInExemptionsController {
             // finish under the approval.
             return new Outcome(Status.FILTER_NOT_READY, null);
         }
+        if (after.chrome() && !sink.lockCredentials()) {
+            // The lock covers the approval from before it exists; no lock, no save.
+            return new Outcome(Status.NOT_SAVED, null);
+        }
+        return commit(before, after, sessionUnlocked, trigger, sink);
+    }
+
+    static Outcome clear(boolean sessionUnlocked, Sink sink) {
+        if (!sessionUnlocked) {
+            throw new SecurityException("An unlocked administrator session is required");
+        }
+        return commit(BuiltInBlockExemptions.Settings.NONE, BuiltInBlockExemptions.Settings.NONE,
+                true, "clear-approvals", sink);
+    }
+
+    private static Outcome commit(
+            BuiltInBlockExemptions.Settings before,
+            BuiltInBlockExemptions.Settings after,
+            boolean sessionUnlocked,
+            String trigger,
+            Sink sink
+    ) {
         if (!sink.write(after)) {
             return new Outcome(Status.NOT_SAVED, null);
         }

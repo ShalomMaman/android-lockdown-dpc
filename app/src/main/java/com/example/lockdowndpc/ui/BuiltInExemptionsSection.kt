@@ -53,6 +53,10 @@ internal data class ExemptionsView(
     val socialObserved: Map<String, BuiltInBlockExemptions.Observed>,
     /** Approved social packages whose installed signer differs from the pin, read live. */
     val socialSignerMismatch: Set<String>,
+    /** Approved, installed social packages whose signer could not be read live. */
+    val socialSignerUnreadable: Set<String>,
+    /** The stored approval record cannot be read; only "clear approvals" may change it. */
+    val recordUnreadable: Boolean,
 ) {
     val chromeInstalled: Boolean
         get() = chromeObserved != BuiltInBlockExemptions.Observed.NOT_INSTALLED
@@ -96,14 +100,16 @@ internal fun loadExemptionsView(context: Context): ExemptionsView {
     val settings = BuiltInBlockExemptionsStore.readForEdit(context)
     val social = socialRows(context, settings)
     val observed = social.associate { it.packageName to ExemptionObserver.observe(context, it.packageName) }
-    val mismatch = settings.socialPins().keys.filter { packageName ->
-        observed[packageName] != BuiltInBlockExemptions.Observed.NOT_INSTALLED &&
-            !BuiltInBlockExemptions.socialVisible(
-                packageName,
-                settings,
-                PackageIdentity.currentSignerSha256IncludingHidden(context.packageManager, packageName),
-            )
-    }.toSet()
+    val installedApprovals = settings.socialPins().keys.filter { packageName ->
+        observed[packageName] != BuiltInBlockExemptions.Observed.NOT_INSTALLED
+    }
+    val signers = installedApprovals.associateWith { packageName ->
+        PackageIdentity.currentSignerSha256IncludingHidden(context.packageManager, packageName)
+    }
+    val unreadable = signers.filterValues { it.isEmpty() }.keys
+    val mismatch = signers.filter { (packageName, signer) ->
+        signer.isNotEmpty() && !BuiltInBlockExemptions.socialVisible(packageName, settings, signer)
+    }.keys
     return ExemptionsView(
         settings = settings,
         chromeDecision = BuiltInBlockExemptionsStore.readback(context)
@@ -113,6 +119,9 @@ internal fun loadExemptionsView(context: Context): ExemptionsView {
         social = social,
         socialObserved = observed,
         socialSignerMismatch = mismatch,
+        socialSignerUnreadable = unreadable,
+        recordUnreadable = BuiltInBlockExemptionsStore.chromeFlag(context) ==
+            BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
     )
 }
 
@@ -136,8 +145,12 @@ internal fun socialRows(
 /** The administrator's reason line for Chrome's decision on the last pass. */
 internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = when (decision) {
     ChromeFilterExemption.Decision.SHOWN -> R.string.system_policy_exempt_chrome_reason_shown
-    ChromeFilterExemption.Decision.NOT_AVAILABLE ->
-        R.string.system_policy_exempt_chrome_reason_not_available
+    ChromeFilterExemption.Decision.NOT_AVAILABLE_WEBVIEW_PROVIDER ->
+        R.string.system_policy_exempt_chrome_reason_not_available_webview
+    ChromeFilterExemption.Decision.NOT_AVAILABLE_WEBVIEW_UNCONFIRMED ->
+        R.string.system_policy_exempt_chrome_reason_not_available_webview_unconfirmed
+    ChromeFilterExemption.Decision.NOT_AVAILABLE_ANDROID_VERSION ->
+        R.string.system_policy_exempt_chrome_reason_not_available_android_version
     ChromeFilterExemption.Decision.NOT_EXEMPTED -> R.string.system_policy_exempt_chrome_reason_not_exempted
     ChromeFilterExemption.Decision.PROTECTION_PAUSED -> R.string.system_policy_exempt_chrome_reason_paused
     ChromeFilterExemption.Decision.FILTER_DISABLED -> R.string.system_policy_exempt_chrome_reason_filter_off
@@ -171,6 +184,7 @@ internal fun observedRes(state: BuiltInBlockExemptions.Observed?): Int = when (s
 /** The approval line for a social row: the stored decision, not Android's state. */
 internal fun socialApprovalRes(packageName: String, view: ExemptionsView): Int = when {
     packageName !in view.settings.socialPins() -> R.string.system_policy_exempt_social_not_approved
+    packageName in view.socialSignerUnreadable -> R.string.system_policy_exempt_social_signer_unreadable_row
     packageName in view.socialSignerMismatch -> R.string.system_policy_exempt_social_signer_mismatch
     else -> R.string.system_policy_exempt_social_approved
 }
@@ -205,8 +219,25 @@ internal fun BuiltInExemptionsSection(
     onRemoveChrome: () -> Unit,
     onRequestSocial: (ExemptionCandidate) -> Unit,
     onRemoveSocial: (ExemptionCandidate) -> Unit,
+    onClearApprovals: () -> Unit,
 ) {
     SectionCard(title = stringResource(R.string.system_policy_section_exemptions)) {
+        if (view.recordUnreadable) {
+            Text(
+                text = stringResource(R.string.system_policy_exempt_record_unreadable),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            )
+            TextButton(
+                onClick = onClearApprovals,
+                enabled = enabled,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            ) {
+                Text(stringResource(R.string.system_policy_exempt_clear_approvals))
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()

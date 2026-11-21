@@ -16,7 +16,11 @@ import java.util.List;
  *       recorded first, so the console never keeps an older result;</li>
  *   <li>the pass records that it started;</li>
  *   <li>Chrome's decision, made with the protection state read <em>after</em>
- *       that record, which is the state the pass actually runs under.</li>
+ *       that record, which is the state the pass actually runs under;</li>
+ *   <li>the home filter settings this pass enforces, settled once (after
+ *       containment, so the teardown guard sees Chrome as this pass left it)
+ *       and returned for every later step — system policy, packages and the
+ *       filter's reconciliation — so a held teardown looks enabled to all.</li>
  * </ol>
  *
  * <p>Later steps may only show a package through the verified path. The
@@ -29,13 +33,25 @@ final class ExemptionPassStart {
 
     enum Stop { NONE, CORRUPT_HOME_FILTER, NOT_DEVICE_OWNER }
 
-    /** Where the pass stopped, and Chrome's decision when it did not. */
-    record Start(Stop stop, ChromeFilterExemption.Decision chrome) {}
+    /**
+     * Where the pass stopped, Chrome's decision and the home filter settings the
+     * pass enforces when it did not.
+     */
+    record Start(Stop stop, ChromeFilterExemption.Decision chrome, BuiltInBlockExemptions.PassFilter filter) {}
 
     interface Steps {
         boolean deviceOwner();
 
         boolean homeFilterReadable();
+
+        /** The stored home filter settings; only asked once they are known to be readable. */
+        HomeFilterPolicy.Settings storedFilter();
+
+        /** The live teardown guard. */
+        BuiltInBlockExemptions.TeardownVerdict teardownVerdict();
+
+        /** Why the Chrome exemption cannot act on this device, when it is out of scope. */
+        ChromeFilterExemption.Decision unavailableDecision();
 
         /** Hides every catalogue social package without a verified exemption. */
         void containSocial(List<String> errors);
@@ -71,15 +87,17 @@ final class ExemptionPassStart {
             if (deviceOwner) {
                 steps.recordEarlyReadback(errors);
             }
-            return new Start(Stop.CORRUPT_HOME_FILTER, null);
+            return new Start(Stop.CORRUPT_HOME_FILTER, null, null);
         }
         steps.markApplyStarted();
         if (!deviceOwner) {
-            return new Start(Stop.NOT_DEVICE_OWNER, null);
+            return new Start(Stop.NOT_DEVICE_OWNER, null, null);
         }
         ChromeFilterExemption.Decision decision = chrome == null
-                ? ChromeFilterExemption.Decision.NOT_AVAILABLE
+                ? steps.unavailableDecision()
                 : steps.decideChrome(chrome, steps.protectionActive(), errors);
-        return new Start(Stop.NONE, decision);
+        BuiltInBlockExemptions.PassFilter filter =
+                BuiltInBlockExemptions.PassFilter.forPass(steps.storedFilter(), steps::teardownVerdict);
+        return new Start(Stop.NONE, decision, filter);
     }
 }

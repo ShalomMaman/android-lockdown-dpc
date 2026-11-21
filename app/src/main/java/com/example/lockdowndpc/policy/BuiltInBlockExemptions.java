@@ -279,11 +279,52 @@ public final class BuiltInBlockExemptions {
     }
 
     /**
-     * While Chrome is approved — or the record is unreadable — Android Settings
-     * must not be able to remove the filter CA, so the credentials lock is on.
+     * What the credentials lock must be. It follows the saved approval, not the
+     * pass: on while Chrome is approved (or the record is unreadable); released
+     * only when the teardown guard itself would allow a teardown; otherwise —
+     * for example after a refused hide — left exactly as it is.
+     *
+     * @return {@code TRUE} to set, {@code FALSE} to release, {@code null} to leave
      */
-    public static boolean credentialsLockRequired(ChromeFlag flag) {
-        return flag != ChromeFlag.ABSENT;
+    public static Boolean credentialsLockTarget(ChromeFlag flag, TeardownVerdict verdict) {
+        if (flag != ChromeFlag.ABSENT) {
+            return Boolean.TRUE;
+        }
+        return verdict == TeardownVerdict.ALLOWED ? Boolean.FALSE : null;
+    }
+
+    /**
+     * The home filter settings one pass enforces, computed once and handed to
+     * every step that depends on them — system policy, packages and the
+     * filter's own reconciliation — so a held teardown looks "enabled" to all.
+     *
+     * @param stored    what is stored
+     * @param effective what the pass enforces: the stored settings, or the
+     *                  stored settings with a pending teardown held
+     * @param hold      why a pending teardown is held, or {@code null}
+     */
+    public record PassFilter(
+            HomeFilterPolicy.Settings stored,
+            HomeFilterPolicy.Settings effective,
+            TeardownVerdict hold
+    ) {
+        public boolean held() {
+            return hold != null;
+        }
+
+        /** Holds a pending teardown unless the guard allows it now. */
+        public static PassFilter forPass(
+                HomeFilterPolicy.Settings stored,
+                java.util.function.Supplier<TeardownVerdict> guard
+        ) {
+            if (hasPendingTeardown(stored)) {
+                TeardownVerdict verdict = guard.get();
+                if (verdict != TeardownVerdict.ALLOWED) {
+                    return new PassFilter(stored, withTeardownHeld(stored), verdict);
+                }
+            }
+            return new PassFilter(stored, stored, null);
+        }
     }
 
     /** The credentials lock as Android reports it. Any call may throw. */

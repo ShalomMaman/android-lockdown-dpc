@@ -9,8 +9,10 @@ package com.example.lockdowndpc.policy;
  * durable. Therefore:
  * <ul>
  *   <li>the exemptions have a preference file of their own, written only here;</li>
- *   <li>after a failed commit the previous values are written back, which
- *       restores the in-memory map whatever the disk does;</li>
+ *   <li>after a failed commit the previous <em>raw</em> stored values are
+ *       written back exactly — never a re-serialised parse, which would turn an
+ *       unreadable record into an empty one — restoring the in-memory map
+ *       whatever the disk does;</li>
  *   <li>and an in-process latch makes every pass see no exemptions at all
  *       until a later commit succeeds, so it hides everything the exemptions
  *       would have shown. The next edit still starts from the last durable
@@ -25,6 +27,12 @@ final class BuiltInExemptionsPersistence {
 
         /** Android semantics: memory is updated even when this returns {@code false}. */
         boolean commit(BuiltInBlockExemptions.Settings settings);
+
+        /** The raw stored values, exactly as found, for a rollback. */
+        Object snapshot();
+
+        /** Writes {@code snapshot} back exactly; memory is restored whatever the disk does. */
+        void restore(Object snapshot);
     }
 
     private final Backing backing;
@@ -62,20 +70,15 @@ final class BuiltInExemptionsPersistence {
 
     /** @return whether {@code settings} was persisted; {@code false} changes nothing visible */
     synchronized boolean write(BuiltInBlockExemptions.Settings settings) {
-        BuiltInBlockExemptions.Settings previous;
-        try {
-            previous = backing.read();
-        } catch (RuntimeException exception) {
-            previous = BuiltInBlockExemptions.Settings.NONE;
-        }
+        Object previous = backing.snapshot();
         if (backing.commit(settings)) {
             untrusted = false;
             return true;
         }
         untrusted = true;
-        // Restores the in-memory map; whether the disk accepts it does not
-        // matter while the latch hides every exemption.
-        backing.commit(previous);
+        // Restores the in-memory map to the exact raw record; whether the disk
+        // accepts it does not matter while the latch hides every exemption.
+        backing.restore(previous);
         return false;
     }
 

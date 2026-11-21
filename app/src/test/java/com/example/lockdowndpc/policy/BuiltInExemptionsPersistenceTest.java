@@ -17,14 +17,15 @@ public final class BuiltInExemptionsPersistenceTest {
 
     private static final String SIGNER = "aa".repeat(32);
 
+    /** Memory holds the raw record: a Settings value, or an unreadable raw marker. */
     private static final class AndroidLikeBacking implements BuiltInExemptionsPersistence.Backing {
-        Settings memory = Settings.NONE;
-        Settings disk = Settings.NONE;
+        Object memory = Settings.NONE;
+        Object disk = Settings.NONE;
         boolean diskFails;
 
         @Override
         public Settings read() {
-            return memory;
+            return memory instanceof Settings settings ? settings : Settings.NONE;
         }
 
         @Override
@@ -36,6 +37,32 @@ public final class BuiltInExemptionsPersistenceTest {
             disk = settings;
             return true;
         }
+
+        @Override
+        public Object snapshot() {
+            return memory;
+        }
+
+        @Override
+        public void restore(Object snapshot) {
+            memory = snapshot;
+            if (!diskFails) {
+                disk = snapshot;
+            }
+        }
+    }
+
+    @Test
+    public void aFailedWriteRestoresAnUnreadableRecordExactlyNotAsEmpty() {
+        AndroidLikeBacking backing = new AndroidLikeBacking();
+        Object unreadable = java.util.Map.of("chrome", true, "social_pins", java.util.Set.of("not-a-pin"));
+        backing.memory = unreadable;
+        backing.disk = unreadable;
+        BuiltInExemptionsPersistence persistence = new BuiltInExemptionsPersistence(backing);
+        backing.diskFails = true;
+        assertFalse(persistence.write(Settings.NONE.withSocial("com.whatsapp", SIGNER)));
+        assertEquals("the raw record is back, not a normalized empty value", unreadable, backing.memory);
+        assertEquals(unreadable, backing.disk);
     }
 
     @Test
@@ -97,6 +124,15 @@ public final class BuiltInExemptionsPersistenceTest {
                     @Override
                     public boolean commit(Settings settings) {
                         return true;
+                    }
+
+                    @Override
+                    public Object snapshot() {
+                        return null;
+                    }
+
+                    @Override
+                    public void restore(Object snapshot) {
                     }
                 });
         assertEquals(Settings.NONE, persistence.read());

@@ -34,6 +34,27 @@ public final class ExemptionPassStartTest {
             return homeFilterReadable;
         }
 
+        HomeFilterPolicy.Settings storedFilter = new HomeFilterPolicy.Settings(
+                new HomeFilterPolicy.Config(HomeFilterPolicy.DEFAULT_VPN_PACKAGE, "https://filter.example.org/p.pac"),
+                true, null, false);
+        BuiltInBlockExemptions.TeardownVerdict verdict = BuiltInBlockExemptions.TeardownVerdict.ALLOWED;
+
+        @Override
+        public HomeFilterPolicy.Settings storedFilter() {
+            return storedFilter;
+        }
+
+        @Override
+        public BuiltInBlockExemptions.TeardownVerdict teardownVerdict() {
+            calls.add("teardown-guard");
+            return verdict;
+        }
+
+        @Override
+        public Decision unavailableDecision() {
+            return Decision.NOT_AVAILABLE_ANDROID_VERSION;
+        }
+
         @Override
         public void containSocial(List<String> errors) {
             calls.add("contain-social");
@@ -101,11 +122,30 @@ public final class ExemptionPassStartTest {
     }
 
     @Test
+    public void aHeldDisableIsSettledOnceAfterContainmentAndLooksEnabledToEveryStep() {
+        // A pending disable while Android does not report Chrome contained: the
+        // start settles the enforced settings once, after containment and after
+        // the pass started; system policy and reconciliation both take this value.
+        RecordingSteps steps = new RecordingSteps();
+        steps.storedFilter = steps.storedFilter.requestDisable();
+        steps.verdict = BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED;
+        ExemptionPassStart.Start start = ExemptionPassStart.begin(steps, new ArrayList<>());
+        assertTrue(start.filter().held());
+        assertTrue(start.filter().effective().enabled());
+        assertTrue(steps.calls.indexOf("contain-chrome") < steps.calls.indexOf("teardown-guard"));
+        assertTrue(steps.calls.indexOf("start") < steps.calls.indexOf("teardown-guard"));
+        java.util.Map<SystemPolicyControl, Boolean> systemPolicy =
+                HomeFilterPolicy.choicesFor(java.util.Map.of(), start.filter().effective().enabled());
+        assertEquals(Boolean.TRUE, systemPolicy.get(SystemPolicyControl.APP_STORES_AND_INSTALLERS));
+        assertFalse(start.filter().stored().enabled());
+    }
+
+    @Test
     public void outOfScopeChromeIsNotAvailableAndNotDecided() {
         RecordingSteps steps = new RecordingSteps();
         steps.chromeInScope = false;
         ExemptionPassStart.Start start = ExemptionPassStart.begin(steps, new ArrayList<>());
-        assertEquals(Decision.NOT_AVAILABLE, start.chrome());
+        assertEquals(Decision.NOT_AVAILABLE_ANDROID_VERSION, start.chrome());
         assertFalse(steps.calls.contains("decide-chrome"));
     }
 

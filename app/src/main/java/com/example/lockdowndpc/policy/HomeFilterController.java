@@ -152,22 +152,32 @@ public final class HomeFilterController {
             errors.add(CORRUPT_CONFIGURATION);
             return;
         }
+        reconcile(context, dpm, admin, errors,
+                BuiltInBlockExemptions.PassFilter.forPass(settings, () -> teardownVerdict(context)));
+    }
+
+    /**
+     * Reconciles the settings a policy pass already settled. A pending teardown
+     * (turn off, or CA removal) never finishes while a Chrome approval is saved
+     * or Chrome is not observed contained: the filter is kept on with its CA,
+     * the request stays pending, and the pass reports why. Boot and retry
+     * passes come through here too. The same settled value went to the pass's
+     * system policy and package steps.
+     */
+    static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
+                          List<String> errors, BuiltInBlockExemptions.PassFilter pass) {
+        HomeFilterPolicy.Settings settings = pass.stored();
+        if (settings == null) {
+            errors.add(CORRUPT_CONFIGURATION);
+            return;
+        }
         if (!settings.configured()) {
             return;
         }
-        // A pending teardown (turn off, or CA removal) never finishes while a
-        // Chrome approval is saved or Chrome is not observed contained: the
-        // filter is kept on with its CA, the request stays pending, and the
-        // pass reports why. Boot and retry passes come through here too.
-        boolean held = false;
-        HomeFilterPolicy.Settings enforced = settings;
-        if (BuiltInBlockExemptions.hasPendingTeardown(settings)) {
-            BuiltInBlockExemptions.TeardownVerdict verdict = teardownVerdict(context);
-            if (verdict != BuiltInBlockExemptions.TeardownVerdict.ALLOWED) {
-                held = true;
-                enforced = BuiltInBlockExemptions.withTeardownHeld(settings);
-                errors.add("home-filter:teardown-held:" + verdict);
-            }
+        boolean held = pass.held();
+        HomeFilterPolicy.Settings enforced = pass.effective();
+        if (held) {
+            errors.add("home-filter:teardown-held:" + pass.hold());
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
