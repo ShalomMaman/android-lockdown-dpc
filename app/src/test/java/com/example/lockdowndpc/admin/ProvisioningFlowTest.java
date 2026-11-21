@@ -165,7 +165,7 @@ public final class ProvisioningFlowTest {
     }
 
     @Test
-    public void baselineIsSkippedOnlyAfterRecordedComplianceOrCompletedSetupWithProtection() {
+    public void baselineIsSkippedOnlyAfterRecordedComplianceOrCompletedSetupWithVerifiedProtection() {
         assertTrue(ProvisioningFlow.shouldApplyBaseline(false, false, false));
         assertTrue(ProvisioningFlow.shouldApplyBaseline(false, false, true));
         assertTrue(ProvisioningFlow.shouldApplyBaseline(true, false, false));
@@ -174,5 +174,13 @@ public final class ProvisioningFlowTest {
         assertFalse(ProvisioningFlow.shouldApplyBaseline(false, true, true));
         assertFalse(ProvisioningFlow.shouldApplyBaseline(true, true, false));
         assertFalse(ProvisioningFlow.shouldApplyBaseline(true, true, true));
+    }
+
+    @Test
+    public void aFailedEarlierPassIsAppliedAgainEvenAfterSetupCompleted() {
+        // Setup marked complete early, the last pass FAILED (enabled but not
+        // verified), no compliance recorded: the baseline must run again.
+        boolean lastPassVerified = false;
+        assertTrue(ProvisioningFlow.shouldApplyBaseline(true, false, lastPassVerified));
     }
 }

@@ -206,8 +206,9 @@ passphrase, the administrator PIN or a recovery code.
 > policy back; an unverified or crashed pass cancels setup, and the failure is
 > kept in the policy status and the audit log. A later compliance request
 > returns immediately when a verified compliance pass was recorded or when
-> setup is complete and protection is already enabled. The recorded flag
-> preserves an administrator's later decision to pause protection. Both
+> setup is complete and the last policy pass was already verified. The
+> recorded flag preserves an administrator's later decision to pause protection
+> on devices that went through this compliance step. Both
 > handlers require `BIND_DEVICE_ADMIN`. After setup, check ownership and policy
 > read-back as described below. QR enrolment on physical devices is pending in
 > [Group Q](hardware-validation.md#group-q--android-12-qr-enrolment).

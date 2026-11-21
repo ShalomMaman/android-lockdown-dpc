@@ -67,7 +67,8 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         PENDING.request(
                 () -> ProvisioningFlow.shouldApplyBaseline(
                         isUserSetupComplete(appContext), isComplianceDone(appContext),
-                        AllowedAppsStore.isProtectionEnabled(appContext)),
+                        AllowedAppsStore.getPolicyState(appContext)
+                                == AllowedAppsStore.PolicyState.ACTIVE),
                 this::showProgress,
                 report -> PolicyReconciliationCoordinator.reconcileForProvisioning(
                         appContext,

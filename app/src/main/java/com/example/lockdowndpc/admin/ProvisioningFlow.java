@@ -35,13 +35,15 @@ final class ProvisioningFlow {
      *
      * <p>Some setup wizards can mark setup complete before they request compliance.
      * Skip only when a verified compliance pass was recorded or when setup is
-     * complete and protection is already enabled. The recorded flag also preserves
-     * an administrator's decision to pause protection after provisioning.
+     * complete and the last policy pass was verified (state ACTIVE). Enabled alone is
+     * not evidence: a failed pass keeps protection enabled with state FAILED. The
+     * recorded flag also preserves an administrator's decision to pause protection
+     * after provisioning.
      */
     static boolean shouldApplyBaseline(
-            boolean userSetupComplete, boolean complianceDone, boolean protectionEnabled
+            boolean userSetupComplete, boolean complianceDone, boolean protectionVerified
     ) {
-        return !complianceDone && !(userSetupComplete && protectionEnabled);
+        return !complianceDone && !(userSetupComplete && protectionVerified);
     }
 
     /** Shares one pass among all live requests. All state is accessed on the main thread. */
