@@ -4,6 +4,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.health.DeviceHealthAssessor.Assessment;
 import com.example.lockdowndpc.health.DeviceHealthSnapshot.AuditEvent;
 import com.example.lockdowndpc.health.DeviceHealthSnapshot.IdentityVerdict;
@@ -26,6 +27,8 @@ import org.junit.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * The redaction rules, proved against hostile input.
@@ -45,6 +48,36 @@ public final class DeviceHealthRedactionTest {
 
     private static final String ADMIN_PIN = "482913";
     private static final String RECOVERY_CODE = "ABCD-EFGH-IJKL";
+
+    @Test
+    public void localReportShowsTheLatestReconciliationResultAndTimeWhileExportIncludesItsTrigger() {
+        Map<Integer, String> strings = Map.of(
+                R.string.health_line, "%s: %s",
+                R.string.health_field_verification, "Policy verification",
+                R.string.health_policy_verification_verified, "Verified against the platform",
+                R.string.health_section_reconciliation, "Last reconciliation",
+                R.string.health_field_reconciliation, "Result",
+                R.string.health_reconciliation_verified, "Verified",
+                R.string.health_field_reconciliation_at, "When");
+        DeviceHealthSnapshot base = hostile();
+        long reconciledAt = NOW - HOUR;
+        for (String trigger : List.of("provisioning-compliance", "device-admin-service-started")) {
+            DeviceHealthSnapshot snapshot = new DeviceHealthSnapshot(
+                    base.policy(), base.kiosk(), base.updates(), base.managementIdentities(),
+                    new Reconciliation(ReconciliationOutcome.VERIFIED, reconciledAt, trigger, ""),
+                    base.platform(), base.audit(), base.maintenance());
+
+            String local = DeviceHealthReport.local(snapshot, null, NOW,
+                    (id, args) -> String.format(Locale.ROOT, strings.getOrDefault(id, ""), args),
+                    Long::toString);
+            assertTrue(local.contains("Policy verification: Verified against the platform\n"));
+            assertTrue(local.contains("Last reconciliation\nResult: Verified\nWhen: " + reconciledAt));
+            assertFalse(local.contains(trigger));
+            assertTrue(DeviceHealthReport.export(snapshot, NOW)
+                    .contains("reconciliation.trigger=" + trigger + "\n"));
+            reconciledAt = NOW;
+        }
+    }
 
     @Test
     public void noFreeTextFieldReachesTheExport() {

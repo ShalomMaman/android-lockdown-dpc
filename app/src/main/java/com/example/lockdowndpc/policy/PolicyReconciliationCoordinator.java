@@ -20,6 +20,8 @@ import java.util.function.Supplier;
 public final class PolicyReconciliationCoordinator {
     private static final String TAG = "PolicyReconciliation";
     static final String THREAD_NAME = "lockdown-policy-reconciliation";
+    /** Reason recorded for the pass the setup wizard requests during provisioning. */
+    public static final String PROVISIONING_COMPLIANCE_REASON = "provisioning-compliance";
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(
             new ReconciliationThreadFactory()
     );
@@ -112,40 +114,74 @@ public final class PolicyReconciliationCoordinator {
                     }
                     return true;
                 },
-                () -> {
-                    LockdownPolicyController.PolicyResult result =
-                            LockdownPolicyController.apply(appContext);
-                    // Recorded, not just logged: an unattended pass is the only
-                    // evidence a device has that it is still enforcing what it
-                    // was told to, and the health report reads it back.
-                    ReconciliationRecord.record(
-                            appContext,
-                            result.applied()
-                                    ? ReconciliationRecord.Outcome.VERIFIED
-                                    : ReconciliationRecord.Outcome.FAILED,
-                            reason,
-                            result.applied() ? "" : summarize(result));
-                    if (result.applied()) {
-                        Log.i(TAG, "Reconciliation verified: " + reason);
-                    } else {
-                        Log.e(TAG, "Reconciliation failed: " + reason);
-                    }
-                    return result.applied();
-                },
-                exception -> {
-                    String message = "Reconciliation crashed (" + reason + "): "
-                            + exception.getClass().getSimpleName();
-                    ReconciliationRecord.record(
-                            appContext,
-                            ReconciliationRecord.Outcome.CRASHED,
-                            reason,
-                            exception.getClass().getSimpleName());
-                    AllowedAppsStore.markApplyFailed(appContext, message);
-                    AuditLog.append(appContext, message);
-                    Log.e(TAG, message, exception);
-                },
+                () -> applyAndRecord(appContext, reason),
+                exception -> recordCrash(appContext, reason, exception),
                 completion
         ));
+    }
+
+    /**
+     * Applies the baseline for {@code ADMIN_POLICY_COMPLIANCE} and reports
+     * whether the complete pass was verified.
+     *
+     * <p>Unlike {@link #reconcileAsyncVerified}, this pass is not skipped while
+     * protection is off. A freshly provisioned device has never stored a
+     * protection state, so the coordinator's gate would skip the only pass that
+     * protects it before the wizard hands the device to its user.
+     * {@link LockdownPolicyController#apply} records protection as enabled when
+     * it starts, exactly as an administrator-initiated apply does. Recording,
+     * crash handling and the policy thread are shared with every other pass.
+     */
+    public static void reconcileForProvisioning(Context context, Consumer<Boolean> completion) {
+        Context appContext = context.getApplicationContext();
+        submit(provisioningPass(
+                () -> applyAndRecord(appContext, PROVISIONING_COMPLIANCE_REASON),
+                exception -> recordCrash(appContext, PROVISIONING_COMPLIANCE_REASON, exception),
+                completion));
+    }
+
+    /** The provisioning pass: no protection gate, otherwise the guarded verified contract. */
+    static Runnable provisioningPass(
+            Supplier<Boolean> work,
+            Consumer<RuntimeException> crashHandler,
+            Consumer<Boolean> completion
+    ) {
+        return () -> runGuardedVerified(() -> true, work, crashHandler, completion);
+    }
+
+    /** Applies the complete policy and records the outcome of the pass. */
+    private static boolean applyAndRecord(Context appContext, String reason) {
+        LockdownPolicyController.PolicyResult result = LockdownPolicyController.apply(appContext);
+        // Recorded, not just logged: an unattended pass is the only
+        // evidence a device has that it is still enforcing what it
+        // was told to, and the health report reads it back.
+        ReconciliationRecord.record(
+                appContext,
+                result.applied()
+                        ? ReconciliationRecord.Outcome.VERIFIED
+                        : ReconciliationRecord.Outcome.FAILED,
+                reason,
+                result.applied() ? "" : summarize(result));
+        if (result.applied()) {
+            Log.i(TAG, "Reconciliation verified: " + reason);
+        } else {
+            Log.e(TAG, "Reconciliation failed: " + reason);
+        }
+        return result.applied();
+    }
+
+    /** Records a pass that threw instead of returning a result. */
+    private static void recordCrash(Context appContext, String reason, RuntimeException exception) {
+        String message = "Reconciliation crashed (" + reason + "): "
+                + exception.getClass().getSimpleName();
+        ReconciliationRecord.record(
+                appContext,
+                ReconciliationRecord.Outcome.CRASHED,
+                reason,
+                exception.getClass().getSimpleName());
+        AllowedAppsStore.markApplyFailed(appContext, message);
+        AuditLog.append(appContext, message);
+        Log.e(TAG, message, exception);
     }
 
     /** The failure summary, as machine tokens rather than prose. */

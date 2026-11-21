@@ -230,4 +230,57 @@ public final class PolicyReconciliationCoordinatorTest {
 
         assertFalse(verified.get());
     }
+
+    @Test
+    public void provisioningPassRunsWithoutTheProtectionGate() {
+        AtomicBoolean worked = new AtomicBoolean();
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.provisioningPass(
+                () -> {
+                    worked.set(true);
+                    return true;
+                },
+                exception -> { throw new AssertionError(exception); },
+                verified::set
+        ).run();
+
+        assertTrue(worked.get());
+        assertTrue(verified.get());
+    }
+
+    @Test
+    public void provisioningPassReportsUnverifiedApply() {
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.provisioningPass(
+                () -> false,
+                exception -> { throw new AssertionError(exception); },
+                verified::set
+        ).run();
+
+        assertFalse(verified.get());
+    }
+
+    @Test
+    public void provisioningPassRecordsACrashAsFailure() {
+        AtomicReference<Boolean> verified = new AtomicReference<>();
+        List<RuntimeException> recorded = new CopyOnWriteArrayList<>();
+        IllegalStateException failure = new IllegalStateException("Policy pass interrupted");
+
+        PolicyReconciliationCoordinator.provisioningPass(
+                () -> { throw failure; },
+                recorded::add,
+                verified::set
+        ).run();
+
+        assertEquals(List.of(failure), recorded);
+        assertFalse(verified.get());
+    }
+
+    @Test
+    public void provisioningReasonIsStable() {
+        assertEquals("provisioning-compliance",
+                PolicyReconciliationCoordinator.PROVISIONING_COMPLIANCE_REASON);
+    }
 }

@@ -196,16 +196,22 @@ Record for each device: model, Android build number, serial, payload SHA-256,
 APK version code, the operator, and the outcome. Never record the Wi-Fi
 passphrase, the administrator PIN or a recovery code.
 
-> **Known gap before the first QR attempt.** Device Guard's manifest declares
-> the admin receiver with `DEVICE_ADMIN_ENABLED` and
-> `PROFILE_PROVISIONING_COMPLETE`, and `LockdownAdminReceiver` implements
-> `onProfileProvisioningComplete`. It declares no activity for
-> `android.app.action.GET_PROVISIONING_MODE` or
-> `android.app.action.ADMIN_POLICY_COMPLIANCE`, which recent platform versions
-> hand to the DPC to finish setup-wizard provisioning. Expect the first QR
-> attempt on Android 11 or newer to expose this, and treat the hardware
-> rehearsal as the test that decides it. The ADB path in Runbook B does not use
-> those intents and is unaffected.
+> **Android 12 (API 31) and later.** Use an APK that includes both setup wizard
+> handlers. Device Guard selects fully managed device mode and cancels setup
+> if Android supplies an allowed-mode list that excludes it. After Android
+> grants Device Owner, the compliance handler shows a progress screen and
+> applies Device Guard's baseline policy through the same verified pass the
+> console uses, recorded as `provisioning-compliance`. Protection is switched
+> on by that pass. The wizard continues only when Android has read the whole
+> policy back; an unverified or crashed pass cancels setup, and the failure is
+> kept in the policy status and the audit log. A later compliance request
+> returns immediately when a verified compliance pass was recorded or when
+> setup is complete and the last policy pass was already verified. The
+> recorded flag preserves an administrator's later decision to pause protection
+> on devices that went through this compliance step. Both
+> handlers require `BIND_DEVICE_ADMIN`. After setup, check ownership and policy
+> read-back as described below. QR enrolment on physical devices is pending in
+> [Group Q](hardware-validation.md#group-q--android-12-qr-enrolment).
 
 ## Home filter
 
@@ -341,11 +347,21 @@ three:
 2. **The console.** Open Device Guard. The status surface reads
    `isDeviceOwnerApp` directly, so it shows ownership rather than an assumption.
 
-3. **A verified policy apply.** Apply the intended protection profile and
-   confirm the console reports it as applied. Device Guard never reports a
-   requested policy as active until it has read the value back from the
-   platform, so an "applied" state is evidence and a "failed" state is a real
-   OEM refusal to investigate — not a display defect.
+3. **A verified policy apply.** After Android 12+ QR enrolment, check the
+   baseline before changing policy in the console. Confirm the status reads
+   **Protection is active and verified**. In Device Health, check that
+   **Policy verification** reads **Verified against the platform** and that
+   **Last reconciliation** shows **Result: Verified** and a **When** timestamp.
+   The clipboard export includes the latest trigger. Once protection is on,
+   a later pass such as `device-admin-service-started` can replace the
+   `provisioning-compliance` record. The result and timestamp describe the
+   most recent pass. For other enrolment methods, apply
+   the intended protection profile before checking the console. Investigate
+   a failed verification before handing over the device. Confirm the
+   Settings factory-reset option is unavailable. See
+   [the recovery section](#recovering-a-device-with-the-wrong-component-or-identity).
+   On production builds, the baseline disables USB debugging. Use the console
+   for policy evidence and Settings for the factory-reset check.
 
 An enrolment that satisfies 1 and 2 but not 3 is an OEM policy problem on a
 correctly owned device. Record which restriction failed before continuing; that
@@ -360,14 +376,16 @@ not try to repair it in place.
 | --- | --- | --- |
 | Wizard cannot download the APK | Download location unreachable, HTTP redirect, captive portal | Fix the host and network; re-scan. The URL must be clean HTTPS end to end. |
 | "Package checksum does not match" or a signature error | The URL serves an APK signed with a different key, or `--signer-sha256` was wrong | Rebuild the payload with `--apk` so the digest is read from the artifact. |
-| Wizard installs the DPC but does not hand over | The mode/compliance intents above are unresolved, or the DPC crashed on the callback | Factory reset. Capture `adb logcat` from the next attempt before resetting if possible. |
+| Wizard installs the DPC but does not hand over | The APK lacks a provisioning handler, fully managed mode is unavailable, or the compliance callback could not verify the baseline | Check the APK version and capture `adb logcat` where available. If the console opens, record its policy error. Factory reset before retrying; a failed compliance pass may already have blocked the Settings reset entry. |
+| Setup finished, then the device must be wiped | Compliance passed, so the baseline, including `DISALLOW_FACTORY_RESET`, is in force | The Settings reset entry is disabled. Use the model's recovery-mode wipe; see the recovery section below. |
 | "Already provisioned" / owner already set | The device was not fully wiped | Factory reset. |
 | Enrolment ends with no management consent screen | Wizard was already completed once | Factory reset. |
 | Device reboots into the wizard repeatedly | Encryption or wizard step interrupted | Factory reset; do not use `--skip-encryption` as a workaround. |
 
-After any failure: factory reset, then start Runbook A from step 1. If the
-device became owned before it failed, the Settings reset entry may already be
-blocked — see the recovery section below for what remains. Keep the failure in
+After any failure: factory reset, then start Runbook A from step 1. Once the
+compliance step has applied the baseline, the Settings reset entry is
+disabled even if setup failed afterwards, and only the recovery-mode wipe
+works — see the recovery section below. Keep the failure in
 the enrolment record — the pattern across models is the deliverable
 of the OEM matrix, not noise.
 
@@ -412,13 +430,14 @@ Proven by `tools/test_provisioning_payload.py` (JVM-free Python unit tests):
 payload structure and key set, digest normalisation across hexadecimal and
 Base64, every refusal path, the environment-variable-only handling of the Wi-Fi
 passphrase, the restricted file mode when a passphrase is embedded, and the
-non-zero exit on validation failure.
+non-zero exit on validation failure. `tools/test_manifest_permissions.py` checks
+the exported provisioning handlers, their intent filters and their permission.
 
 Not proven anywhere in this repository: that a printed QR scans on any specific
-OEM setup wizard, that the wizard completes the handover to
-`LockdownAdminReceiver` on Android 11 or newer, that the download location is
-reachable from a device before policy exists, and that a provisioned device then
-reports a verified policy apply. Those are hardware acceptance items and they
+OEM setup wizard, that the wizard completes both provisioning callbacks on
+Android 12 or later, that the download location is reachable from a device
+before policy exists, and that a provisioned device then reports a verified
+policy apply. Those are hardware acceptance items and they
 belong to the physical validation gate in
 [`docs/production-roadmap.md`](production-roadmap.md).
 
