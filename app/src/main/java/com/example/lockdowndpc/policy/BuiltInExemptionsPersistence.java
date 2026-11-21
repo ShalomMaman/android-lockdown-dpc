@@ -10,20 +10,23 @@ package com.example.lockdowndpc.policy;
  * <ul>
  *   <li>the exemptions have a preference file of their own, written only here;</li>
  *   <li>after a failed commit the previous <em>raw</em> stored values are
- *       written back exactly — never a re-serialised parse, which would turn an
- *       unreadable record into an empty one — restoring the in-memory map
- *       whatever the disk does;</li>
+ *       written back exactly — never a re-serialised parse and never with a
+ *       marker added, so an unreadable record stays unreadable — restoring the
+ *       in-memory map whatever the disk does;</li>
  *   <li>and an in-process latch makes every pass see no exemptions at all
- *       until a later commit succeeds, so it hides everything the exemptions
- *       would have shown. The next edit still starts from the last durable
- *       decision ({@link #readForEdit}).</li>
+ *       until a later commit succeeds. The next edit still starts from the
+ *       stored record ({@link #record}).</li>
  * </ul>
+ *
+ * <p>Every reader gets its answer from {@link Backing#read}, which parses with
+ * {@link BuiltInBlockExemptions#parseRecord} — the one parser.
  */
 final class BuiltInExemptionsPersistence {
 
     /** The raw preference file. */
     interface Backing {
-        BuiltInBlockExemptions.Settings read();
+        /** The record, parsed by {@link BuiltInBlockExemptions#parseRecord}. */
+        BuiltInBlockExemptions.Record read();
 
         /** Android semantics: memory is updated even when this returns {@code false}. */
         boolean commit(BuiltInBlockExemptions.Settings settings);
@@ -42,30 +45,19 @@ final class BuiltInExemptionsPersistence {
         this.backing = backing;
     }
 
-    /** The stored decision, or none while untrusted or unreadable. */
-    BuiltInBlockExemptions.Settings read() {
-        if (untrusted) {
-            return BuiltInBlockExemptions.Settings.NONE;
-        }
+    /** The stored record as it is; an unreadable or failing read is unreadable. */
+    BuiltInBlockExemptions.Record record() {
         try {
-            return backing.read();
+            BuiltInBlockExemptions.Record record = backing.read();
+            return record == null ? BuiltInBlockExemptions.Record.UNREADABLE : record;
         } catch (RuntimeException exception) {
-            return BuiltInBlockExemptions.Settings.NONE;
+            return BuiltInBlockExemptions.Record.UNREADABLE;
         }
     }
 
-    /**
-     * The baseline for the next edit: the last durable decision, whatever the
-     * latch says. After a failed write the previous values were written back,
-     * so this is the decision as it stood before that write. Editing from it
-     * means a retry never drops earlier approvals.
-     */
-    BuiltInBlockExemptions.Settings readForEdit() {
-        try {
-            return backing.read();
-        } catch (RuntimeException exception) {
-            return BuiltInBlockExemptions.Settings.NONE;
-        }
+    /** What a policy pass enforces: none while untrusted or unreadable. */
+    BuiltInBlockExemptions.Settings read() {
+        return untrusted ? BuiltInBlockExemptions.Settings.NONE : record().enforced();
     }
 
     /** @return whether {@code settings} was persisted; {@code false} changes nothing visible */
@@ -76,8 +68,6 @@ final class BuiltInExemptionsPersistence {
             return true;
         }
         untrusted = true;
-        // Restores the in-memory map to the exact raw record; whether the disk
-        // accepts it does not matter while the latch hides every exemption.
         backing.restore(previous);
         return false;
     }

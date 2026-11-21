@@ -373,8 +373,12 @@ life: it is set and read back before a Chrome approval is saved (also while
 protection is paused; no lock, no save), each pass confirms it before the CA
 check that Chrome's release relies on, and it is released only when the
 teardown guard would allow a teardown, so a refused hide keeps it. Every save
-writes a format marker, so a damaged file Android loads as an empty map is
-recognised. If the
+writes a format marker, and one parser reads the record for every use
+(enforcement, kiosk eligibility, the teardown guard, the console and edits): a
+file that exists without the marker — zero bytes, damaged, or an older format —
+is unreadable, enforces no approval and refuses filter teardown. Pausing first
+removes the evidence a later pass would use to continue a verified one, and is
+refused if Android does not persist that. If the
 stored exemption record cannot be read, no exemption applies, ordinary edits
 are refused, and only an explicit "Clear all approvals" replaces it; a failed
 save restores the exact stored record. A Chrome that is
@@ -401,6 +405,14 @@ and browsers can never be approved this way, and a built-in blocked package
 cannot be configured as the home filter's VPN.
 
 **Known limits.**
+
+- After a reboot, a Chrome that was shown before it may stay visible until
+  the first protected pass runs (Device Guard does no direct-boot work). Its
+  managed configuration — the mandatory filter proxy — and the always-on VPN
+  lockdown still apply in that window, and the first pass hides it unless it
+  continues the last verified pass.
+- A failed link-routing step does not hide Chrome or fail the pass: links
+  fall back to the blocked page and the failure is logged and audited.
 
 - Web content that another app renders itself (its own WebView or in-app
   browser) does not follow Chrome's policies; it is filtered only at the

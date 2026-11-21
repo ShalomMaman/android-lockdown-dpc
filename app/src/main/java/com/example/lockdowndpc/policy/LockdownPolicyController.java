@@ -186,7 +186,19 @@ public final class LockdownPolicyController {
             boolean routedAway = !chrome.shown();
             chrome = ChromeFilterExemption.release(chrome, filterConfirmed, chromeGateway, errors);
             if (chrome.shown()) {
-                routeLinks(context, dpm, admin, true, errors);
+                // This pass showed Chrome on confirmed evidence; the package
+                // event Android sends for it may continue this pass.
+                BuiltInBlockExemptionsStore.recordChromeRelease(context, homeFilter);
+                // Link routing is not a release condition: a routing failure
+                // is reported, falls back to the blocked page, and neither
+                // fails the pass nor hides Chrome again.
+                ArrayList<String> routingWarnings = new ArrayList<>();
+                routeLinks(context, dpm, admin, true, routingWarnings);
+                if (!routingWarnings.isEmpty()) {
+                    String summary = summarizeErrors(routingWarnings);
+                    Log.w(TAG, "Chrome link routing unverified: " + summary);
+                    AuditLog.append(context, "builtin-exemption: chrome link routing unverified: " + summary);
+                }
             } else if (!routedAway) {
                 routeLinks(context, dpm, admin, false, errors);
             }
@@ -215,7 +227,22 @@ public final class LockdownPolicyController {
     public static synchronized PolicyResult pause(Context context) {
         HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
         if (homeFilter == null) return corruptHomeFilter();
-        AllowedAppsStore.markPauseStarted(context);
+        // Before anything changes: remove the continuation evidence, durably,
+        // or refuse the pause.
+        boolean started = PauseStart.begin(new PauseStart.Steps() {
+            @Override
+            public boolean invalidateContinuation() {
+                return BuiltInBlockExemptionsStore.invalidateContinuation(context);
+            }
+
+            @Override
+            public void markPauseStarted() {
+                AllowedAppsStore.markPauseStarted(context);
+            }
+        });
+        if (!started) {
+            return new PolicyResult(true, false, 0, 0, List.of(PauseStart.REFUSED_ERROR));
+        }
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {

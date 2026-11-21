@@ -2,73 +2,63 @@ package com.example.lockdowndpc.policy;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.os.SystemClock;
 
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /**
- * Stored exemptions from the built-in block catalogues, and the last read-back.
+ * Stored exemptions from the built-in block catalogues, the last read-back and
+ * the evidence a later pass needs to continue a verified one.
  *
  * <p>The decision and the read-back live in separate preference files: nothing
  * but {@link BuiltInExemptionsPersistence} ever commits the decision's file, so
- * a read-back commit can never make a failed decision durable. The decision
- * defaults to "no exemptions", so a device that never touches the feature
- * behaves exactly as before; a stored value that no longer validates reads as
- * no exemption.
+ * a read-back commit can never make a failed decision durable. Every reader of
+ * the decision — enforcement, kiosk eligibility, the teardown guard, the
+ * console and the edit path — goes through {@link #record}, which parses with
+ * {@link BuiltInBlockExemptions#parseRecord}, the one parser.
  */
 public final class BuiltInBlockExemptionsStore {
 
     private static final String PREFS = "builtin_block_exemptions";
     private static final String READBACK_PREFS = "builtin_block_exemptions_readback";
-    private static final String KEY_CHROME = "chrome";
-    private static final String KEY_SOCIAL_PINS = "social_pins";
-    private static final String KEY_FORMAT = "format";
     private static final String KEY_VERIFIED_FILTER = "verified_filter";
     private static final String KEY_VERIFIED_BOOT = "verified_boot";
+    private static final String KEY_RELEASED_FILTER = "chrome_released_filter";
+    private static final String KEY_RELEASED_BOOT = "chrome_released_boot";
+    private static final String KEY_RELEASED_AT = "chrome_released_at";
     private static final String KEY_READBACK_FOR = "for";
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
+
+    /** How long after its own Chrome release a pass counts as caused by that release. */
+    static final long OWN_RELEASE_WINDOW_MS = 60_000L;
 
     private static volatile BuiltInExemptionsPersistence persistence;
 
     private BuiltInBlockExemptionsStore() {}
 
-    /** The decision a policy pass enforces; none while a failed write is unresolved. */
+    /** The stored approval record, read by the one parser. */
+    public static BuiltInBlockExemptions.Record record(Context context) {
+        return persistence(context).record();
+    }
+
+    /** What a policy pass enforces: none while unreadable or while a failed write is unresolved. */
     public static BuiltInBlockExemptions.Settings read(Context context) {
         return persistence(context).read();
     }
 
-    /** The last durable decision, the baseline for an administrator's next edit. */
+    /** The stored decision as the baseline for an edit ({@code NONE} when unreadable; edits are refused then). */
     public static BuiltInBlockExemptions.Settings readForEdit(Context context) {
-        return persistence(context).readForEdit();
+        return record(context).enforced();
     }
 
-    /**
-     * The stored Chrome flag read on its own from the raw record, for the home
-     * filter teardown guard. A malformed record is {@code UNREADABLE}, never
-     * "absent".
-     */
+    /** The Chrome flag of the stored record: present, absent or unreadable. */
     public static BuiltInBlockExemptions.ChromeFlag chromeFlag(Context context) {
-        try {
-            java.util.Map<String, ?> raw = context.getApplicationContext()
-                    .getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll();
-            return BuiltInBlockExemptions.chromeFlag(raw.get(KEY_CHROME), raw.get(KEY_SOCIAL_PINS),
-                    raw.get(KEY_FORMAT), fileHasContent(context));
-        } catch (RuntimeException exception) {
-            return BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
-        }
-    }
-
-    /**
-     * Whether the decision's preference file exists on disk with content. A
-     * damaged file Android loads as an empty map still exists, so a missing
-     * format marker then means "unreadable", not "nothing saved".
-     */
-    private static boolean fileHasContent(Context context) {
-        java.io.File file = new java.io.File(context.getApplicationInfo().dataDir,
-                "shared_prefs/" + PREFS + ".xml");
-        return file.isFile() && file.length() > 0;
+        return record(context).flag();
     }
 
     /** An earlier save failed and passes currently enforce no exemptions. */
@@ -87,9 +77,10 @@ public final class BuiltInBlockExemptionsStore {
             synchronized (BuiltInBlockExemptionsStore.class) {
                 current = persistence;
                 if (current == null) {
-                    SharedPreferences prefs = context.getApplicationContext()
-                            .getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-                    current = new BuiltInExemptionsPersistence(new PreferencesBacking(prefs));
+                    Context app = context.getApplicationContext();
+                    java.io.File file = new java.io.File(app.getApplicationInfo().dataDir,
+                            "shared_prefs/" + PREFS + ".xml");
+                    current = persistenceFor(app.getSharedPreferences(PREFS, Context.MODE_PRIVATE), file::exists);
                     persistence = current;
                 }
             }
@@ -97,31 +88,41 @@ public final class BuiltInBlockExemptionsStore {
         return current;
     }
 
-    private record PreferencesBacking(SharedPreferences prefs)
+    /** The store's persistence over a given preference file, for the store tests. */
+    static BuiltInExemptionsPersistence persistenceFor(SharedPreferences prefs, BooleanSupplier fileExists) {
+        return new BuiltInExemptionsPersistence(new PreferencesBacking(prefs, fileExists));
+    }
+
+    private static final String[] RECORD_KEYS = {
+            BuiltInBlockExemptions.KEY_CHROME,
+            BuiltInBlockExemptions.KEY_SOCIAL_PINS,
+            BuiltInBlockExemptions.KEY_FORMAT
+    };
+
+    private record PreferencesBacking(SharedPreferences prefs, BooleanSupplier fileExists)
             implements BuiltInExemptionsPersistence.Backing {
 
         @Override
-        public BuiltInBlockExemptions.Settings read() {
-            try {
-                LinkedHashMap<String, String> pins = new LinkedHashMap<>();
-                for (String entry : prefs.getStringSet(KEY_SOCIAL_PINS, Set.of())) {
-                    int split = entry.indexOf('=');
-                    if (split <= 0) {
-                        return BuiltInBlockExemptions.Settings.NONE;
-                    }
-                    pins.put(entry.substring(0, split), entry.substring(split + 1));
-                }
-                return new BuiltInBlockExemptions.Settings(prefs.getBoolean(KEY_CHROME, false), pins);
-            } catch (IllegalArgumentException | ClassCastException exception) {
-                return BuiltInBlockExemptions.Settings.NONE;
-            }
+        public BuiltInBlockExemptions.Record read() {
+            return BuiltInBlockExemptions.parseRecord(prefs.getAll(), fileExists.getAsBoolean());
+        }
+
+        @Override
+        public boolean commit(BuiltInBlockExemptions.Settings settings) {
+            LinkedHashSet<String> pins = new LinkedHashSet<>();
+            settings.socialPins().forEach((name, digest) -> pins.add(name + "=" + digest));
+            return prefs.edit()
+                    .putBoolean(BuiltInBlockExemptions.KEY_CHROME, settings.chrome())
+                    .putStringSet(BuiltInBlockExemptions.KEY_SOCIAL_PINS, pins)
+                    .putInt(BuiltInBlockExemptions.KEY_FORMAT, BuiltInBlockExemptions.FORMAT_VERSION)
+                    .commit();
         }
 
         @Override
         public Object snapshot() {
-            java.util.Map<String, ?> all = prefs.getAll();
-            java.util.HashMap<String, Object> raw = new java.util.HashMap<>();
-            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS, KEY_FORMAT}) {
+            Map<String, ?> all = prefs.getAll();
+            HashMap<String, Object> raw = new HashMap<>();
+            for (String key : RECORD_KEYS) {
                 if (all.containsKey(key)) {
                     Object value = all.get(key);
                     raw.put(key, value instanceof Set<?> set ? new LinkedHashSet<>(set) : value);
@@ -130,17 +131,13 @@ public final class BuiltInBlockExemptionsStore {
             return raw;
         }
 
+        /** Exactly the prior raw values: nothing added, so an unreadable record stays unreadable. */
         @Override
         @SuppressWarnings("unchecked")
         public void restore(Object snapshot) {
-            java.util.Map<String, Object> raw = new java.util.HashMap<>((java.util.Map<String, Object>) snapshot);
-            if (raw.isEmpty()) {
-                // Nothing was saved before: restore "nothing saved" with the
-                // marker, so the file this restore creates is not read as damage.
-                raw.put(KEY_FORMAT, BuiltInBlockExemptions.FORMAT_VERSION);
-            }
+            Map<String, Object> raw = (Map<String, Object>) snapshot;
             SharedPreferences.Editor editor = prefs.edit();
-            for (String key : new String[]{KEY_CHROME, KEY_SOCIAL_PINS, KEY_FORMAT}) {
+            for (String key : RECORD_KEYS) {
                 Object value = raw.get(key);
                 if (!raw.containsKey(key)) {
                     editor.remove(key);
@@ -161,17 +158,6 @@ public final class BuiltInBlockExemptionsStore {
                 }
             }
             editor.commit();
-        }
-
-        @Override
-        public boolean commit(BuiltInBlockExemptions.Settings settings) {
-            LinkedHashSet<String> pins = new LinkedHashSet<>();
-            settings.socialPins().forEach((name, digest) -> pins.add(name + "=" + digest));
-            return prefs.edit()
-                    .putBoolean(KEY_CHROME, settings.chrome())
-                    .putStringSet(KEY_SOCIAL_PINS, pins)
-                    .putInt(KEY_FORMAT, BuiltInBlockExemptions.FORMAT_VERSION)
-                    .commit();
         }
     }
 
@@ -215,20 +201,66 @@ public final class BuiltInBlockExemptionsStore {
                 .commit();
     }
 
-    /** Whether the pass about to start continues the last verified one. Read before it starts. */
+    /**
+     * Records that this pass itself showed Chrome, on confirmed filter
+     * evidence. Showing a hidden package makes Android announce it as added,
+     * which queues another pass; that pass is caused by this release and may
+     * continue it (it still re-checks Chrome's signer and configuration).
+     */
+    static void recordChromeRelease(Context context, HomeFilterPolicy.Settings filter) {
+        readbackPrefs(context).edit()
+                .putString(KEY_RELEASED_FILTER, BuiltInBlockExemptions.filterFingerprint(filter))
+                .putLong(KEY_RELEASED_BOOT, bootCount(context))
+                .putLong(KEY_RELEASED_AT, SystemClock.elapsedRealtime())
+                .commit();
+    }
+
+    /**
+     * Whether the pass about to start continues the last verified one, or
+     * follows this process's own Chrome release moments ago. Read before the
+     * pass starts; the release record is used once.
+     */
     static boolean continuesVerifiedPass(Context context, HomeFilterPolicy.Settings filter) {
         try {
             SharedPreferences prefs = readbackPrefs(context);
-            return BuiltInBlockExemptions.continuesVerifiedPass(
+            String fingerprint = BuiltInBlockExemptions.filterFingerprint(filter);
+            long boot = bootCount(context);
+            boolean ownRelease = prefs.contains(KEY_RELEASED_AT)
+                    && BuiltInBlockExemptions.continuesVerifiedPass(true,
+                            prefs.getString(KEY_RELEASED_FILTER, null), fingerprint,
+                            prefs.getLong(KEY_RELEASED_BOOT, -1L), boot)
+                    && SystemClock.elapsedRealtime() - prefs.getLong(KEY_RELEASED_AT, Long.MIN_VALUE / 2)
+                        < OWN_RELEASE_WINDOW_MS;
+            prefs.edit().remove(KEY_RELEASED_FILTER).remove(KEY_RELEASED_BOOT).remove(KEY_RELEASED_AT).commit();
+            return ownRelease || BuiltInBlockExemptions.continuesVerifiedPass(
                     AllowedAppsStore.isProtectionEnabled(context)
                             && AllowedAppsStore.getPolicyState(context) == AllowedAppsStore.PolicyState.ACTIVE,
                     prefs.getString(KEY_VERIFIED_FILTER, null),
-                    BuiltInBlockExemptions.filterFingerprint(filter),
+                    fingerprint,
                     prefs.getLong(KEY_VERIFIED_BOOT, -1L),
-                    bootCount(context));
+                    boot);
         } catch (RuntimeException exception) {
             return false;
         }
+    }
+
+    /**
+     * Removes all continuation evidence, durably. A pause does this before it
+     * changes anything and refuses itself when the commit fails, so a later
+     * pass can never continue a verified pass across a pause.
+     */
+    static boolean invalidateContinuation(Context context) {
+        return invalidateContinuation(readbackPrefs(context));
+    }
+
+    static boolean invalidateContinuation(SharedPreferences prefs) {
+        return prefs.edit()
+                .remove(KEY_VERIFIED_FILTER)
+                .remove(KEY_VERIFIED_BOOT)
+                .remove(KEY_RELEASED_FILTER)
+                .remove(KEY_RELEASED_BOOT)
+                .remove(KEY_RELEASED_AT)
+                .commit();
     }
 
     /** The device's boot count, or {@code -1} when it cannot be read (never a continuation). */

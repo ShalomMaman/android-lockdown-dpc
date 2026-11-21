@@ -175,53 +175,91 @@ public final class BuiltInBlockExemptions {
     /** The stored Chrome approval flag as found on disk, read on its own. */
     public enum ChromeFlag { ABSENT, PRESENT, UNREADABLE }
 
-    /**
-     * Classifies the raw stored record for the teardown guard. Any malformed
-     * part of the record — the Chrome flag or any social pin — is
-     * {@link ChromeFlag#UNREADABLE}, which the guard treats like a saved
-     * approval. A pass, by contrast, withholds every exemption on such a record.
-     */
-    public static ChromeFlag chromeFlag(Object rawChrome, Object rawSocialPins) {
-        return chromeFlag(rawChrome, rawSocialPins, FORMAT_VERSION, false);
-    }
-
     /** The format marker every save writes; its absence in an existing file means damage. */
     public static final int FORMAT_VERSION = 1;
 
+    /** Stored record keys, shared by the parser and the store. */
+    static final String KEY_CHROME = "chrome";
+    static final String KEY_SOCIAL_PINS = "social_pins";
+    static final String KEY_FORMAT = "format";
+
     /**
-     * The same, also catching a damaged file Android loaded as an empty map:
-     * every save writes {@link #FORMAT_VERSION}, so a file that exists on disk
-     * without the marker is {@link ChromeFlag#UNREADABLE}, never "absent".
-     *
-     * @param rawFormat      the stored format marker, or {@code null}
-     * @param fileHasContent the preference file exists on disk with content
+     * The approval record as read: {@link #settings} when readable, otherwise
+     * unreadable. Unreadable enforces nothing — no Chrome, no social app, no
+     * kiosk eligibility — and refuses filter teardown.
      */
-    public static ChromeFlag chromeFlag(Object rawChrome, Object rawSocialPins, Object rawFormat,
-                                       boolean fileHasContent) {
-        if (rawFormat == null ? fileHasContent : !Integer.valueOf(FORMAT_VERSION).equals(rawFormat)) {
-            return ChromeFlag.UNREADABLE;
+    public record Record(Settings settings) {
+        public static final Record UNREADABLE = new Record(null);
+        public static final Record EMPTY = new Record(Settings.NONE);
+
+        public boolean unreadable() {
+            return settings == null;
         }
+
+        /** What a policy pass enforces from this record. */
+        public Settings enforced() {
+            return settings == null ? Settings.NONE : settings;
+        }
+
+        public ChromeFlag flag() {
+            if (settings == null) {
+                return ChromeFlag.UNREADABLE;
+            }
+            return settings.chrome() ? ChromeFlag.PRESENT : ChromeFlag.ABSENT;
+        }
+
+        /** The prior state for an audit line. */
+        public String auditText() {
+            return settings == null ? "unreadable" : settings.auditText();
+        }
+    }
+
+    /**
+     * The one parser of the stored approval record. Every reader — policy
+     * enforcement, kiosk eligibility, the teardown guard, the console and the
+     * edit path — gets its answer from here.
+     *
+     * <ul>
+     *   <li>No file and nothing in memory: readable, no approvals.</li>
+     *   <li>Otherwise the format marker must be {@link #FORMAT_VERSION}. A file
+     *       that exists without it — including a zero-byte file, or a damaged
+     *       one Android loaded as an empty map — is unreadable.</li>
+     *   <li>Any malformed value is unreadable.</li>
+     * </ul>
+     *
+     * @param raw        the stored values as Android loaded them
+     * @param fileExists the preference file exists on disk (any size)
+     */
+    public static Record parseRecord(Map<String, ?> raw, boolean fileExists) {
+        Map<String, ?> values = raw == null ? Map.of() : raw;
+        if (values.isEmpty() && !fileExists) {
+            return Record.EMPTY;
+        }
+        if (!Integer.valueOf(FORMAT_VERSION).equals(values.get(KEY_FORMAT))) {
+            return Record.UNREADABLE;
+        }
+        Object rawChrome = values.get(KEY_CHROME);
         if (rawChrome != null && !(rawChrome instanceof Boolean)) {
-            return ChromeFlag.UNREADABLE;
+            return Record.UNREADABLE;
         }
-        if (rawSocialPins != null) {
-            if (!(rawSocialPins instanceof Set<?> pins)) {
-                return ChromeFlag.UNREADABLE;
+        LinkedHashMap<String, String> pins = new LinkedHashMap<>();
+        Object rawPins = values.get(KEY_SOCIAL_PINS);
+        if (rawPins != null) {
+            if (!(rawPins instanceof Set<?> entries)) {
+                return Record.UNREADABLE;
             }
-            LinkedHashMap<String, String> parsed = new LinkedHashMap<>();
-            for (Object entry : pins) {
+            for (Object entry : entries) {
                 if (!(entry instanceof String text) || text.indexOf('=') <= 0) {
-                    return ChromeFlag.UNREADABLE;
+                    return Record.UNREADABLE;
                 }
-                parsed.put(text.substring(0, text.indexOf('=')), text.substring(text.indexOf('=') + 1));
-            }
-            try {
-                new Settings(false, parsed);
-            } catch (IllegalArgumentException exception) {
-                return ChromeFlag.UNREADABLE;
+                pins.put(text.substring(0, text.indexOf('=')), text.substring(text.indexOf('=') + 1));
             }
         }
-        return Boolean.TRUE.equals(rawChrome) ? ChromeFlag.PRESENT : ChromeFlag.ABSENT;
+        try {
+            return new Record(new Settings(Boolean.TRUE.equals(rawChrome), pins));
+        } catch (IllegalArgumentException exception) {
+            return Record.UNREADABLE;
+        }
     }
 
     /**

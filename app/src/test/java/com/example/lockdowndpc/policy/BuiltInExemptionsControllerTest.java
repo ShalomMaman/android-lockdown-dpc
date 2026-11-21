@@ -27,7 +27,7 @@ public final class BuiltInExemptionsControllerTest {
         boolean untrusted;
         boolean filterSteady = true;
         boolean lockSucceeds = true;
-        BuiltInBlockExemptions.ChromeFlag flag = BuiltInBlockExemptions.ChromeFlag.ABSENT;
+        BuiltInBlockExemptions.Record record = BuiltInBlockExemptions.Record.EMPTY;
         Settings written;
 
         @Override
@@ -56,8 +56,8 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
-        public BuiltInBlockExemptions.ChromeFlag chromeFlag() {
-            return flag;
+        public BuiltInBlockExemptions.Record record() {
+            return record;
         }
 
         @Override
@@ -185,8 +185,8 @@ public final class BuiltInExemptionsControllerTest {
         boolean diskFails;
 
         @Override
-        public Settings read() {
-            return memory;
+        public BuiltInBlockExemptions.Record read() {
+            return new BuiltInBlockExemptions.Record(memory);
         }
 
         @Override
@@ -221,17 +221,17 @@ public final class BuiltInExemptionsControllerTest {
             }
         };
         // Chrome approved and saved.
-        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.readForEdit(),
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.record().enforced(),
                 settings -> settings.withChrome(true), true, "approve:chrome", sink).status());
         // WhatsApp approval fails to save; passes now see no exemptions.
         backing.diskFails = true;
-        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(persistence.readForEdit(),
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(persistence.record().enforced(),
                 settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
                 sink).status());
         assertEquals(Settings.NONE, persistence.read());
         // The retry starts from the last saved decision, not from the latch.
         backing.diskFails = false;
-        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.readForEdit(),
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.record().enforced(),
                 settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
                 sink).status());
         assertEquals(Settings.NONE.withChrome(true).withSocial("com.whatsapp", SIGNER), backing.disk);
@@ -293,7 +293,7 @@ public final class BuiltInExemptionsControllerTest {
     @Test
     public void anUnreadableRecordRefusesOrdinaryEditsAndWritesNothing() {
         RecordingSink sink = new RecordingSink();
-        sink.flag = BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
+        sink.record = BuiltInBlockExemptions.Record.UNREADABLE;
         assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(Settings.NONE,
                 settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
                 sink).status());
@@ -305,11 +305,13 @@ public final class BuiltInExemptionsControllerTest {
     @Test
     public void onlyAnExplicitClearMayOverwriteAnUnreadableRecord() {
         RecordingSink sink = new RecordingSink();
-        sink.flag = BuiltInBlockExemptions.ChromeFlag.UNREADABLE;
+        sink.record = BuiltInBlockExemptions.Record.UNREADABLE;
         assertThrows(SecurityException.class, () -> BuiltInExemptionsController.clear(false, sink));
         assertTrue(sink.calls.isEmpty());
         assertEquals(Status.APPLIED, BuiltInExemptionsController.clear(true, sink).status());
         assertEquals(Settings.NONE, sink.written);
+        assertTrue("the prior state is logged as read: " + sink.calls,
+                sink.calls.stream().anyMatch(call -> call.contains(": unreadable -> chrome=false")));
         assertFalse("clearing does not touch the lock; the pass releases it under the guard",
                 sink.calls.contains("lock"));
     }

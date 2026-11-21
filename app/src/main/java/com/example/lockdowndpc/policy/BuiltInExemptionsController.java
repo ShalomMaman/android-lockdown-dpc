@@ -56,8 +56,8 @@ public final class BuiltInExemptionsController {
         /** The home filter is on, with nothing pending, and its CA (if any) installed. */
         boolean filterSteadyForChrome();
 
-        /** The stored approval record, read raw: an unreadable record refuses ordinary edits. */
-        BuiltInBlockExemptions.ChromeFlag chromeFlag();
+        /** The stored approval record, from the one reader: an unreadable record refuses ordinary edits. */
+        BuiltInBlockExemptions.Record record();
 
         /**
          * Sets {@code DISALLOW_CONFIG_CREDENTIALS} and reads it back, before a
@@ -114,8 +114,8 @@ public final class BuiltInExemptionsController {
             }
 
             @Override
-            public BuiltInBlockExemptions.ChromeFlag chromeFlag() {
-                return BuiltInBlockExemptionsStore.chromeFlag(context);
+            public BuiltInBlockExemptions.Record record() {
+                return BuiltInBlockExemptionsStore.record(context);
             }
 
             @Override
@@ -179,7 +179,7 @@ public final class BuiltInExemptionsController {
         if (!sink.protectionActive()) {
             return new Outcome(Status.PAUSED_REFUSED, null);
         }
-        if (sink.chromeFlag() == BuiltInBlockExemptions.ChromeFlag.UNREADABLE) {
+        if (sink.record().unreadable()) {
             // The edit baseline of an unreadable record is "none", so an ordinary
             // edit would silently drop whatever it holds. Only clearApprovals
             // may overwrite it.
@@ -201,7 +201,7 @@ public final class BuiltInExemptionsController {
             // The lock covers the approval from before it exists; no lock, no save.
             return new Outcome(Status.NOT_SAVED, null);
         }
-        return commit(before, after, sessionUnlocked, trigger, sink);
+        return commit(before.auditText(), after, sessionUnlocked, trigger, sink);
     }
 
     static Outcome clear(boolean sessionUnlocked, Sink sink) {
@@ -211,12 +211,13 @@ public final class BuiltInExemptionsController {
         if (!sessionUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
         }
-        return commit(BuiltInBlockExemptions.Settings.NONE, BuiltInBlockExemptions.Settings.NONE,
+        // The prior state is logged as it was read: "unreadable" when it was.
+        return commit(sink.record().auditText(), BuiltInBlockExemptions.Settings.NONE,
                 true, "clear-approvals", sink);
     }
 
     private static Outcome commit(
-            BuiltInBlockExemptions.Settings before,
+            String beforeText,
             BuiltInBlockExemptions.Settings after,
             boolean sessionUnlocked,
             String trigger,
@@ -232,7 +233,7 @@ public final class BuiltInExemptionsController {
                 ? "administrator " + trigger
                 : trigger + " (no administrator session)";
         String entry = "builtin-exemption: " + actor + ": "
-                + before.auditText() + " -> " + after.auditText();
+                + beforeText + " -> " + after.auditText();
         boolean audited = sink.audit(entry);
         // The decision is already persisted, so the pass runs either way: a
         // stored removal must take effect even if its audit line did not.

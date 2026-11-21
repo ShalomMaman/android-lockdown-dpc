@@ -24,8 +24,10 @@ public final class BuiltInExemptionsPersistenceTest {
         boolean diskFails;
 
         @Override
-        public Settings read() {
-            return memory instanceof Settings settings ? settings : Settings.NONE;
+        public BuiltInBlockExemptions.Record read() {
+            return memory instanceof Settings settings
+                    ? new BuiltInBlockExemptions.Record(settings)
+                    : BuiltInBlockExemptions.Record.UNREADABLE;
         }
 
         @Override
@@ -117,7 +119,7 @@ public final class BuiltInExemptionsPersistenceTest {
         BuiltInExemptionsPersistence persistence = new BuiltInExemptionsPersistence(
                 new BuiltInExemptionsPersistence.Backing() {
                     @Override
-                    public Settings read() {
+                    public BuiltInBlockExemptions.Record read() {
                         throw new IllegalStateException("corrupt");
                     }
 

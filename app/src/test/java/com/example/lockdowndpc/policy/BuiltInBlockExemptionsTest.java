@@ -221,35 +221,46 @@ public final class BuiltInBlockExemptionsTest {
                 BuiltInBlockExemptions.teardownVerdict(absent, Observed.VISIBLE, false));
     }
 
-    @Test
-    public void theChromeFlagIsReadOnItsOwnAndAMalformedRecordIsUnreadable() {
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, BuiltInBlockExemptions.chromeFlag(null, null));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT, BuiltInBlockExemptions.chromeFlag(false, Set.of()));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT,
-                BuiltInBlockExemptions.chromeFlag(true, Set.of(WHATSAPP + "=" + SIGNER_A)));
-        assertEquals("a malformed social pin no longer hides a saved Chrome flag",
-                BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
-                BuiltInBlockExemptions.chromeFlag(true, Set.of("not-a-pin")));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
-                BuiltInBlockExemptions.chromeFlag(false, Set.of("org.example.reader=" + SIGNER_A)));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, BuiltInBlockExemptions.chromeFlag("true", null));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.UNREADABLE, BuiltInBlockExemptions.chromeFlag(false, "pins"));
+    private static Map<String, Object> raw(Object... keyValues) {
+        java.util.HashMap<String, Object> map = new java.util.HashMap<>();
+        for (int index = 0; index < keyValues.length; index += 2) {
+            map.put((String) keyValues[index], keyValues[index + 1]);
+        }
+        return map;
     }
 
     @Test
-    public void aDamagedFileLoadedAsAnEmptyMapIsUnreadableNotAbsent() {
+    public void theOneParserFailsClosedOnEveryDamagedOrUnknownRecord() {
         int format = BuiltInBlockExemptions.FORMAT_VERSION;
-        assertEquals("empty map, but the file exists on disk",
-                BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
-                BuiltInBlockExemptions.chromeFlag(null, null, null, true));
-        assertEquals("nothing ever saved", BuiltInBlockExemptions.ChromeFlag.ABSENT,
-                BuiltInBlockExemptions.chromeFlag(null, null, null, false));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.ABSENT,
-                BuiltInBlockExemptions.chromeFlag(false, Set.of(), format, true));
-        assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT,
-                BuiltInBlockExemptions.chromeFlag(true, null, format, true));
-        assertEquals("an unknown format is not trusted", BuiltInBlockExemptions.ChromeFlag.UNREADABLE,
-                BuiltInBlockExemptions.chromeFlag(false, null, 99, true));
+        assertEquals("nothing ever saved", BuiltInBlockExemptions.Record.EMPTY,
+                BuiltInBlockExemptions.parseRecord(Map.of(), false));
+        assertTrue("a zero-byte or damaged file loaded as an empty map",
+                BuiltInBlockExemptions.parseRecord(Map.of(), true).unreadable());
+        assertTrue("old format: no marker", BuiltInBlockExemptions.parseRecord(raw("chrome", true), true).unreadable());
+        assertTrue("unknown format", BuiltInBlockExemptions.parseRecord(raw("format", 99), true).unreadable());
+        assertTrue("non-boolean flag", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", "true"), true).unreadable());
+        assertTrue("malformed pin", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", true, "social_pins", Set.of("not-a-pin")), true).unreadable());
+        assertTrue("not in the catalogue", BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "social_pins", Set.of("org.example.reader=" + SIGNER_A)), true).unreadable());
+        BuiltInBlockExemptions.Record good = BuiltInBlockExemptions.parseRecord(
+                raw("format", format, "chrome", true, "social_pins", Set.of(WHATSAPP + "=" + SIGNER_A)), true);
+        assertFalse(good.unreadable());
+        assertEquals(BuiltInBlockExemptions.ChromeFlag.PRESENT, good.flag());
+        assertEquals(Settings.NONE.withChrome(true).withSocial(WHATSAPP, SIGNER_A), good.enforced());
+    }
+
+    @Test
+    public void anOldFormatRecordWithChromeApprovedEnforcesNothingAndIsNotKioskEligible() {
+        BuiltInBlockExemptions.Record old = BuiltInBlockExemptions.parseRecord(
+                raw("chrome", true, "social_pins", Set.of(TELEGRAM + "=" + SIGNER_A)), true);
+        assertTrue(old.unreadable());
+        assertEquals("no Chrome, no social app", Settings.NONE, old.enforced());
+        assertEquals("teardown refused", BuiltInBlockExemptions.ChromeFlag.UNREADABLE, old.flag());
+        assertFalse(BuiltInBlockExemptions.socialVisible(TELEGRAM, old.enforced(), SIGNER_A));
+        assertTrue("not kiosk-eligible", KioskAppCatalog.isProtectedFromKiosk(TELEGRAM, Set.of()));
+        assertEquals("unreadable", old.auditText());
     }
 
     @Test
