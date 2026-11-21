@@ -11,9 +11,10 @@ package com.example.lockdowndpc.policy;
  *   <li>the exemptions have a preference file of their own, written only here;</li>
  *   <li>after a failed commit the previous values are written back, which
  *       restores the in-memory map whatever the disk does;</li>
- *   <li>and an in-process latch makes every reader see no exemptions at all
- *       until a later commit succeeds, so a pass hides everything the
- *       exemptions would have shown.</li>
+ *   <li>and an in-process latch makes every pass see no exemptions at all
+ *       until a later commit succeeds, so it hides everything the exemptions
+ *       would have shown. The next edit still starts from the last durable
+ *       decision ({@link #readForEdit}).</li>
  * </ul>
  */
 final class BuiltInExemptionsPersistence {
@@ -38,6 +39,20 @@ final class BuiltInExemptionsPersistence {
         if (untrusted) {
             return BuiltInBlockExemptions.Settings.NONE;
         }
+        try {
+            return backing.read();
+        } catch (RuntimeException exception) {
+            return BuiltInBlockExemptions.Settings.NONE;
+        }
+    }
+
+    /**
+     * The baseline for the next edit: the last durable decision, whatever the
+     * latch says. After a failed write the previous values were written back,
+     * so this is the decision as it stood before that write. Editing from it
+     * means a retry never drops earlier approvals.
+     */
+    BuiltInBlockExemptions.Settings readForEdit() {
         try {
             return backing.read();
         } catch (RuntimeException exception) {

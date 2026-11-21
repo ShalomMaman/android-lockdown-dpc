@@ -5,6 +5,7 @@ import android.content.SharedPreferences;
 
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -27,17 +28,21 @@ public final class BuiltInBlockExemptionsStore {
     private static final String KEY_PASS_VERIFIED = "pass_verified";
     private static final String KEY_CHROME_DECISION = "chrome_decision";
     private static final String KEY_CHROME_OBSERVED = "chrome_observed";
-    private static final String KEY_SOCIAL_VISIBLE = "social_visible";
-    private static final String KEY_SOCIAL_UNKNOWN = "social_unknown";
+    private static final String KEY_SOCIAL_OBSERVED = "social_observed";
     private static final String KEY_SOCIAL_MISMATCH = "social_signer_mismatch";
 
     private static volatile BuiltInExemptionsPersistence persistence;
 
     private BuiltInBlockExemptionsStore() {}
 
-    /** The stored decision; none while a failed write is unresolved. */
+    /** The decision a policy pass enforces; none while a failed write is unresolved. */
     public static BuiltInBlockExemptions.Settings read(Context context) {
         return persistence(context).read();
+    }
+
+    /** The last durable decision, the baseline for an administrator's next edit. */
+    public static BuiltInBlockExemptions.Settings readForEdit(Context context) {
+        return persistence(context).readForEdit();
     }
 
     /** Persists the decision. {@code false} means nothing changed. */
@@ -95,22 +100,19 @@ public final class BuiltInBlockExemptionsStore {
     /**
      * What the last pass read back from Android, for the decision it describes.
      *
-     * @param passVerified  the whole pass finished without an error
-     * @param socialVisible catalogue packages Android reported visible, approved or not
-     * @param socialUnknown catalogue packages whose state could not be read
+     * @param passVerified the whole pass finished without an error
+     * @param social       the observed state of every installed catalogue social package
      */
     public record Readback(
             String forSettings,
             boolean passVerified,
             ChromeFilterExemption.Decision chromeDecision,
-            ChromeFilterExemption.Observed chromeObserved,
-            Set<String> socialVisible,
-            Set<String> socialUnknown,
+            BuiltInBlockExemptions.Observed chromeObserved,
+            Map<String, BuiltInBlockExemptions.Observed> social,
             Set<String> socialSignerMismatch
     ) {
         public Readback {
-            socialVisible = Set.copyOf(socialVisible);
-            socialUnknown = Set.copyOf(socialUnknown);
+            social = Map.copyOf(social);
             socialSignerMismatch = Set.copyOf(socialSignerMismatch);
         }
 
@@ -120,13 +122,14 @@ public final class BuiltInBlockExemptionsStore {
     }
 
     static boolean saveReadback(Context context, Readback readback) {
+        LinkedHashSet<String> social = new LinkedHashSet<>();
+        readback.social().forEach((name, state) -> social.add(name + "=" + state.name()));
         return readbackPrefs(context).edit()
                 .putString(KEY_READBACK_FOR, readback.forSettings())
                 .putBoolean(KEY_PASS_VERIFIED, readback.passVerified())
                 .putString(KEY_CHROME_DECISION, readback.chromeDecision().name())
                 .putString(KEY_CHROME_OBSERVED, readback.chromeObserved().name())
-                .putStringSet(KEY_SOCIAL_VISIBLE, new LinkedHashSet<>(readback.socialVisible()))
-                .putStringSet(KEY_SOCIAL_UNKNOWN, new LinkedHashSet<>(readback.socialUnknown()))
+                .putStringSet(KEY_SOCIAL_OBSERVED, social)
                 .putStringSet(KEY_SOCIAL_MISMATCH, new LinkedHashSet<>(readback.socialSignerMismatch()))
                 .commit();
     }
@@ -141,13 +144,20 @@ public final class BuiltInBlockExemptionsStore {
             if (forSettings == null || decision == null || observed == null) {
                 return null;
             }
+            LinkedHashMap<String, BuiltInBlockExemptions.Observed> social = new LinkedHashMap<>();
+            for (String entry : prefs.getStringSet(KEY_SOCIAL_OBSERVED, Set.of())) {
+                int split = entry.indexOf('=');
+                if (split > 0) {
+                    social.put(entry.substring(0, split),
+                            BuiltInBlockExemptions.Observed.valueOf(entry.substring(split + 1)));
+                }
+            }
             return new Readback(
                     forSettings,
                     prefs.getBoolean(KEY_PASS_VERIFIED, false),
                     ChromeFilterExemption.Decision.valueOf(decision),
-                    ChromeFilterExemption.Observed.valueOf(observed),
-                    prefs.getStringSet(KEY_SOCIAL_VISIBLE, Set.of()),
-                    prefs.getStringSet(KEY_SOCIAL_UNKNOWN, Set.of()),
+                    BuiltInBlockExemptions.Observed.valueOf(observed),
+                    social,
                     prefs.getStringSet(KEY_SOCIAL_MISMATCH, Set.of()));
         } catch (IllegalArgumentException | ClassCastException exception) {
             return null;

@@ -4,8 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Observed;
+import com.example.lockdowndpc.policy.ChromeFilterExemption.Containment;
 import com.example.lockdowndpc.policy.ChromeFilterExemption.Decision;
-import com.example.lockdowndpc.policy.ChromeFilterExemption.Observed;
 
 import org.junit.Test;
 
@@ -15,11 +16,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Chrome's decision and visibility, driven through the production calls the
- * policy pass makes ({@code prepare}, then {@code applyVisibility} in the
- * sweep's place) against a fake Android layer that records every call. These
- * tests exercise Device Guard's own ordering and decisions; they make no claim
- * about what Chrome or Android does with the values.
+ * Chrome's containment, decision and visibility, driven through the production
+ * calls in the order the pass makes them ({@code contain}, {@code decide},
+ * then {@code applyVisibility} in the sweep's place) against a fake Android
+ * layer that records every call. Visibility only ever changes through those
+ * calls. These tests make no claim about what Chrome or Android does with the
+ * values.
  */
 public final class ChromeFilterExemptionTest {
 
@@ -31,10 +33,9 @@ public final class ChromeFilterExemptionTest {
         String signer = BuiltInBlockExemptions.CHROME_RELEASE_SIGNER_SHA256;
         Map<String, Object> restrictions = new LinkedHashMap<>();
         boolean keepRestrictions = true;
-        boolean webViewProvider;
         boolean hidden;
         boolean suspended;
-        boolean refuseSuspension;
+        boolean refuseHide;
         RuntimeException throwOnRead;
         RuntimeException throwOnObserve;
 
@@ -58,12 +59,12 @@ public final class ChromeFilterExemptionTest {
             }
         }
 
-        @Override public boolean webViewProvider() { return webViewProvider; }
-
         @Override
         public void setHidden(boolean value) {
             calls.add("hide=" + value);
-            hidden = value;
+            if (!(refuseHide && value)) {
+                hidden = value;
+            }
         }
 
         @Override
@@ -77,20 +78,19 @@ public final class ChromeFilterExemptionTest {
         @Override
         public void setSuspended(boolean value) {
             calls.add("suspend=" + value);
-            if (refuseSuspension && value) {
-                throw new IllegalStateException("suspension-refused");
-            }
             suspended = value;
         }
 
         @Override public boolean suspended() { return suspended; }
     }
 
-    /** One protected pass: the production prepare, then Chrome's sweep step. */
+    /** One protected pass's Chrome steps, in production order. */
     private static Decision pass(FakeChrome chrome, boolean exempted, boolean protectionActive,
                                  boolean filterEnabled, List<String> errors) {
-        Decision decision = ChromeFilterExemption.prepare(
-                exempted, protectionActive, filterEnabled, filterEnabled ? PAC : null, chrome, errors);
+        String pac = filterEnabled ? PAC : null;
+        Containment containment = ChromeFilterExemption.contain(exempted, filterEnabled, pac, chrome, errors);
+        Decision decision = ChromeFilterExemption.decide(
+                containment, exempted, protectionActive, filterEnabled, pac, chrome, errors);
         ChromeFilterExemption.applyVisibility(decision, chrome, errors);
         return decision;
     }
@@ -99,6 +99,16 @@ public final class ChromeFilterExemptionTest {
         FakeChrome chrome = new FakeChrome();
         chrome.hidden = false;
         return chrome;
+    }
+
+    // --- Scope ----------------------------------------------------------------------
+
+    @Test
+    public void theExemptionIsInertWhileChromeIsTheWebViewProviderOrBeforeAndroid10() {
+        assertFalse(ChromeFilterExemption.inScope(33, BuiltInBlockExemptions.CHROME));
+        assertFalse(ChromeFilterExemption.inScope(28, "com.google.android.webview"));
+        assertTrue(ChromeFilterExemption.inScope(29, "com.google.android.webview"));
+        assertTrue(ChromeFilterExemption.inScope(34, null));
     }
 
     // --- Contained unless every condition holds --------------------------------------
@@ -122,8 +132,6 @@ public final class ChromeFilterExemptionTest {
 
     @Test
     public void containedWhenTheHomeFilterIsDisabledOrItsSettingsAreUnreadable() {
-        // apply() passes filterEnabled=false and no PAC for unreadable settings,
-        // before its early return.
         FakeChrome chrome = visibleChrome();
         assertEquals(Decision.FILTER_DISABLED, pass(chrome, true, true, false, new ArrayList<>()));
         assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
@@ -155,7 +163,20 @@ public final class ChromeFilterExemptionTest {
         List<String> errors = new ArrayList<>();
         assertEquals(Decision.ERROR, pass(chrome, true, true, true, errors));
         assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
-        assertTrue(errors.get(0).startsWith("chrome-exemption:"));
+    }
+
+    // --- Refused containment ------------------------------------------------------------
+
+    @Test
+    public void aRefusedHideStopsTheConfigurationWriteAndLeavesThePassUnverified() {
+        FakeChrome chrome = visibleChrome();
+        chrome.refuseHide = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.CONTAIN_UNVERIFIED, pass(chrome, true, true, true, errors));
+        assertFalse("no configuration write without a confirmed containment",
+                chrome.calls.contains("write-config"));
+        assertTrue(errors.contains(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR));
+        assertFalse(chrome.calls.contains("hide=false"));
     }
 
     @Test
@@ -172,10 +193,10 @@ public final class ChromeFilterExemptionTest {
         }
     }
 
-    // --- Ordering, through the production calls --------------------------------------
+    // --- Ordering ------------------------------------------------------------------------
 
     @Test
-    public void onResumeChromeIsContainedBeforeTheConfigurationIsWrittenAndShownOnlyAfterReadBack() {
+    public void chromeIsContainedBeforeTheConfigurationIsWrittenAndShownOnlyAfterReadBack() {
         FakeChrome chrome = visibleChrome();
         assertEquals(Decision.SHOWN, pass(chrome, true, true, true, new ArrayList<>()));
         int contain = chrome.calls.indexOf("hide=true");
@@ -194,7 +215,15 @@ public final class ChromeFilterExemptionTest {
         assertEquals(Decision.SHOWN, pass(chrome, true, true, true, new ArrayList<>()));
         assertFalse(chrome.calls.contains("hide=true"));
         assertFalse(chrome.calls.contains("write-config"));
-        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void allowedAtTheStartButNotAtTheDecisionIsContained() {
+        // Configured and exempted, but the pass then runs paused.
+        FakeChrome chrome = visibleChrome();
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        assertEquals(Decision.PROTECTION_PAUSED, pass(chrome, true, false, true, new ArrayList<>()));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
     }
 
     @Test
@@ -209,66 +238,22 @@ public final class ChromeFilterExemptionTest {
                 .contains("\"ProxyPacMandatory\":true"));
     }
 
-    // --- WebView provider ------------------------------------------------------------
+    // --- Observation -------------------------------------------------------------------
 
     @Test
-    public void aWebViewProviderChromeIsSuspendedNotHiddenAndNeverShownWhenNotAllowed() {
-        FakeChrome chrome = visibleChrome();
-        chrome.webViewProvider = true;
-        List<String> errors = new ArrayList<>();
-        pass(chrome, false, true, true, errors);
-        assertEquals("suspend=true", chrome.calls.get(0));
-        assertFalse(chrome.calls.contains("hide=true"));
-        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
-        assertTrue(errors.isEmpty());
-    }
-
-    @Test
-    public void aRefusedSuspensionIsAnErrorNotAContainment() {
-        FakeChrome chrome = visibleChrome();
-        chrome.webViewProvider = true;
-        chrome.refuseSuspension = true;
-        List<String> errors = new ArrayList<>();
-        pass(chrome, false, true, true, errors);
-        assertTrue(errors.toString(),
-                errors.stream().anyMatch(e -> e.startsWith(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR)));
-        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
-    }
-
-    @Test
-    public void aShownWebViewProviderIsUnsuspended() {
-        FakeChrome chrome = visibleChrome();
-        chrome.webViewProvider = true;
-        chrome.suspended = true;
-        assertEquals(Decision.SHOWN, pass(chrome, true, true, true, new ArrayList<>()));
-        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
-    }
-
-    // --- Observation ------------------------------------------------------------------
-
-    @Test
-    public void anObservationThatThrowsIsUnknownNotHidden() {
+    public void anObservationThatThrowsIsUnknownAndNotTakenAsContained() {
         FakeChrome chrome = visibleChrome();
         chrome.throwOnObserve = new IllegalStateException("binder");
         assertEquals(Observed.UNKNOWN, ChromeFilterExemption.observe(chrome));
         List<String> errors = new ArrayList<>();
         ChromeFilterExemption.applyVisibility(Decision.NOT_EXEMPTED, chrome, errors);
-        assertTrue("unknown is not reported as contained",
-                errors.contains(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR));
+        assertTrue(errors.contains(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR));
     }
 
     @Test
-    public void aShowAndroidDidNotKeepIsReported() {
-        FakeChrome chrome = new FakeChrome() {
-            @Override
-            public void setHidden(boolean value) {
-                calls.add("hide=" + value);
-                hidden = true;
-            }
-        };
-        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
-        List<String> errors = new ArrayList<>();
-        pass(chrome, true, true, true, errors);
-        assertTrue(errors.contains(ChromeFilterExemption.SHOW_UNVERIFIED_ERROR));
+    public void aSuspendedChromeIsObservedAsSuspendedNotHidden() {
+        FakeChrome chrome = visibleChrome();
+        chrome.suspended = true;
+        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
     }
 }

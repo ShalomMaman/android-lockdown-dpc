@@ -54,7 +54,7 @@ public final class BuiltInExemptionsController {
             String trigger
     ) {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> change(
-                BuiltInBlockExemptionsStore.read(context),
+                BuiltInBlockExemptionsStore.readForEdit(context),
                 operation,
                 AdminSession.isUnlocked(),
                 trigger,
@@ -116,7 +116,10 @@ public final class BuiltInExemptionsController {
         if (!sink.write(after)) {
             return new Outcome(Status.NOT_SAVED, null);
         }
-        String entry = "builtin-exemption: administrator " + trigger + ": "
+        String actor = sessionUnlocked
+                ? "administrator " + trigger
+                : trigger + " (no administrator session)";
+        String entry = "builtin-exemption: " + actor + ": "
                 + before.auditText() + " -> " + after.auditText();
         boolean audited = sink.audit(entry);
         if (!sink.protectionActive()) {

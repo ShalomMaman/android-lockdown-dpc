@@ -1,6 +1,7 @@
 package com.example.lockdowndpc.policy;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
@@ -18,7 +19,7 @@ public final class BuiltInExemptionsControllerTest {
 
     private static final String SIGNER = "aa".repeat(32);
 
-    private static final class RecordingSink implements BuiltInExemptionsController.Sink {
+    private static class RecordingSink implements BuiltInExemptionsController.Sink {
         final List<String> calls = new ArrayList<>();
         boolean writeSucceeds = true;
         boolean auditSucceeds = true;
@@ -82,7 +83,8 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals(before.withChrome(false), sink.written);
         assertEquals(3, sink.calls.size());
         assertEquals("write", sink.calls.get(0));
-        assertTrue(sink.calls.get(1).startsWith("audit:builtin-exemption: administrator remove:chrome: "));
+        assertTrue(sink.calls.get(1).startsWith(
+                "audit:builtin-exemption: remove:chrome (no administrator session): "));
         assertTrue(sink.calls.get(1).contains("chrome=true") && sink.calls.get(1).contains("-> chrome=false"));
         assertEquals("pass", sink.calls.get(2));
     }
@@ -108,6 +110,66 @@ public final class BuiltInExemptionsControllerTest {
         assertNull(outcome.result());
         assertEquals(Settings.NONE.withChrome(true), sink.written);
         assertTrue("no pass runs while paused", sink.calls.stream().noneMatch("pass"::equals));
+    }
+
+    @Test
+    public void aRemovalWithoutASessionIsAuditedAsSuch() {
+        RecordingSink sink = new RecordingSink();
+        BuiltInExemptionsController.change(Settings.NONE.withChrome(true),
+                settings -> settings.withChrome(false), false, "remove:chrome", sink);
+        String audit = sink.calls.get(1);
+        assertTrue(audit, audit.contains("remove:chrome (no administrator session)"));
+        assertFalse(audit, audit.contains("administrator remove"));
+    }
+
+    /** Android's commit(): memory changes even when the disk write fails. */
+    private static final class AndroidLikeBacking implements BuiltInExemptionsPersistence.Backing {
+        Settings memory = Settings.NONE;
+        Settings disk = Settings.NONE;
+        boolean diskFails;
+
+        @Override
+        public Settings read() {
+            return memory;
+        }
+
+        @Override
+        public boolean commit(Settings settings) {
+            memory = settings;
+            if (diskFails) {
+                return false;
+            }
+            disk = settings;
+            return true;
+        }
+    }
+
+    @Test
+    public void aRetryAfterAFailedSaveKeepsEarlierApprovals() {
+        AndroidLikeBacking backing = new AndroidLikeBacking();
+        BuiltInExemptionsPersistence persistence = new BuiltInExemptionsPersistence(backing);
+        RecordingSink sink = new RecordingSink() {
+            @Override
+            public boolean write(Settings settings) {
+                return persistence.write(settings);
+            }
+        };
+        // Chrome approved and saved.
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.readForEdit(),
+                settings -> settings.withChrome(true), true, "approve:chrome", sink).status());
+        // WhatsApp approval fails to save; passes now see no exemptions.
+        backing.diskFails = true;
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(persistence.readForEdit(),
+                settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
+                sink).status());
+        assertEquals(Settings.NONE, persistence.read());
+        // The retry starts from the last saved decision, not from the latch.
+        backing.diskFails = false;
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.change(persistence.readForEdit(),
+                settings -> settings.withSocial("com.whatsapp", SIGNER), true, "approve:com.whatsapp",
+                sink).status());
+        assertEquals(Settings.NONE.withChrome(true).withSocial("com.whatsapp", SIGNER), backing.disk);
+        assertEquals(backing.disk, persistence.read());
     }
 
     @Test

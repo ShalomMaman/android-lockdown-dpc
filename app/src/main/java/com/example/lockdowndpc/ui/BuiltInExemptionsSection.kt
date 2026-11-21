@@ -81,7 +81,7 @@ internal fun installedExemptionCandidates(
 }
 
 internal fun loadExemptionsView(context: Context): ExemptionsView {
-    val settings = BuiltInBlockExemptionsStore.read(context)
+    val settings = BuiltInBlockExemptionsStore.readForEdit(context)
     return ExemptionsView(
         settings = settings,
         readback = BuiltInBlockExemptionsStore.readback(context)?.takeIf { it.describes(settings) },
@@ -93,58 +93,60 @@ internal fun loadExemptionsView(context: Context): ExemptionsView {
     )
 }
 
-/**
- * The status line for Chrome, from the read-back taken for the current decision
- * only. "Confirmed" needs a SHOWN decision, Android reporting Chrome visible,
- * and a pass that finished without any error. A withdrawn exemption reads as
- * pending until Android reports Chrome hidden or suspended.
- */
-internal fun chromeStatusRes(view: ExemptionsView): Int {
-    val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
-    val observed = readback.chromeObserved()
-    val maybeVisible = observed == ChromeFilterExemption.Observed.VISIBLE ||
-        observed == ChromeFilterExemption.Observed.UNKNOWN
-    if (!view.settings.chrome()) {
-        return if (maybeVisible) {
-            R.string.system_policy_exempt_chrome_state_revocation_pending
-        } else {
-            R.string.system_policy_exempt_chrome_state_off
-        }
-    }
-    return when (readback.chromeDecision()) {
-        ChromeFilterExemption.Decision.SHOWN ->
-            if (observed == ChromeFilterExemption.Observed.VISIBLE && readback.passVerified()) {
-                R.string.system_policy_exempt_chrome_state_active
-            } else {
-                R.string.system_policy_exempt_chrome_state_unconfirmed
-            }
-        ChromeFilterExemption.Decision.NOT_EXEMPTED -> R.string.system_policy_exempt_state_pending
-        ChromeFilterExemption.Decision.PROTECTION_PAUSED ->
-            R.string.system_policy_exempt_chrome_state_paused
-        ChromeFilterExemption.Decision.FILTER_DISABLED ->
-            R.string.system_policy_exempt_chrome_state_filter_off
-        ChromeFilterExemption.Decision.NOT_INSTALLED ->
-            R.string.system_policy_exempt_chrome_state_not_installed
-        ChromeFilterExemption.Decision.SIGNER_UNVERIFIED ->
-            R.string.system_policy_exempt_chrome_state_signer_unverified
-        ChromeFilterExemption.Decision.CONFIG_UNVERIFIED ->
-            R.string.system_policy_exempt_chrome_state_restrictions_unverified
-        ChromeFilterExemption.Decision.ERROR -> R.string.system_policy_exempt_chrome_state_error
-    }
+/** The administrator's reason line for Chrome's decision on the last pass. */
+internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = when (decision) {
+    ChromeFilterExemption.Decision.SHOWN -> R.string.system_policy_exempt_chrome_reason_shown
+    ChromeFilterExemption.Decision.NOT_AVAILABLE ->
+        R.string.system_policy_exempt_chrome_reason_not_available
+    ChromeFilterExemption.Decision.NOT_EXEMPTED -> R.string.system_policy_exempt_chrome_reason_not_exempted
+    ChromeFilterExemption.Decision.PROTECTION_PAUSED -> R.string.system_policy_exempt_chrome_reason_paused
+    ChromeFilterExemption.Decision.FILTER_DISABLED -> R.string.system_policy_exempt_chrome_reason_filter_off
+    ChromeFilterExemption.Decision.NOT_INSTALLED -> R.string.system_policy_exempt_chrome_reason_not_installed
+    ChromeFilterExemption.Decision.SIGNER_UNVERIFIED -> R.string.system_policy_exempt_chrome_reason_signer
+    ChromeFilterExemption.Decision.CONTAIN_UNVERIFIED ->
+        R.string.system_policy_exempt_chrome_reason_contain_unverified
+    ChromeFilterExemption.Decision.CONFIG_UNVERIFIED ->
+        R.string.system_policy_exempt_chrome_reason_config_unverified
+    ChromeFilterExemption.Decision.ERROR -> R.string.system_policy_exempt_chrome_reason_error
 }
 
-internal fun socialStatusRes(packageName: String, view: ExemptionsView): Int {
-    val readback = view.readback ?: return R.string.system_policy_exempt_state_pending
-    val approved = packageName in view.settings.socialPins()
-    val visible = packageName in readback.socialVisible()
-    val unknown = packageName in readback.socialUnknown()
-    return when {
-        !approved && (visible || unknown) -> R.string.system_policy_exempt_social_revocation_pending
-        !approved -> R.string.system_policy_exempt_social_blocked
-        packageName in readback.socialSignerMismatch() ->
-            R.string.system_policy_exempt_social_signer_mismatch
-        visible && readback.passVerified() -> R.string.system_policy_exempt_social_confirmed
-        else -> R.string.system_policy_exempt_social_unconfirmed
+/** What Android reported, word for word; no inference about why. */
+internal fun observedRes(state: BuiltInBlockExemptions.Observed?): Int = when (state) {
+    BuiltInBlockExemptions.Observed.VISIBLE -> R.string.system_policy_exempt_observed_visible
+    BuiltInBlockExemptions.Observed.HIDDEN -> R.string.system_policy_exempt_observed_hidden
+    BuiltInBlockExemptions.Observed.SUSPENDED -> R.string.system_policy_exempt_observed_suspended
+    BuiltInBlockExemptions.Observed.UNKNOWN -> R.string.system_policy_exempt_observed_unknown
+    BuiltInBlockExemptions.Observed.NOT_INSTALLED, null ->
+        R.string.system_policy_exempt_observed_not_installed
+}
+
+/** The approval line for a social row: the stored decision, not Android's state. */
+internal fun socialApprovalRes(packageName: String, view: ExemptionsView): Int = when {
+    packageName !in view.settings.socialPins() -> R.string.system_policy_exempt_social_not_approved
+    view.readback?.socialSignerMismatch()?.contains(packageName) == true ->
+        R.string.system_policy_exempt_social_signer_mismatch
+    else -> R.string.system_policy_exempt_social_approved
+}
+
+/** Status lines from the read-back taken for the current decision only. */
+@Composable
+private fun ObservedLines(reason: String?, observed: BuiltInBlockExemptions.Observed?, view: ExemptionsView) {
+    val readback = view.readback
+    val lines = if (readback == null) {
+        listOfNotNull(reason, stringResource(R.string.system_policy_exempt_state_pending))
+    } else {
+        listOfNotNull(
+            reason,
+            stringResource(R.string.system_policy_exempt_android_state, stringResource(observedRes(observed))),
+            if (readback.passVerified()) null else stringResource(R.string.system_policy_exempt_pass_unverified),
+        )
+    }
+    lines.forEach { line ->
+        Text(
+            text = line,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -178,13 +180,10 @@ internal fun BuiltInExemptionsSection(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    text = stringResource(
-                        R.string.system_policy_status_line,
-                        stringResource(chromeStatusRes(view)),
-                    ),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ObservedLines(
+                    reason = view.readback?.let { stringResource(chromeReasonRes(it.chromeDecision())) },
+                    observed = view.readback?.chromeObserved(),
+                    view = view,
                 )
             }
             Spacer(Modifier.size(16.dp))
@@ -242,10 +241,10 @@ internal fun BuiltInExemptionsSection(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Text(
-                        text = stringResource(socialStatusRes(candidate.packageName, view)),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    ObservedLines(
+                        reason = stringResource(socialApprovalRes(candidate.packageName, view)),
+                        observed = view.readback?.social()?.get(candidate.packageName),
+                        view = view,
                     )
                 }
                 Spacer(Modifier.size(16.dp))

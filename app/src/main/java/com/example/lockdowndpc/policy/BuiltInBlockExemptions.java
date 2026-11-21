@@ -79,6 +79,9 @@ public final class BuiltInBlockExemptions {
             "com.google.android.apps.youtube.music"
     );
 
+    /** What Android reports for a package. {@link #UNKNOWN} when a read threw. */
+    public enum Observed { VISIBLE, HIDDEN, SUSPENDED, NOT_INSTALLED, UNKNOWN }
+
     public static boolean isAppStore(String packageName) {
         return packageName != null && APP_STORES.contains(packageName);
     }
