@@ -33,6 +33,7 @@
     <string name="home_filter_invalid_settings">יש לבדוק את מזהה האפליקציה, החתימה, הגדרות Tailscale וכתובת ה־PAC. אם מגדירים בדיקת חיבור, יש להזין כתובת HTTPS ואת התשובה הצפויה.</string>
     <string name="home_filter_invalid_ca">יש לבחור קובץ שמכיל תעודת CA ציבורית אחת בפורמט PEM או DER.</string>
     <string name="home_filter_picker_unavailable">לא ניתן לפתוח את בורר הקבצים של Android.</string>
+    <string name="home_filter_chrome_approval_blocks_change">יש להסיר קודם את ההיתר של Chrome במדיניות המערכת. כל עוד Chrome מותר, אי אפשר לכבות את סינון הבית או להסיר את תעודת הסינון.</string>
     <string name="home_filter_operation_failed">לא ניתן להשלים את פעולת הסינון הביתי.</string>
     <string name="home_filter_corrupt_settings">לא ניתן לקרוא את ההגדרות השמורות של הסינון הביתי. יש לפנות למנהל המכשיר לשחזור ההגדרות.</string>
     <string name="home_filter_requires_android_10">הסינון הביתי זמין מגרסת Android 10 ‏(API 29) ומעלה.</string>

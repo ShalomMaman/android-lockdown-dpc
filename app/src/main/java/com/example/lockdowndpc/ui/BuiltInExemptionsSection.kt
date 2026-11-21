@@ -89,8 +89,25 @@ internal fun loadExemptionsView(context: Context): ExemptionsView {
             context,
             setOf(BuiltInBlockExemptions.CHROME),
         ).isNotEmpty(),
-        social = installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL),
+        social = socialRows(context, settings),
     )
+}
+
+/**
+ * Installed catalogue social apps plus every saved approval, installed or not,
+ * so an approval for an uninstalled app can still be removed before a later
+ * reinstall would bring the app back.
+ */
+internal fun socialRows(
+    context: Context,
+    settings: BuiltInBlockExemptions.Settings,
+): List<ExemptionCandidate> {
+    val installed = installedExemptionCandidates(context, BuiltInBlockExemptions.EXEMPTABLE_SOCIAL)
+    val listed = installed.map { it.packageName }.toSet()
+    val uninstalledApprovals = settings.socialPins().keys
+        .filter { it !in listed }
+        .map { ExemptionCandidate(it, it) }
+    return installed + uninstalledApprovals
 }
 
 /** The administrator's reason line for Chrome's decision on the last pass. */
@@ -102,6 +119,7 @@ internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = wh
     ChromeFilterExemption.Decision.PROTECTION_PAUSED -> R.string.system_policy_exempt_chrome_reason_paused
     ChromeFilterExemption.Decision.FILTER_DISABLED -> R.string.system_policy_exempt_chrome_reason_filter_off
     ChromeFilterExemption.Decision.NOT_INSTALLED -> R.string.system_policy_exempt_chrome_reason_not_installed
+    ChromeFilterExemption.Decision.DISABLED -> R.string.system_policy_exempt_chrome_reason_disabled
     ChromeFilterExemption.Decision.SIGNER_UNVERIFIED -> R.string.system_policy_exempt_chrome_reason_signer
     ChromeFilterExemption.Decision.CONTAIN_UNVERIFIED ->
         R.string.system_policy_exempt_chrome_reason_contain_unverified

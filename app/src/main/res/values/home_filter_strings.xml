@@ -33,6 +33,7 @@
     <string name="home_filter_invalid_settings">Check the VPN package, signer, Tailscale settings and PAC URL. For the optional check, enter both an HTTPS URL and the expected response.</string>
     <string name="home_filter_invalid_ca">Choose a file with one public CA certificate in PEM or DER format.</string>
     <string name="home_filter_picker_unavailable">Android could not open the file picker.</string>
+    <string name="home_filter_chrome_approval_blocks_change">Remove the Chrome approval in System policy first. While Chrome is approved, the home filter cannot be turned off and its certificate cannot be removed.</string>
     <string name="home_filter_operation_failed">Could not complete the home filter operation.</string>
     <string name="home_filter_corrupt_settings">The saved home filter settings could not be read. Contact the administrator to recover the configuration.</string>
     <string name="home_filter_requires_android_10">The home filter requires Android 10 (API 29) or later.</string>

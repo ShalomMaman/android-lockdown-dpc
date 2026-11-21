@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
@@ -185,6 +187,8 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         remember(revision) { PlayStoreCompatibilityStore.isEnabled(context) }
     val playCompatibilityState = remember(revision) { playCompatibilityStateOf(context) }
     val exemptionsView = remember(revision) { loadExemptionsView(context) }
+    // A background pass can change what Android reports; re-read on return.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { revision++ }
     var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
 
     fun requireSession(): Boolean {

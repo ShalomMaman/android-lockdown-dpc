@@ -73,12 +73,6 @@ public final class LockdownPolicyController {
             }
 
             @Override
-            public boolean filterTeardownRequested() {
-                return homeFilter != null && homeFilter.configured()
-                        && (!homeFilter.enabled() || homeFilter.removeCa());
-            }
-
-            @Override
             public void containSocial(List<String> containErrors) {
                 containUnexemptedSocial(context, dpm, admin, social, containErrors);
             }
@@ -158,13 +152,7 @@ public final class LockdownPolicyController {
                 playCompatibility, homeFilter, social, chromeInScope, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
         int errorsBeforeFilter = errors.size();
-        if (start.holdFilterTeardown()) {
-            // Android did not confirm Chrome's hide: keep the VPN lockdown, the
-            // PAC and the CA in place; the next pass retries the hide first.
-            errors.add("home-filter:teardown-held-chrome-not-contained");
-        } else {
-            HomeFilterController.reconcile(context, dpm, admin, errors);
-        }
+        HomeFilterController.reconcile(context, dpm, admin, errors);
         if (chromeInScope) {
             // Chrome is released only now, after the home filter's own
             // reconciliation, and only if it reported no error. Links follow

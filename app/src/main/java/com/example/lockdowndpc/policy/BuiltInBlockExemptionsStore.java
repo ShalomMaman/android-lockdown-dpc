@@ -127,21 +127,41 @@ public final class BuiltInBlockExemptionsStore {
     }
 
     static boolean saveReadback(Context context, Readback readback) {
+        return saveReadback(readbackPrefs(context), readback);
+    }
+
+    /**
+     * Saves the read-back. Android's {@code commit()} updates memory before the
+     * disk write, so a failed save would still be visible to the console; on
+     * failure the record is therefore written again as unverified, which is
+     * what memory then holds whatever the disk does.
+     */
+    static boolean saveReadback(SharedPreferences prefs, Readback readback) {
+        if (edit(prefs, readback).commit()) {
+            return true;
+        }
+        edit(prefs, readback).putBoolean(KEY_PASS_VERIFIED, false).commit();
+        return false;
+    }
+
+    private static SharedPreferences.Editor edit(SharedPreferences prefs, Readback readback) {
         LinkedHashSet<String> social = new LinkedHashSet<>();
         readback.social().forEach((name, state) -> social.add(name + "=" + state.name()));
-        return readbackPrefs(context).edit()
+        return prefs.edit()
                 .putString(KEY_READBACK_FOR, readback.forSettings())
                 .putBoolean(KEY_PASS_VERIFIED, readback.passVerified())
                 .putString(KEY_CHROME_DECISION, readback.chromeDecision().name())
                 .putString(KEY_CHROME_OBSERVED, readback.chromeObserved().name())
                 .putStringSet(KEY_SOCIAL_OBSERVED, social)
-                .putStringSet(KEY_SOCIAL_MISMATCH, new LinkedHashSet<>(readback.socialSignerMismatch()))
-                .commit();
+                .putStringSet(KEY_SOCIAL_MISMATCH, new LinkedHashSet<>(readback.socialSignerMismatch()));
     }
 
     /** The last read-back, or {@code null} when none was recorded. */
     public static Readback readback(Context context) {
-        SharedPreferences prefs = readbackPrefs(context);
+        return readback(readbackPrefs(context));
+    }
+
+    static Readback readback(SharedPreferences prefs) {
         try {
             String forSettings = prefs.getString(KEY_READBACK_FOR, null);
             String decision = prefs.getString(KEY_CHROME_DECISION, null);

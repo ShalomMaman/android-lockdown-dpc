@@ -193,6 +193,17 @@ public final class BuiltInExemptionsControllerTest {
     }
 
     @Test
+    public void anApprovalForAnUninstalledAppCanBeRemoved() {
+        // Nothing in the change rule depends on the package being installed.
+        RecordingSink sink = new RecordingSink();
+        Settings before = Settings.NONE.withSocial("com.discord", SIGNER);
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                before, settings -> settings.withoutSocial("com.discord"), true, "remove:com.discord", sink);
+        assertEquals(Status.APPLIED, outcome.status());
+        assertEquals(Settings.NONE, sink.written);
+    }
+
+    @Test
     public void anUnchangedDecisionDoesNothing() {
         RecordingSink sink = new RecordingSink();
         assertEquals(Status.UNCHANGED, BuiltInExemptionsController.change(

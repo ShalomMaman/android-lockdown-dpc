@@ -333,6 +333,23 @@ public final class ChromeFilterExemptionTest {
     }
 
     @Test
+    public void aDisabledChromeIsNeverShownAndTheReleaseStepMakesNoVisibilityCall() {
+        FakeChrome chrome = visibleChrome();
+        chrome.enabled = false;
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        List<String> errors = new ArrayList<>();
+        Containment containment = ChromeFilterExemption.contain(true, true, PAC, chrome, errors);
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, PAC, chrome, errors);
+        assertEquals(Decision.DISABLED, decision);
+        assertFalse("no configuration write for a disabled Chrome", chrome.calls.contains("write-config"));
+        int callsBeforeRelease = chrome.calls.size();
+        assertEquals(Decision.DISABLED, ChromeFilterExemption.release(decision, true, chrome, errors));
+        assertEquals("release leaves an already hidden, disabled Chrome alone",
+                callsBeforeRelease, chrome.calls.size());
+        assertFalse(chrome.calls.contains("hide=false"));
+    }
+
+    @Test
     public void aDisabledChromeIsObservedAsDisabledNotAvailable() {
         FakeChrome chrome = visibleChrome();
         chrome.enabled = false;

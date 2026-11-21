@@ -173,6 +173,27 @@ public final class BuiltInBlockExemptions {
     }
 
     /**
+     * Whether a home filter change would take away what a saved Chrome approval
+     * relies on: turning the filter off, or removing its CA. While Chrome is
+     * approved such a change is refused; the administrator removes the Chrome
+     * approval first (that pass hides Chrome), and the filter change then works
+     * exactly as without the feature.
+     */
+    public static boolean blocksFilterChange(
+            Settings exemptions,
+            HomeFilterPolicy.Settings before,
+            HomeFilterPolicy.Settings after
+    ) {
+        if (exemptions == null || !exemptions.chrome() || before == null || after == null
+                || !before.configured()) {
+            return false;
+        }
+        boolean disables = before.enabled() && !after.enabled();
+        boolean removesCa = !before.removeCa() && after.removeCa();
+        return disables || removesCa;
+    }
+
+    /**
      * Whether a social package may be shown: approved, and its single current
      * signer is the one pinned at approval. An unreadable signer ({@code ""})
      * never matches.

@@ -17,13 +17,11 @@ import java.util.List;
 /** The start-of-pass order apply() runs, against recording steps. */
 public final class ExemptionPassStartTest {
 
-    private static class RecordingSteps implements ExemptionPassStart.Steps {
+    private static final class RecordingSteps implements ExemptionPassStart.Steps {
         final List<String> calls = new ArrayList<>();
         boolean deviceOwner = true;
         boolean homeFilterReadable = true;
         boolean chromeInScope = true;
-        boolean filterTeardownRequested;
-        Containment chromeContainment = Containment.CONTAINED;
         /** Protection reads as active only once the pass recorded that it started. */
         boolean started;
         Boolean protectionSeenByDecision;
@@ -34,11 +32,6 @@ public final class ExemptionPassStartTest {
         public boolean homeFilterReadable() {
             calls.add("check-home-filter");
             return homeFilterReadable;
-        }
-
-        @Override
-        public boolean filterTeardownRequested() {
-            return filterTeardownRequested;
         }
 
         @Override
@@ -59,7 +52,7 @@ public final class ExemptionPassStartTest {
         @Override
         public Containment containChrome(List<String> errors) {
             calls.add("contain-chrome");
-            return chromeInScope ? chromeContainment : null;
+            return chromeInScope ? Containment.CONTAINED : null;
         }
 
         @Override
@@ -105,50 +98,6 @@ public final class ExemptionPassStartTest {
         assertTrue(steps.calls.indexOf("contain-chrome") < steps.calls.indexOf("start"));
         assertTrue("a browser-backed WebView provider is suspended before protection starts",
                 steps.calls.indexOf("suspend-webview-provider") < steps.calls.indexOf("start"));
-    }
-
-    /** A Chrome Android refuses to hide. */
-    private static final class RefusingChrome implements ChromeFilterExemption.Gateway {
-        boolean hidden;
-
-        @Override public boolean installed() { return true; }
-        @Override public String currentSignerSha256() { return BuiltInBlockExemptions.CHROME_RELEASE_SIGNER_SHA256; }
-        @Override public java.util.Map<String, Object> restrictions() { return new java.util.HashMap<>(); }
-        @Override public void setRestrictions(java.util.Map<String, Object> values) { }
-        @Override public void setHidden(boolean value) { }
-        @Override public boolean hidden() { return hidden; }
-        @Override public void setSuspended(boolean value) { }
-        @Override public boolean suspended() { return false; }
-        @Override public boolean enabled() { return true; }
-    }
-
-    @Test
-    public void filterTeardownWaitsWhenChromesHideIsRefused() {
-        // Chrome visible, the administrator turns the filter off, Android
-        // refuses the hide: the start tells the pass to keep VPN, PAC and CA.
-        RecordingSteps steps = new RecordingSteps() {
-            @Override
-            public Containment containChrome(List<String> errors) {
-                calls.add("contain-chrome");
-                return ChromeFilterExemption.contain(true, false, null, new RefusingChrome(), errors);
-            }
-        };
-        steps.filterTeardownRequested = true;
-        List<String> errors = new ArrayList<>();
-        ExemptionPassStart.Start start = ExemptionPassStart.begin(steps, errors);
-        assertTrue(start.holdFilterTeardown());
-        assertTrue(errors.contains(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR));
-    }
-
-    @Test
-    public void filterTeardownProceedsOnceChromeIsContained() {
-        RecordingSteps steps = new RecordingSteps();
-        steps.filterTeardownRequested = true;
-        assertFalse(ExemptionPassStart.begin(steps, new ArrayList<>()).holdFilterTeardown());
-        steps = new RecordingSteps();
-        steps.chromeContainment = Containment.REFUSED;
-        assertFalse("no hold when nothing is being torn down",
-                ExemptionPassStart.begin(steps, new ArrayList<>()).holdFilterTeardown());
     }
 
     @Test

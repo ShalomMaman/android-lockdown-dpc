@@ -46,6 +46,12 @@ public final class ChromeFilterExemption {
         PROTECTION_PAUSED(false),
         FILTER_DISABLED(false),
         NOT_INSTALLED(false),
+        /**
+         * Chrome is disabled in Android. It is never shown: showing it would
+         * only be undone again, and every show is a package event that starts
+         * another pass.
+         */
+        DISABLED(false),
         SIGNER_UNVERIFIED(false),
         CONTAIN_UNVERIFIED(false),
         CONFIG_UNVERIFIED(false),
@@ -127,6 +133,7 @@ public final class ChromeFilterExemption {
                 return Containment.NOT_INSTALLED;
             }
             if (exempted && filterEnabled && pacUrl != null && !pacUrl.isBlank()
+                    && gateway.enabled()
                     && BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())
                     && BuiltInBlockExemptions.restrictionsSatisfied(gateway.restrictions(), pacUrl)) {
                 return Containment.ALREADY_ALLOWED;
@@ -269,6 +276,9 @@ public final class ChromeFilterExemption {
         }
         if (containment == Containment.NOT_INSTALLED || !gateway.installed()) {
             return Decision.NOT_INSTALLED;
+        }
+        if (!gateway.enabled()) {
+            return Decision.DISABLED;
         }
         if (!BuiltInBlockExemptions.chromeSignerVerified(gateway.currentSignerSha256())) {
             return Decision.SIGNER_UNVERIFIED;

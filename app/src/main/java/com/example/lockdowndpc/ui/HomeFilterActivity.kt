@@ -125,6 +125,8 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 selectedCa = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: HomeFilterController.ChromeApprovalBlocksChangeException) {
+                error = R.string.home_filter_chrome_approval_blocks_change
             } catch (_: HomeFilterController.CorruptConfigurationException) {
                 snapshot = null
                 error = R.string.home_filter_corrupt_settings

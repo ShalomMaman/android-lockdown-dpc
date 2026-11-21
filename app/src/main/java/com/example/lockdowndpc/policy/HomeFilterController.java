@@ -28,6 +28,13 @@ public final class HomeFilterController {
 
     public record Snapshot(HomeFilterPolicy.Settings settings, HomeFilterPolicy.Report report) {}
 
+    /** Turning the filter off or removing its CA while Chrome is approved. */
+    public static final class ChromeApprovalBlocksChangeException extends IllegalStateException {
+        private ChromeApprovalBlocksChangeException() {
+            super("Remove the Chrome approval before turning off the home filter or removing its certificate");
+        }
+    }
+
     public static final class CorruptConfigurationException extends IllegalStateException {
         private CorruptConfigurationException() {
             super(CORRUPT_CONFIGURATION);
@@ -94,6 +101,12 @@ public final class HomeFilterController {
             }
             HomeFilterPolicy.Settings before = requireSettings(context);
             HomeFilterPolicy.Settings after = operation.apply(before);
+            // Enforced here, not only in the console: a saved Chrome approval
+            // relies on the filter, so it must be removed first.
+            if (BuiltInBlockExemptions.blocksFilterChange(
+                    BuiltInBlockExemptionsStore.readForEdit(context), before, after)) {
+                throw new ChromeApprovalBlocksChangeException();
+            }
             if (!before.equals(after)) {
                 try {
                     HomeFilterStore.write(context, after);

@@ -348,12 +348,17 @@ what Android reports before it returns. Chrome's configuration is written only
 after Android confirmed that hide. Chrome is shown again only after the home
 filter's own reconciliation in the same pass reported no error (so enabling the
 filter with a missing VPN app keeps it hidden); a show Android does not confirm
-is undone, and links follow that final result. If Android does not confirm
-Chrome's hide while the home filter is being turned off (or its CA removed),
-the pass keeps the VPN lockdown, the PAC and the CA in place, reports itself
-unverified, and the next pass retries the hide first. A home filter save that
+is undone, and links follow that final result. While a Chrome approval is
+saved, the home filter cannot be turned off and its CA cannot be removed: the
+home filter screen refuses with "remove the Chrome approval first", and the
+check is enforced in `HomeFilterController`, not only in the screen. Removing
+the approval runs an ordinary pass that hides Chrome first; after that the
+filter can be turned off exactly as without the feature. A Chrome that is
+disabled in Android is never shown. A home filter save that
 fails to persist restores the previous settings in memory and still runs a
-pass. The console reports a disabled app as disabled, not available. A refused hide is an error, so the pass is
+pass. The console reports a disabled app as disabled, not available, lists every
+saved social approval even when the app is not installed (so it can still be
+removed), and re-reads Android's state whenever it is opened again. A refused hide is an error, so the pass is
 reported unverified. The console shows, per app, only what Android last
 reported for the current decision. While Chrome is shown, `http`/`https`
 links route to it; Custom Tabs and Trusted Web Activities that

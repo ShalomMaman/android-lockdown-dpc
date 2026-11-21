@@ -172,6 +172,47 @@ public final class BuiltInBlockExemptionsTest {
         assertEquals(Boolean.FALSE, merged.get("PasswordManagerEnabled"));
     }
 
+    // --- Home filter changes while Chrome is approved -------------------------------
+
+    private static HomeFilterPolicy.Settings enabledFilter(String ca) {
+        return new HomeFilterPolicy.Settings(
+                new HomeFilterPolicy.Config(HomeFilterPolicy.DEFAULT_VPN_PACKAGE, PAC), true, ca, false);
+    }
+
+    @Test
+    public void disablingTheFilterIsRefusedWhileChromeIsApproved() {
+        HomeFilterPolicy.Settings before = enabledFilter(null);
+        assertTrue(BuiltInBlockExemptions.blocksFilterChange(
+                Settings.NONE.withChrome(true), before, before.requestDisable()));
+    }
+
+    @Test
+    public void removingTheCertificateIsRefusedWhileChromeIsApproved() {
+        HomeFilterPolicy.Settings before = enabledFilter("MIIB");
+        assertTrue(BuiltInBlockExemptions.blocksFilterChange(
+                Settings.NONE.withChrome(true), before, before.requestRemoveCa()));
+    }
+
+    @Test
+    public void bothChangesAreAllowedOnceTheChromeApprovalIsRemoved() {
+        Settings withoutChrome = Settings.NONE.withChrome(true).withChrome(false)
+                .withSocial(WHATSAPP, SIGNER_A);
+        HomeFilterPolicy.Settings before = enabledFilter("MIIB");
+        assertFalse(BuiltInBlockExemptions.blocksFilterChange(withoutChrome, before, before.requestDisable()));
+        assertFalse(BuiltInBlockExemptions.blocksFilterChange(withoutChrome, before, before.requestRemoveCa()));
+    }
+
+    @Test
+    public void otherFilterChangesAreNotAffectedByAChromeApproval() {
+        Settings chrome = Settings.NONE.withChrome(true);
+        HomeFilterPolicy.Settings before = enabledFilter(null);
+        assertFalse("retry", BuiltInBlockExemptions.blocksFilterChange(chrome, before, before));
+        assertFalse("installing a certificate", BuiltInBlockExemptions.blocksFilterChange(
+                chrome, before, new HomeFilterPolicy.Settings(before.config(), true, "MIIB", false)));
+        assertFalse("first enable", BuiltInBlockExemptions.blocksFilterChange(
+                chrome, HomeFilterPolicy.Settings.OFF, before));
+    }
+
     // --- Kiosk ------------------------------------------------------------------------
 
     @Test
