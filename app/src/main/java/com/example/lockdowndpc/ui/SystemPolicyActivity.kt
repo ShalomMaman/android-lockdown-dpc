@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -432,11 +434,32 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         working = true
         message = null
         coroutineScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ScheduleController.setEnabled(context.applicationContext, requested)
+            val outcome = withContext(Dispatchers.IO) {
+                try {
+                    Result.success(ScheduleController.setEnabled(context.applicationContext, requested))
+                } catch (exception: RuntimeException) {
+                    // SecurityException included: shown as an expired session below.
+                    Result.failure<ScheduleController.Result>(exception)
+                }
             }
             working = false
             revision++
+            val result = outcome.getOrElse { failure ->
+                // The stored schedule is re-read on the next render, so the
+                // row shows what is actually in force.
+                message = if (failure is SecurityException) {
+                    UiMessage(context.getString(R.string.system_policy_error_auth), isError = true)
+                } else {
+                    UiMessage(
+                        context.getString(
+                            R.string.system_policy_applied_failed,
+                            failure.javaClass.simpleName.bidiIsolated(),
+                        ),
+                        isError = true,
+                    )
+                }
+                return@launch
+            }
             val pass = result.pass()
             message = when (result.outcome().status()) {
                 ScheduleChange.Status.SESSION_REQUIRED -> UiMessage(
@@ -717,11 +740,21 @@ private fun ScheduleRow(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
-    val on = settings.unreadable() || settings.bothWindowsEnabled()
+    // On while any window restricts: one enabled window is still a schedule
+    // in force, and the fail-closed night window of an unreadable record too.
+    val on = settings.unreadable() || settings.enforcing()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
+            // The row owns the switch semantics, so TalkBack reads the title
+            // and status together with the state.
+            .toggleable(
+                value = on,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = onToggle,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -751,9 +784,10 @@ private fun ScheduleRow(
             )
         }
         Spacer(Modifier.size(16.dp))
+        // Decorative: the row above is the toggle.
         Switch(
             checked = on,
-            onCheckedChange = { onToggle(it) },
+            onCheckedChange = null,
             enabled = enabled,
         )
     }

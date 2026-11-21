@@ -12,7 +12,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <!--
         Night and work hours boundaries fire on time when exact alarms are
-        permitted; without it they fall back to a ten-minute window. Granted by
+        permitted; without it they fall back to inexact alarms. Granted by
         default on Android 12 and 13, an administrator choice on Android 14+.
         See policy/ScheduleAlarm.java.
     -->
@@ -202,6 +202,16 @@
         -->
         <service
             android:name=".maintenance.MaintenanceGuardJobService"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!--
+            Night and work hours catch-up sweep, armed only while a schedule is
+            enforcing. Exported with BIND_JOB_SERVICE for the same reason as
+            the maintenance guard: only the platform can bind it.
+        -->
+        <service
+            android:name=".policy.ScheduleSweepJobService"
             android:exported="true"
             android:permission="android.permission.BIND_JOB_SERVICE" />
 

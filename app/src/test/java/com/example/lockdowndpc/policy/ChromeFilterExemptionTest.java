@@ -493,4 +493,67 @@ public final class ChromeFilterExemptionTest {
         chrome.suspended = true;
         assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
     }
+
+    // --- Night and work hours ---------------------------------------------------------
+
+    @Test
+    public void aReleaseNeverLiftsASuspensionAnActiveWindowHolds() {
+        // Shown on an earlier pass, then suspended by an active window; this
+        // pass contains Chrome again (not a continuation) and releases it.
+        FakeChrome chrome = new FakeChrome();
+        chrome.suspended = true;
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        List<String> errors = new ArrayList<>();
+        Containment containment = ChromeFilterExemption.contain(true, true, PAC, false, chrome, errors);
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, PAC, chrome, errors);
+        assertEquals(Decision.SHOWN, decision);
+        Decision released = ChromeFilterExemption.release(decision, true, true, chrome, errors);
+        assertEquals(Decision.SHOWN, released);
+        assertTrue(errors.isEmpty());
+        assertFalse("the window's suspension is never lifted", chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+        assertFalse(chrome.hidden);
+        assertEquals(Observed.SUSPENDED, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aReleaseOutsideAWindowLiftsAContainmentSuspension() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.hidden = true;
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.SHOWN, ChromeFilterExemption.release(Decision.SHOWN, true, false, chrome, errors));
+        assertTrue(chrome.calls.contains("suspend=false"));
+        assertEquals(Observed.VISIBLE, ChromeFilterExemption.observe(chrome));
+    }
+
+    @Test
+    public void aHeldReleaseThatAndroidLeavesHiddenIsUnverifiedAndContained() {
+        FakeChrome chrome = new FakeChrome() {
+            @Override
+            public void setHidden(boolean value) {
+                calls.add("hide=" + value);
+                hidden = true;
+            }
+        };
+        chrome.hidden = true;
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.SHOW_UNVERIFIED,
+                ChromeFilterExemption.release(Decision.SHOWN, true, true, chrome, errors));
+        assertTrue(errors.contains(ChromeFilterExemption.SHOW_UNVERIFIED_ERROR));
+        assertFalse(chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+    }
+
+    @Test
+    public void aHeldChromeIsStillContainedWhenTheFilterIsUnconfirmed() {
+        FakeChrome chrome = visibleChrome();
+        chrome.suspended = true;
+        List<String> errors = new ArrayList<>();
+        assertEquals(Decision.FILTER_UNCONFIRMED,
+                ChromeFilterExemption.release(Decision.SHOWN, false, true, chrome, errors));
+        assertFalse(chrome.calls.contains("suspend=false"));
+        assertTrue(chrome.suspended);
+    }
 }

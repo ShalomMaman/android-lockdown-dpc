@@ -245,11 +245,34 @@ public final class ChromeFilterExemption {
             Gateway gateway,
             List<String> errors
     ) {
+        return release(decision, filterConfirmed, false, gateway, errors);
+    }
+
+    /**
+     * @param scheduleHolds an active night or work window holds Chrome's
+     *                      suspension ({@link ScheduleSuspension#holding}).
+     *                      Then the release only unhides Chrome and never
+     *                      lifts that suspension, so a schedule step that
+     *                      fails later in the pass cannot leave Chrome
+     *                      launchable inside the window. Chrome is shown, and
+     *                      opens once the window ends.
+     */
+    public static Decision release(
+            Decision decision,
+            boolean filterConfirmed,
+            boolean scheduleHolds,
+            Gateway gateway,
+            List<String> errors
+    ) {
         if (decision.shown() && filterConfirmed) {
             try {
                 gateway.setHidden(false);
-                gateway.setSuspended(false);
-                if (observe(gateway) == BuiltInBlockExemptions.Observed.VISIBLE) {
+                if (!scheduleHolds) {
+                    gateway.setSuspended(false);
+                }
+                BuiltInBlockExemptions.Observed shown = observe(gateway);
+                if (shown == BuiltInBlockExemptions.Observed.VISIBLE
+                        || (scheduleHolds && shown == BuiltInBlockExemptions.Observed.SUSPENDED)) {
                     return Decision.SHOWN;
                 }
                 errors.add(SHOW_UNVERIFIED_ERROR);

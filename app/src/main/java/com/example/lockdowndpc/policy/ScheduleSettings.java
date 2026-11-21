@@ -159,8 +159,13 @@ public record ScheduleSettings(SchedulePolicy.Schedule schedule, Set<String> all
      * The console's single switch: both windows on or both off. Hours, days,
      * timezone and allowlist of a readable record are kept; a missing or
      * unreadable record starts from the default schedule in {@code zone}.
+     * Turning off a device that never stored a schedule is no change at all:
+     * {@link #OFF} stays {@link #OFF}, so nothing is written or audited.
      */
     public ScheduleSettings withWindowsEnabled(boolean enabled, ZoneId zone) {
+        if (schedule == null && !unreadable && !enabled) {
+            return this;
+        }
         if (schedule == null || unreadable) {
             return new ScheduleSettings(defaultSchedule(zone, enabled), Set.of(), false);
         }

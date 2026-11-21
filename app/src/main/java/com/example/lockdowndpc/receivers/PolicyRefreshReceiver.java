@@ -18,7 +18,10 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context context, Intent intent) {
-        String action = intent.getAction();
+        String action = intent == null ? null : intent.getAction();
+        if (action == null) {
+            return;
+        }
         if (isScheduleTrigger(action)) {
             reconcileForSchedule(context, action);
             return;

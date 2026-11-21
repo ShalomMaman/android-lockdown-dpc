@@ -29,25 +29,34 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
     private final DevicePolicyManager dpm;
     private final ComponentName admin;
 
+    /** Set when another part of this pass's inventory failed; see {@link #inventoryFailed}. */
+    private RuntimeException inventoryFailure;
+
     ScheduleDeviceGateway(Context context, DevicePolicyManager dpm, ComponentName admin) {
         this.context = context;
         this.dpm = dpm;
         this.admin = admin;
     }
 
+    /**
+     * Marks this pass's inventory as failed: {@link #launchablePackages} then
+     * throws {@code cause}, which {@link ScheduleSuspension} reports as
+     * {@link ScheduleSuspension#INVENTORY_FAILED} while suspending nothing new
+     * and releasing nothing it holds.
+     */
+    void inventoryFailed(RuntimeException cause) {
+        inventoryFailure = cause;
+    }
+
     @Override
     public Set<String> launchablePackages() {
-        // Not through query(): a failed inventory must reach the pass as an
-        // error, never read as "nothing to suspend".
-        Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
-        PackageManager pm = context.getPackageManager();
-        List<ResolveInfo> matches;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            matches = pm.queryIntentActivities(launcher, PackageManager.ResolveInfoFlags.of(0));
-        } else {
-            //noinspection deprecation
-            matches = pm.queryIntentActivities(launcher, 0);
+        if (inventoryFailure != null) {
+            throw inventoryFailure;
         }
+        // Not through a silent fallback: a failed inventory must reach the pass
+        // as an error, never read as "nothing to suspend".
+        Intent launcher = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+        List<ResolveInfo> matches = query(context.getPackageManager(), launcher, 0);
         LinkedHashSet<String> packages = new LinkedHashSet<>();
         for (ResolveInfo info : matches) {
             if (info.activityInfo != null) {
@@ -105,6 +114,10 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
      * or by being made the default SMS app. The home launcher always counts:
      * suspending the one HOME activity would strand the device. When no single
      * default resolves, every HOME handler is kept.
+     *
+     * @throws RuntimeException when an activity inventory fails (including a
+     *         {@code null} answer from {@code PackageManager}); the caller treats
+     *         that as a failed schedule inventory
      */
     static Set<String> roleApps(Context context) {
         PackageManager pm = context.getPackageManager();
@@ -209,15 +222,21 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
                 && (info.flags & (ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_UPDATED_SYSTEM_APP)) != 0;
     }
 
+    /**
+     * {@code queryIntentActivities}, where a {@code null} answer is a failed
+     * inventory rather than "no match". Throws; callers fail closed.
+     */
     private static List<ResolveInfo> query(PackageManager pm, Intent intent, int flags) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                return pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(flags));
-            }
+        List<ResolveInfo> matches;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            matches = pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(flags));
+        } else {
             //noinspection deprecation
-            return pm.queryIntentActivities(intent, flags);
-        } catch (RuntimeException exception) {
-            return List.of();
+            matches = pm.queryIntentActivities(intent, flags);
         }
+        if (matches == null) {
+            throw new IllegalStateException("null-activity-inventory");
+        }
+        return matches;
     }
 }

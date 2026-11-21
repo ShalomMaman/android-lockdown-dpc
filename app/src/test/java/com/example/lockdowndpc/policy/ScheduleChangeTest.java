@@ -137,4 +137,15 @@ public final class ScheduleChangeTest {
         assertEquals(ScheduleChange.Status.SESSION_REQUIRED, ScheduleChange.apply(off(), turnOff).status());
         assertEquals(List.of(), turnOff.commits);
     }
+
+    @Test
+    public void turningOffANeverStoredScheduleWritesAndAuditsNothing() {
+        FakeBoundary boundary = new FakeBoundary(ScheduleSettings.OFF);
+        ScheduleSettings next = ScheduleSettings.OFF.withWindowsEnabled(false, JERUSALEM);
+        assertEquals(ScheduleSettings.OFF, next);
+        ScheduleChange.Outcome outcome = ScheduleChange.apply(next, boundary);
+        assertEquals(ScheduleChange.Status.UNCHANGED, outcome.status());
+        assertTrue(boundary.commits.isEmpty());
+        assertTrue(boundary.audit.isEmpty());
+    }
 }

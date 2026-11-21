@@ -194,7 +194,11 @@ public final class LockdownPolicyController {
             filterConfirmed = filterConfirmed && lockConfirmed;
             boolean routedAway = !chrome.shown();
             BuiltInBlockExemptions.Observed beforeRelease = ChromeFilterExemption.observe(chromeGateway);
-            chrome = ChromeFilterExemption.release(chrome, filterConfirmed, chromeGateway, errors);
+            // A suspension an active window holds is never lifted here, the
+            // same guard the social exemption step uses: the schedule step
+            // below may fail, and must not find Chrome already released.
+            chrome = ChromeFilterExemption.release(chrome, filterConfirmed,
+                    scheduleHolding.contains(BuiltInBlockExemptions.CHROME), chromeGateway, errors);
             if (ChromeFilterExemption.unhidByRelease(beforeRelease, chrome)) {
                 // This pass changed Chrome from hidden to visible on confirmed
                 // evidence; the package event Android sends for that may
@@ -1168,6 +1172,7 @@ public final class LockdownPolicyController {
             // disabled schedule may have left behind.
             ScheduleSuspension.reconcile(schedule, now,
                     new ScheduleSuspension.Device(Set.of(), Set.of()), gateway, errors);
+            ScheduleStore.markReconciled(context, now);
             return;
         }
         PackageManager pm = context.getPackageManager();
@@ -1178,7 +1183,15 @@ public final class LockdownPolicyController {
             core.add(homeFilter.config().vpnPackage());
         }
         core.addAll(LockdownPackages.ESSENTIAL_SYSTEM);
-        core.addAll(ScheduleDeviceGateway.roleApps(context));
+        try {
+            core.addAll(ScheduleDeviceGateway.roleApps(context));
+        } catch (RuntimeException exception) {
+            // Without the role apps the always-available core is unknown, and
+            // suspending against a partial core could strand the dialer or
+            // the home screen. Treated as a failed inventory: nothing new is
+            // suspended, nothing held is released, and the pass reports it.
+            gateway.inventoryFailed(exception);
+        }
         // Android refuses to suspend an active device administrator; asking on
         // every pass would only fail every pass.
         Set<String> activeAdmins = activeAdminPackages(dpm);
@@ -1214,6 +1227,11 @@ public final class LockdownPolicyController {
         }
         ScheduleSuspension.Result result = ScheduleSuspension.reconcile(schedule, now,
                 new ScheduleSuspension.Device(core, heldByOthers), gateway, errors);
+        // The instant this pass evaluated the schedule at, for the catch-up
+        // check only. Recorded once the step ran, even with errors, so a
+        // failing step is not re-run on every screen-on; a step that crashed
+        // records nothing and the next check asks for a pass again.
+        ScheduleStore.markReconciled(context, now);
         if (!result.activeWindows().isEmpty()) {
             Log.i(TAG, "Schedule windows active: " + result.activeWindows()
                     + ", suspended=" + result.suspended().size());

@@ -10,6 +10,7 @@ import android.util.Log;
 
 import com.example.lockdowndpc.policy.HomeFilterController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
+import com.example.lockdowndpc.policy.ScheduleAlarm;
 import com.example.lockdowndpc.updates.UpdateScheduler;
 
 /**
@@ -43,7 +44,27 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
         }
     };
 
+    /**
+     * Night and work hours catch-up: the screen turning on or the device being
+     * unlocked is the first moment a missed boundary could matter to the user.
+     * These broadcasts reach only runtime receivers. The check runs on the
+     * policy thread and queues a pass only when a boundary was missed, so a
+     * device without an enforcing schedule reads two preference files and stops.
+     */
+    private final BroadcastReceiver scheduleReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent == null ? null : intent.getAction();
+            if (!Intent.ACTION_SCREEN_ON.equals(action) && !Intent.ACTION_USER_PRESENT.equals(action)) {
+                return;
+            }
+            Context app = context.getApplicationContext();
+            PolicyReconciliationCoordinator.runOnPolicyThread(() -> ScheduleAlarm.catchUp(app, action, null));
+        }
+    };
+
     private boolean receiverRegistered;
+    private boolean scheduleReceiverRegistered;
 
     @Override
     public void onCreate() {
@@ -58,6 +79,21 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
             registerReceiver(packageReceiver, filter);
         }
         receiverRegistered = true;
+
+        IntentFilter screen = new IntentFilter(Intent.ACTION_SCREEN_ON);
+        screen.addAction(Intent.ACTION_USER_PRESENT);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(scheduleReceiver, screen, Context.RECEIVER_NOT_EXPORTED);
+            } else {
+                //noinspection UnspecifiedRegisterReceiverFlag
+                registerReceiver(scheduleReceiver, screen);
+            }
+            scheduleReceiverRegistered = true;
+        } catch (RuntimeException exception) {
+            // The boundary alarms and the periodic sweep still run.
+            Log.e(TAG, "Schedule catch-up receiver not registered", exception);
+        }
 
         // Reconcile the entire installed inventory whenever Android rebinds the
         // service. This closes the gap if the process was killed under memory
@@ -76,6 +112,10 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
         if (receiverRegistered) {
             unregisterReceiver(packageReceiver);
             receiverRegistered = false;
+        }
+        if (scheduleReceiverRegistered) {
+            unregisterReceiver(scheduleReceiver);
+            scheduleReceiverRegistered = false;
         }
         super.onDestroy();
     }
