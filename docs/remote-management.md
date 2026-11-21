@@ -1,7 +1,9 @@
 # Remote management design
 
-**Status: design proposal, revision 4. Nothing in this document is implemented
-yet unless a section says "exists today".**
+**Status: accepted direction (v1); implementation PRs must meet the acceptance
+criteria in [section 15](#15-acceptance-criteria-carried-into-prs). Revision 4,
+final. Nothing in this document is implemented yet unless a section says
+"exists today".**
 
 Three independent reviews found new P1 issues each time the design let the
 online server change what a device may do. Revision 4 therefore keeps v1 to the
@@ -47,6 +49,7 @@ depends on them is merged.
 12. [v1 delivery plan](#12-v1-delivery-plan)
 13. [Blockers and open questions](#13-blockers-and-open-questions)
 14. [Later (separate design, not reviewed here)](#14-later-separate-design-not-reviewed-here)
+15. [Acceptance criteria carried into PRs](#15-acceptance-criteria-carried-into-prs)
 - [Appendix A: Review resolution](#appendix-a-review-resolution)
 
 ---
@@ -212,9 +215,13 @@ holding the action and `android.intent.category.DEFAULT`, and
 shape Google's Test DPC uses, and `tools/test_manifest_permissions.py` pins it.
 
 **Build gate.** A build constant `REMOTE_ENROLMENT_ENABLED` is `false` in
-release builds until PR 9 (section 12). While it is false, a bundle with any
-`dg.remote.*` key makes both activities return `RESULT_CANCELED` before
-anything is written. A device never enters a remote mode from a build that
+release builds until PR 9 (section 12). One shared check,
+`RemoteEnrolmentGate.permits()`, runs first in **every** entry point that can
+start a remote mode: both provisioning activities, the receiver fallback and
+the bench option. While it is false, a bundle with any `dg.remote.*` key makes
+both activities return `RESULT_CANCELED` before anything is written, the
+receiver writes nothing and records `remote-enrolment-disabled`, and the bench
+option is not shown. A device never enters a remote mode from a build that
 cannot finish enrolment.
 
 **Remote intent first.** With the gate on, the first statement of each
@@ -389,8 +396,11 @@ names. Key sets have no time-based expiry; revocation is by a newer version.
    Otherwise the option is absent and the console shows
    `bench-enrol-not-fresh` (conversion is Later, 14.2). The screen is a
    non-exported activity.
-3. Choosing it writes the marker, moves to `ENROLLING` and applies the
-   baseline before any network call.
+3. Choosing it runs one operation on the policy thread: it **checks the gate
+   and freshness again** and, only if both still hold, writes the marker in the
+   same step. It then moves to `ENROLLING` and applies the baseline before any
+   network call. A device that stopped being fresh between showing the option
+   and choosing it is refused with `bench-enrol-not-fresh`.
 4. The operator types the server host. The device fetches the key set and
    shows the root fingerprint (eight groups of four characters) to compare
    with the fleet card. The operator then types a **bench code** created per
@@ -474,8 +484,9 @@ depends on wall-clock time.
   - `deviceId`;
   - a fresh 32-byte `nonce`;
   - `keySetVersion`, `fleetPolicyVersion`;
-  - `committedSha256`, `verifiedSha256`;
-  - the active recovery overrides;
+  - `committedSha256`, the active recovery overrides and their
+    `generationSha256`;
+  - `verifiedGeneration` (5.3, hashes);
   - `lastCommandSequence`;
   - the report.
 
@@ -499,13 +510,30 @@ depends on wall-clock time.
 
   A refusal at one step does not stop later steps. A command never depends on
   the policy state, so step 2's outcome does not change step 4.
-- **Hashes both sides can reproduce.** `committedSha256` = SHA-256 of the
-  signed payload bytes of the fleet policy (or the baseline) that the journal
-  holds. The effective state is that policy plus the active recovery
-  overrides, a fixed enumeration (8.4). The report carries both, so the
-  server can compute the effective state without device data. `verifiedSha256`
-  = SHA-256 of `committedSha256 ‖ sorted override codes` for the last
-  generation a read-back verified.
+- **Hashes both sides can reproduce.** Every hash is a raw 32-byte SHA-256
+  digest. On the wire, in reports and in the journal it is written as
+  **lowercase hexadecimal, 64 characters**. Hashes are always concatenated as
+  raw bytes, never as text.
+  - `committedSha256` = SHA-256 of the exact signed payload bytes (the
+    base64url-decoded `payload`) of the fleet policy the journal holds. For
+    the baseline, it is `baselineSha256` over the canonical baseline bytes.
+  - The **generation** is the committed policy plus the active recovery
+    overrides, a fixed enumeration (8.4).
+    `generationSha256 = SHA-256("dg-gen/1" ‖ 0x00 ‖ committedSha256[32 raw
+    bytes] ‖ n ‖ for each override in ascending ASCII order: len ‖ ASCII
+    code)`, where `n` and `len` are single unsigned bytes.
+  - Example vectors (also committed in PR 4): with `committedSha256 =
+    SHA-256("example") =
+    50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c`:
+    - no overrides →
+      `6248175361a6f10d6e60c31f0ccdd4e91630402b1651e10fcdf5fc6be732f28f`;
+    - `network-off` →
+      `41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb`.
+  - `verifiedSha256` is the `generationSha256` of the last generation a
+    read-back verified. It is stored and reported **together with that
+    generation's own** `fleetPolicyVersion` (or `baseline`),
+    `committedSha256` and override list (`verifiedGeneration`), so it can be
+    reproduced even after the current generation has moved on.
 
 ### 5.4 Commands are fresh by construction
 
@@ -516,10 +544,16 @@ on the device and no expiry to compute from time:
 2. Commit `{sequence, kind, state: ACCEPTED, bootCount, cutoffElapsed}` with
    the raised floor, where `cutoffElapsed = requestSentElapsed + 120 s`.
 3. Commit `state: DISPATCHING`.
-4. **After that commit**, check again that the boot count is unchanged and
-   that `elapsedRealtime < cutoffElapsed`. If either fails, commit
-   `command-expired` and stop.
+4. **After that commit**, check again that the boot count is unchanged,
+   that `elapsedRealtime < cutoffElapsed`, **and that `commands-off` is not
+   active**. If any check fails, commit `command-expired` or
+   `cancelled-by-recovery` and stop.
 5. Call the platform once. Commit `state: DONE` with the evidence.
+
+Steps 2–5 and the recovery commit (8.3) run on the **same single policy
+thread**. A recovery that lands before step 4 therefore cancels the command,
+and a command whose platform call has already happened is reported as
+executed. There is no third outcome.
 6. After a crash, `ACCEPTED` becomes `command-expired` (the nonce cannot
    survive a process death), and `DISPATCHING` is reported as
    `dispatch-outcome-unknown` and **never dispatched again**.
@@ -547,12 +581,14 @@ thread before any `DevicePolicyManager` call:
 
 1. Read `committedSha256` and the overrides from the journal. The **target
    generation** is `committedSha256 ‖ overrides`.
-2. If the projection stamp equals the target generation, go to step 4.
+2. (No shortcut: the projection stamp is a consistency check, never a reason
+   to skip step 3; see A2 in section 15.)
 3. Re-project the **full** effective policy into every legacy store. Every
    write uses `commit()`, through package-private setters that only
-   `AuthorizedPolicyWriter` reaches. Then write the projection stamp, **last**,
-   with `commit()`. Projection overwrites every field, so it is idempotent: a
-   partial projection from a crash is simply written again in full.
+   `AuthorizedPolicyWriter` reaches, and readers see only successfully stored
+   state (A2). Then write the projection stamp, **last**, with `commit()`.
+   Projection overwrites every field, so it is idempotent: a partial
+   projection from a crash is simply written again in full.
 4. Run the reconciliation pass with the target generation as a parameter.
 5. After the read-back, write `verifiedSha256` **only if** the pass verified
    **and** the journal's target generation is still the one the pass
@@ -707,7 +743,9 @@ Every sync carries a report signed with the device key:
 
 - the redacted health snapshot (package census as counts);
 - the mode, `keySetVersion`, `fleetPolicyVersion`;
-- `committedSha256`, the overrides and `verifiedSha256`;
+- `committedSha256`, the overrides and `generationSha256`;
+- `verifiedGeneration` (`verifiedSha256` with its own policy version,
+  `committedSha256` and overrides);
 - the error codes of the last pass;
 - command outcomes;
 - recovery events;
@@ -761,7 +799,10 @@ chooses one or more, **then** enters the code. A valid code leads to **one**
 - removes the verifier;
 - records the use;
 - writes the chosen overrides;
-- marks every command entry in `ACCEPTED` as `cancelled-by-recovery`.
+- marks every command entry in `ACCEPTED` or `DISPATCHING` whose platform
+  call has not been made as `cancelled-by-recovery`. The commit runs on the
+  policy thread, which also makes the final dispatch decision (5.4), so no
+  command can slip past it.
 
 If that commit fails, nothing is consumed or changed
 (`recovery-commit-failed`). If the process dies before it, nothing happened.
@@ -905,14 +946,15 @@ Each PR lands with its tests. Hardware groups go into
 | 2 | `AuditLog` event codes | — | Code stability; health export carries codes |
 | 3 | Mode boundary: `ManagementMode`, marker storage, build gate (off), first-PIN closure, `AdminAuthority`/`AuthorizedPolicyWriter` with `commit()`-only package-private setters, boot receiver, sweep and maintenance routed by mode | 1 | `ModeBoundaryTest`, writer coverage, mode table; existing tests unchanged |
 | 4 | Shared contract and vectors: four document types, closed schema with Later-field and Later-command rejections, sync order and nonce rules, hash definitions, journal and projection crash vectors (5.5), command dispatch vectors, recovery atomic-commit vectors | 1 | Vectors reviewed by a second agent before any code consumes them |
-| 5 | Provisioning activities (4.2), baseline, marker-only recovery, bench freshness check; remote branch compiled but gated | 3 | JVM tests (4.9); hardware with the remote-test artifact: QR to a verified baseline, cancel path, bench refusal on a device with local state |
-| 6 | Verifier, journal, `ensureProjected()`, recovery verifier and overrides; no network | 3, 4 | Vector tests; crash injection at every listed point; recovery tests; locale parity for the recovery screen |
+| 5 | Verifier, journal, `ensureProjected()` and the apply order, recovery verifier and overrides; no network. Must meet acceptance criteria A1–A3, A5 | 3, 4 | Vector tests; crash and write-failure injection at every listed point; Android-call failure injection; recovery tests; locale parity for the recovery screen |
+| 6 | Provisioning activities (4.2), baseline through the PR 5 journal, marker-only recovery, shared enrolment gate, atomic freshness check; remote branch compiled but gated. Must meet A6 | 3, 5 | JVM tests (4.9); hardware with the remote-test artifact: QR to a verified baseline, cancel path, bench refusal on a device with local state |
 | 7 | `tools/provisioning_payload.py` remote options; `tools/fleet_admin.py` (including `verify-enrolment` and both guards) | 4 | Python tests; vectors |
 | 8 | Test server (separate repository) and device client: enrolment challenge and transcript, sync order and nonce, commands, reports; in the remote-test artifact | 5, 6, 7 | End-to-end tests; hardware: enrolment with the server up and down, interrupted apply, reboot before first unlock, `lock_now` with and without a secure lock |
-| 9 | **Gate PR — activation.** Production server hardening (KMS/HSM server key, audit export), MCP read and command tools with scopes, read-only remote console, `REMOTE_ENROLMENT_ENABLED` on in release builds | 8 | Gate: section 13 blockers closed; independent review |
+| 9 | **Gate PR — activation.** Production server hardening (KMS/HSM server key, audit export), MCP read and command tools with scopes, read-only remote console, `REMOTE_ENROLMENT_ENABLED` on in release builds | 8 | Gate: section 13 blockers closed; acceptance criteria A1–A7 met (A7 lands here); independent review |
 | 10+ | Anything from section 14 | 9 and its own design | Behind the gate; separate design and review |
 
-PRs 2–4, 6 and 7 need no server and no network.
+PRs 2–5 and 7 need no server and no network. PR 5 lands before PR 6, because
+the baseline is applied through its journal.
 
 ---
 
@@ -932,8 +974,12 @@ PRs 2–4, 6 and 7 need no server and no network.
 5. An owner decision on server hosting, operation and server-key protection.
    Nothing in this repository may name it.
 6. Fleet policy key custody: where the offline key lives and who may sign.
-7. The signed self-update drill passing on each firmware family before any
-   fleet policy disables ADB there (enforced by the admin tool's ADB guard).
+7. The signed self-update drill passing on each firmware family before
+   **anything** disables ADB there: a fleet policy (enforced by the admin
+   tool's ADB guard) **or the baseline itself**. A production-profile build,
+   whose baseline turns `developer_options_and_adb` on, may enrol devices only
+   on firmware families with a recorded drill pass.
+8. Acceptance criteria A1–A7 (section 15) met by their PRs.
 
 ### Open questions
 
@@ -1059,13 +1105,47 @@ changes a README claim and needs its own privacy review.
 
 ---
 
+## 15. Acceptance criteria carried into PRs
+
+The fourth review confirmed that the v1 cuts removed the earlier design risks.
+What remains are properties of the **current code** that v1 relies on. They
+are carried as acceptance criteria: the named PR is not merged until the
+criterion holds and its regression test passes. Two pure-specification items
+were fixed in this document directly (5.3 hash encoding; 5.4 and 8.3
+`commands-off` at dispatch).
+
+| # | Finding (round 4) | Code today | PR | Required fix | Regression test |
+| --- | --- | --- | --- | --- | --- |
+| A1 | **P1-1** A policy change can make an app visible before the protection it depends on is verified | `LockdownPolicyController.apply` runs `applyPackagePolicy` before `HomeFilterController.reconcile`; a later VPN failure is reported, but the unhide stays | 5 | In remote modes, the pass applies and reads back the protections that a newly visible package depends on (system controls, home filter, VPN lockdown) **before** any hide-to-visible write. If they fail, or the pass is interrupted, packages that the previous verified generation hid stay hidden. Visible-to-hidden writes are not delayed | Gateway fault injection: the VPN lockdown fails, or the process dies between Android calls, during a change that unhides a package → the package is still hidden, the pass is not verified, and `verifiedSha256` is unchanged |
+| A2 | **P1-2** A failed `commit()` can still become live policy, because Android updates the in-memory `SharedPreferences` copy first | `SharedPreferencesImpl` applies edits in memory before writing; current setters ignore the result or use `apply()` | 5 (vectors in 4) | The engine reads only from a **snapshot that was stored successfully**: the journal is read back from disk after each commit, or written to a temporary file that is then atomically renamed, and an unsuccessful write is never visible to readers in the same process. `ensureProjected()` re-projects the full generation before **every** pass; the stamp is a consistency check, not a reason to skip writing | Write-failure injection with the process **still running**: for the journal, each projection store, and recovery consumption, the next pass in the same process applies the previous committed generation, and the recovery code is not consumed |
+| A3 | **P1-3** A pass can be reported verified while a signed value is not enforced | `SystemPolicyControlStatus.faultsProtection()` faults only for a requested **critical** control that **failed**; advisory failures and unsupported controls never fault. CA removal is checked only when the new settings still carry the certificate, and an unconfigured filter returns early without cleanup | 5 | In remote modes, every value a fleet policy sets explicitly must be enforced and read back. An advisory failure or an unsupported requested control makes the generation **not verified** (the console still shows it as today). The admin tool refuses to list a device whose reported SDK cannot enforce a requested control. Projection keeps the previous CA and filter configuration until a read-back proves they are removed. `verifiedSha256` advances only after that | Vectors: `wifi_configuration: true` refused by the OEM → not verified; `date_and_time: true` on API 26–27 → not verified; CA installed → `caCertificate: null` → the CA is removed and proven before verification; filter on → off without the old configuration → cleanup still runs |
+| A4 | **P2-1** Hash encoding and the previous verified generation are ambiguous | — | Doc (vectors in 4) | Fixed in 5.3: raw-byte concatenation, hex on the wire, `verifiedGeneration` reported with its own version, hash and overrides | The two example vectors in 5.3 plus override-order vectors |
+| A5 | **P2-2** A command in `DISPATCHING` can escape `commands-off` | — | Doc (implemented in 5) | Fixed in 5.4 and 8.3: the final dispatch check reads `commands-off`, and dispatch and recovery share the policy thread | Recovery committed between the `DISPATCHING` commit and the platform call → `cancelled-by-recovery`, and `lockNow` is never called |
+| A6 | **P2-3** The enrolment gate does not cover every entry point and dependency | `LockdownAdminReceiver.onProfileProvisioningComplete` has no gate; production baseline disables ADB (`SystemPolicyControl.DEVELOPER_OPTIONS_AND_ADB`, `PRODUCTION_ONLY`) | 6 | One shared gate in all four entry points (4.2); freshness re-checked in the operation that writes the marker (4.8); journal (PR 5) before the baseline (PR 6); signed-update drill before any ADB withdrawal, including the baseline (13, blocker 7) | Gate off: each entry point leaves no marker and no store change; a device that gains local state between showing and choosing the bench option is refused; the PR dependency is checked in review |
+| A7 | **P2-4** Offline attestation proves possession, but not that this is the device the administrator meant to enrol | The server supplies both the challenge and the enrolment record | 9 (tool in 7) | The admin tool keeps its **own enrolment inventory**, written when it creates the ticket: ticket hash, fleet, and the expected device identity (attested serial, or the enrollment-specific ID recorded at the bench). Before signing, it derives `deviceId` from the attested leaf key and requires a match with the inventory entry for that ticket | A genuine enrolment record from another device, or for another ticket or fleet, is refused by the tool even though every signature verifies |
+
+---
+
 ## Appendix A: Review resolution
 
-Three independent reviews by a different AI model, run read-only against the
-code, examined revisions 1–3. **Fixed** means v1 contains the change.
+Four independent reviews by a different AI model, run read-only against the
+code, examined revisions 1–4. The design loop ends with round 4; its remaining
+items are acceptance criteria for the implementing PRs (section 15). **Fixed** means v1 contains the change.
 **Later** means the capability is no longer in v1, so the risk cannot arise
 from v1; the reason is given. **Rejected** means the finding did not hold
 against the code. No finding was rejected.
+
+### Round 4 (revision 4) — final
+
+| Finding | Disposition |
+| --- | --- |
+| P1-1 unhide before the protection is verified | **Carried to PR 5** (A1) |
+| P1-2 failed `commit()` visible in memory; projection skipped on a matching stamp | **Carried to PR 5**, vectors in PR 4 (A2) |
+| P1-3 verified despite advisory or unsupported failures; CA and filter cleanup | **Carried to PR 5** (A3) |
+| P2-1 hash encoding and previous verified generation | **Fixed in doc** (5.3, 7.2); vectors in PR 4 (A4) |
+| P2-2 `DISPATCHING` versus `commands-off` | **Fixed in doc** (5.4, 8.3); implemented in PR 5 (A5) |
+| P2-3 gate entry points, freshness at write, journal order, drill before the baseline disables ADB | **Fixed in doc** (4.2, 4.8, 12, 13); **carried to PR 6** (A6) |
+| P2-4 offline match to the intended device | **Carried to PR 9**, tool in PR 7 (A7) |
 
 ### Round 3 (revision 3)
 
