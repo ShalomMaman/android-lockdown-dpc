@@ -38,6 +38,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
+import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.security.AppLabelSanitizer;
 
@@ -207,7 +208,7 @@ public final class KioskHostActivity extends AppCompatActivity {
         if (!adminEntryGesture.onTap(SystemClock.elapsedRealtime())) {
             return;
         }
-        AuditLog.append(this, getString(R.string.audit_kiosk_admin_entry));
+        AuditLog.append(this, AuditEvent.KIOSK_ADMIN_ENTRY, getString(R.string.audit_kiosk_admin_entry));
         startActivity(KioskAdminEntry.consoleIntent(this, KioskAdminEntry.SOURCE_KIOSK_GESTURE));
     }
 

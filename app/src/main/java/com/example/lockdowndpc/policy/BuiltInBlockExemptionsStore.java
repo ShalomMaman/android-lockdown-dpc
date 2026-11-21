@@ -336,7 +336,7 @@ public final class BuiltInBlockExemptionsStore {
     static void containmentOutcome(
             Context context, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
         containmentOutcome(readbackPrefs(context), refusedNow, confirmedNow, approvedNow,
-                line -> AuditLog.appendCommitted(context, line));
+                line -> AuditLog.appendCommitted(context, AuditEvent.EXEMPTION_CONTAINMENT_CHANGED, line));
     }
 
     static void containmentOutcome(

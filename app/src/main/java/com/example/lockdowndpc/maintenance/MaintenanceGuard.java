@@ -15,6 +15,7 @@ import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOut
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
+import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.HomeFilterController;
 import com.example.lockdowndpc.policy.HomeFilterPolicy;
@@ -464,24 +465,32 @@ public final class MaintenanceGuard {
      */
     private static void auditFrom(Context context, MaintenanceOutcome outcome) {
         int template;
+        AuditEvent event;
         switch (outcome.phase()) {
             case OPEN:
                 if (outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED) {
                     template = R.string.maint_audit_opened;
+                    event = AuditEvent.MAINTENANCE_OPENED;
                 } else if (outcome.restoreProven()
                         || outcome.status() == MaintenanceCoordinator.MaintenanceStatus.REFUSED) {
                     // restoreProven, not restoreVerified: a failed open reports
                     // itself as Phase.OPEN, so the phase-specific check read a
                     // verified restore as a failed one and wrote the wrong line.
                     template = R.string.maint_audit_open_failed;
+                    event = AuditEvent.MAINTENANCE_OPEN_FAILED;
                 } else {
                     template = R.string.maint_audit_restore_failed;
+                    event = AuditEvent.MAINTENANCE_RESTORE_FAILED;
                 }
                 break;
             case RESTORE:
-                template = outcome.restoreVerified()
-                        ? R.string.maint_audit_closed
-                        : R.string.maint_audit_restore_failed;
+                if (outcome.restoreVerified()) {
+                    template = R.string.maint_audit_closed;
+                    event = AuditEvent.MAINTENANCE_CLOSED;
+                } else {
+                    template = R.string.maint_audit_restore_failed;
+                    event = AuditEvent.MAINTENANCE_RESTORE_FAILED;
+                }
                 break;
             default:
                 return;
@@ -489,12 +498,14 @@ public final class MaintenanceGuard {
         if (outcome.closeReason() != null) {
             AuditLog.append(
                     context,
+                    AuditEvent.MAINTENANCE_CLOSE_REASON,
                     context.getString(MaintenanceLabels.closeAudit(outcome.closeReason())));
         }
         // The summary is Latin machine tokens; isolating it stops them dragging
         // their punctuation to the wrong side of a Hebrew audit line.
         AuditLog.append(
                 context,
+                event,
                 context.getString(template, BidiText.bidiIsolated(outcome.auditSummary())));
     }
 }

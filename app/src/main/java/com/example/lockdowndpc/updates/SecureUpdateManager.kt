@@ -9,6 +9,7 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import java.io.File
 import java.io.FileInputStream
@@ -55,7 +56,7 @@ object SecureUpdateManager {
             clearCachedUpdate(appContext)
             val reason = "update-check-failed:${exception.javaClass.simpleName}"
             UpdateStateStore.recordFailure(appContext, reason)
-            AuditLog.append(appContext, reason)
+            AuditLog.append(appContext, AuditEvent.UPDATE_CHECK_FAILED, reason)
             UpdateCheckResult.FAILED
         } finally {
             operationLock.unlock()
@@ -74,7 +75,7 @@ object SecureUpdateManager {
         }
         if (snapshot.phase == UpdatePhase.INSTALLING && isInstalledCandidate(appContext, snapshot)) {
             UpdateStateStore.recordInstalled(appContext, currentVersion)
-            AuditLog.append(appContext, "Update $currentVersion installed successfully")
+            AuditLog.append(appContext, AuditEvent.UPDATE_INSTALLED, "Update $currentVersion installed successfully")
         }
         clearCachedUpdate(appContext)
     }
@@ -141,7 +142,11 @@ object SecureUpdateManager {
             throw UpdateVerificationException("update-manifest-expired-before-install")
         }
         commitSelfUpdate(context, apk, authorized)
-        AuditLog.append(context, "Update ${authorized.versionName} verified and sent for install")
+        AuditLog.append(
+            context,
+            AuditEvent.UPDATE_INSTALL_REQUESTED,
+            "Update ${authorized.versionName} verified and sent for install",
+        )
         return UpdateCheckResult.INSTALLING
     }
 

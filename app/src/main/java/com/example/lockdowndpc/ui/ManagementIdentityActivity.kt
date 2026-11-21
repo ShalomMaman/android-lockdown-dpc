@@ -43,6 +43,7 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.ManagementIdentityInspector
 import com.example.lockdowndpc.security.AdminSession
@@ -160,6 +161,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             refusals.forEach { row ->
                 AuditLog.append(
                     app,
+                    AuditEvent.MANAGEMENT_IDENTITY_REFUSED,
                     app.getString(
                         R.string.mgmtid_audit_refused,
                         row.packageName.ltrIsolated(),
@@ -190,6 +192,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
         row: ManagementIdentityRow,
         computePins: () -> Set<String>,
         resultTemplate: Int,
+        auditEvent: AuditEvent,
         auditTemplate: Int,
     ) {
         if (working || !requireSession()) {
@@ -235,6 +238,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             withContext(Dispatchers.IO) {
                 AuditLog.append(
                     app,
+                    auditEvent,
                     app.getString(
                         auditTemplate,
                         row.packageName.ltrIsolated(),
@@ -321,6 +325,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                         )
                     },
                     resultTemplate = R.string.mgmtid_result_pinned,
+                    auditEvent = AuditEvent.MANAGEMENT_PIN_ADDED,
                     auditTemplate = R.string.mgmtid_audit_pin_added,
                 )
             },
@@ -341,6 +346,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                         )
                     },
                     resultTemplate = R.string.mgmtid_result_removed,
+                    auditEvent = AuditEvent.MANAGEMENT_PIN_REMOVED,
                     auditTemplate = R.string.mgmtid_audit_pin_removed,
                 )
             },
@@ -362,6 +368,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                         )
                     },
                     resultTemplate = R.string.mgmtid_result_pinned,
+                    auditEvent = AuditEvent.MANAGEMENT_PIN_ADDED,
                     auditTemplate = R.string.mgmtid_audit_pin_added,
                 )
             },

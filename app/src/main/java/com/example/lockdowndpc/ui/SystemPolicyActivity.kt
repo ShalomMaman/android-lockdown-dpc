@@ -43,6 +43,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
 import com.example.lockdowndpc.policy.BuiltInExemptionsController
@@ -210,6 +211,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         SystemPolicyStore.invalidateVerification(context, change.control)
         AuditLog.append(
             context,
+            AuditEvent.SYSTEM_POLICY_CHANGED,
             context.getString(
                 R.string.audit_system_policy_changed,
                 "${change.control.storageKey()}=${change.requested}".bidiIsolated(),
@@ -242,6 +244,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         PlayStoreCompatibilityStore.setEnabled(context, requested)
         AuditLog.append(
             context,
+            AuditEvent.PLAY_COMPATIBILITY_CHANGED,
             context.getString(
                 R.string.audit_play_compatibility_changed,
                 "play_store_compatibility=$requested".bidiIsolated(),
@@ -297,6 +300,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 else -> {
                     AuditLog.append(
                         context,
+                        AuditEvent.SYSTEM_POLICY_APPLIED,
                         context.getString(R.string.audit_system_policy_applied),
                     )
                     UiMessage(

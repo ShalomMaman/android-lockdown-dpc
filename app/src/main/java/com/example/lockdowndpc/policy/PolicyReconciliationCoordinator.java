@@ -180,7 +180,7 @@ public final class PolicyReconciliationCoordinator {
                 reason,
                 exception.getClass().getSimpleName());
         AllowedAppsStore.markApplyFailed(appContext, message);
-        AuditLog.append(appContext, message);
+        AuditLog.append(appContext, AuditEvent.RECONCILIATION_CRASHED, message);
         Log.e(TAG, message, exception);
     }
 
@@ -225,7 +225,7 @@ public final class PolicyReconciliationCoordinator {
                     String message = "Pause reconciliation crashed (" + reason + "): "
                             + exception.getClass().getSimpleName();
                     AllowedAppsStore.markPauseFailed(appContext, message);
-                    AuditLog.append(appContext, message);
+                    AuditLog.append(appContext, AuditEvent.PAUSE_RECONCILIATION_CRASHED, message);
                     Log.e(TAG, message, exception);
                 },
                 completion
@@ -264,7 +264,7 @@ public final class PolicyReconciliationCoordinator {
                 exception -> {
                     String message = "Kiosk restore crashed (" + reason + "): "
                             + exception.getClass().getSimpleName();
-                    AuditLog.append(appContext, message);
+                    AuditLog.append(appContext, AuditEvent.KIOSK_RESTORE_CRASHED, message);
                     Log.e(TAG, message, exception);
                 },
                 null

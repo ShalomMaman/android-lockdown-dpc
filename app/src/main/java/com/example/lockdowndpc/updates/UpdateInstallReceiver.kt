@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInstaller
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 
 class UpdateInstallReceiver : BroadcastReceiver() {
@@ -16,7 +17,7 @@ class UpdateInstallReceiver : BroadcastReceiver() {
         val sessionId = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
         val snapshot = UpdateStateStore.read(context)
         if (sessionId < 0 || sessionId != snapshot.candidateSessionId) {
-            AuditLog.append(context, "Ignored stale or unknown install result")
+            AuditLog.append(context, AuditEvent.UPDATE_INSTALL_RESULT_IGNORED, "Ignored stale or unknown install result")
             return
         }
         val versionName = snapshot.candidateVersion
@@ -24,23 +25,23 @@ class UpdateInstallReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_SUCCESS -> {
                 if (SecureUpdateManager.isInstalledCandidate(context, snapshot)) {
                     UpdateStateStore.recordInstalled(context, versionName)
-                    AuditLog.append(context, "Update $versionName installed successfully")
+                    AuditLog.append(context, AuditEvent.UPDATE_INSTALLED, "Update $versionName installed successfully")
                 } else {
                     val message = "installed-version-did-not-match-candidate"
                     UpdateStateStore.recordFailure(context, message)
-                    AuditLog.append(context, message)
+                    AuditLog.append(context, AuditEvent.UPDATE_INSTALL_FAILED, message)
                 }
             }
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 abandonPendingSession(context, intent)
                 val message = "update-install-requires-user-action"
                 UpdateStateStore.recordFailure(context, message)
-                AuditLog.append(context, message)
+                AuditLog.append(context, AuditEvent.UPDATE_INSTALL_FAILED, message)
             }
             else -> {
                 val message = "update-install-failed:$status"
                 UpdateStateStore.recordFailure(context, message)
-                AuditLog.append(context, message)
+                AuditLog.append(context, AuditEvent.UPDATE_INSTALL_FAILED, message)
             }
         }
         SecureUpdateManager.clearCachedUpdate(context)

@@ -17,6 +17,7 @@ import com.example.lockdowndpc.maintenance.MaintenanceStateMachine;
 import com.example.lockdowndpc.maintenance.MaintenanceStore;
 import com.example.lockdowndpc.maintenance.MaintenanceWindow;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
+import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.LockdownPackages;
 import com.example.lockdowndpc.policy.ManagementIdentityInspector;
 import com.example.lockdowndpc.policy.ManagementIdentityStatus;
@@ -73,12 +74,20 @@ public final class DeviceHealthCollector {
                 readManagementIdentities(appContext),
                 readReconciliation(appContext),
                 readPlatform(),
-                // AuditLog stores localized prose with no machine code, and the
-                // redaction allowlist works on codes, so an unconverted tail
-                // would export as nothing anyway. The local report shows the
-                // audit log on its own screen.
-                List.of(),
+                readAudit(appContext),
                 readMaintenance(appContext));
+    }
+
+    private static List<DeviceHealthSnapshot.AuditEvent> readAudit(Context context) {
+        try {
+            List<DeviceHealthSnapshot.AuditEvent> audit = new ArrayList<>();
+            for (AuditLog.CodeEntry entry : AuditLog.codes(context)) {
+                audit.add(new DeviceHealthSnapshot.AuditEvent(entry.atMillis(), entry.code(), ""));
+            }
+            return audit;
+        } catch (RuntimeException exception) {
+            return List.of();
+        }
     }
 
     private static DeviceHealthSnapshot.Policy readPolicy(Context context) {

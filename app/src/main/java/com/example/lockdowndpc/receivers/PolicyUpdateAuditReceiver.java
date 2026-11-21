@@ -9,6 +9,7 @@ import android.os.Bundle;
 
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
+import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 
 /** Receives authoritative asynchronous policy results on Android 14 and newer. */
@@ -59,6 +60,6 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
                 target,
                 result.getResultCode());
         AllowedAppsStore.markApplyFailed(context, error);
-        AuditLog.append(context, error);
+        AuditLog.append(context, AuditEvent.POLICY_RESULT_FAILED, error);
     }
 }

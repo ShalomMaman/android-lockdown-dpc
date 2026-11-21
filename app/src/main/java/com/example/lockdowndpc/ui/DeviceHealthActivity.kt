@@ -36,6 +36,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.health.DeviceHealthCollector
 import com.example.lockdowndpc.health.DeviceHealthReport
 import com.example.lockdowndpc.health.DeviceHealthSnapshot
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
@@ -177,7 +178,11 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
                         copyToClipboard(context, export)
                         coroutineScope.launch(Dispatchers.IO) {
                             // The action is audited; the exported text is not.
-                            AuditLog.append(context, context.getString(R.string.health_audit_exported))
+                            AuditLog.append(
+                                context,
+                                AuditEvent.HEALTH_EXPORTED,
+                                context.getString(R.string.health_audit_exported),
+                            )
                         }
                         message = UiMessage(
                             text = context.getString(R.string.health_export_copied),

@@ -170,6 +170,23 @@ public final class DeviceHealthRedactionTest {
     }
 
     @Test
+    public void theAuditCodesFieldCarriesOnlyTimestampsAndRecognizedCodes() {
+        DeviceHealthSnapshot base = hostile();
+        DeviceHealthSnapshot snapshot = new DeviceHealthSnapshot(
+                base.policy(), base.kiosk(), base.updates(), base.managementIdentities(),
+                base.reconciliation(), base.platform(), List.of(
+                        new AuditEvent(NOW - 2, "legacy", "historical audit text"),
+                        new AuditEvent(NOW - 1, "pin.set", "new audit text\nauditCodes=extra"),
+                        new AuditEvent(NOW, "pin.set\nauditCodes=extra", "unknown audit text")),
+                base.maintenance());
+
+        String export = DeviceHealthReport.export(snapshot, NOW);
+        assertEquals(List.of("auditCodes=" + (NOW - 2) + " legacy", "auditCodes=" + (NOW - 1) + " pin.set"),
+                export.lines().filter(line -> line.startsWith("auditCodes=")).toList());
+        assertFalse(export.contains("audit text"));
+    }
+
+    @Test
     public void aRecognisedAuditEntryKeepsOnlyItsTimeAndItsCode() {
         DeviceHealthSnapshot redacted = DeviceHealthRedaction.redact(hostile());
 

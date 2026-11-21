@@ -63,7 +63,7 @@ public final class BuiltInExemptionsController {
     interface Sink {
         boolean write(BuiltInBlockExemptions.Settings settings);
 
-        boolean audit(String entry);
+        boolean audit(AuditEvent event, String entry);
 
         /** An earlier save failed and passes currently enforce no exemptions. */
         boolean exemptionsUntrusted();
@@ -130,8 +130,8 @@ public final class BuiltInExemptionsController {
             }
 
             @Override
-            public boolean audit(String entry) {
-                return AuditLog.appendCommitted(context, entry);
+            public boolean audit(AuditEvent event, String entry) {
+                return AuditLog.appendCommitted(context, event, entry);
             }
 
             @Override
@@ -227,7 +227,8 @@ public final class BuiltInExemptionsController {
         if (before.equals(after)) {
             return new Outcome(Status.UNCHANGED, null);
         }
-        if ((before.loosensTo(after) || sink.exemptionsUntrusted()) && !sessionWasUnlocked) {
+        boolean grantsExemption = before.loosensTo(after);
+        if ((grantsExemption || sink.exemptionsUntrusted()) && !sessionWasUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
         }
         if (after.chrome() && !before.chrome() && !sink.filterSteadyForChrome()) {
@@ -252,7 +253,8 @@ public final class BuiltInExemptionsController {
             return new Outcome(Status.NOT_SAVED, null);
         }
         return commit(before.auditText(), BuiltInBlockExemptions.revoked(before, after),
-                after, sessionWasUnlocked, sessionUnlocked, trigger, sink);
+                after, sessionWasUnlocked, sessionUnlocked, trigger,
+                grantsExemption ? AuditEvent.EXEMPTION_GRANTED : AuditEvent.EXEMPTION_REVOKED, sink);
     }
 
     static Outcome clear(BooleanSupplier sessionUnlocked, Sink sink) {
@@ -268,7 +270,7 @@ public final class BuiltInExemptionsController {
                 ? new BuiltInBlockExemptions.Revocation(BuiltInBlockExemptions.EXEMPTABLE_SOCIAL, true)
                 : BuiltInBlockExemptions.revoked(record.enforced(), BuiltInBlockExemptions.Settings.NONE);
         return commit(record.auditText(), revocation, BuiltInBlockExemptions.Settings.NONE,
-                true, sessionUnlocked, "clear-approvals", sink);
+                true, sessionUnlocked, "clear-approvals", AuditEvent.EXEMPTIONS_CLEARED, sink);
     }
 
     private static Outcome commit(
@@ -278,6 +280,7 @@ public final class BuiltInExemptionsController {
             boolean sessionWasUnlocked,
             BooleanSupplier sessionUnlocked,
             String trigger,
+            AuditEvent event,
             Sink sink
     ) {
         // Tighten before revoking: what the change takes away is contained
@@ -305,7 +308,7 @@ public final class BuiltInExemptionsController {
         String entry = "builtin-exemption: " + actor + ": "
                 + beforeText + " -> " + after.auditText()
                 + (contained ? "" : " (" + SocialContainment.REFUSED_ERROR + ")");
-        boolean audited = sink.audit(entry);
+        boolean audited = sink.audit(event, entry);
         // The decision is already persisted, so the pass runs either way: a
         // stored removal must take effect even if its audit line did not.
         LockdownPolicyController.PolicyResult result = sink.applyPass();
