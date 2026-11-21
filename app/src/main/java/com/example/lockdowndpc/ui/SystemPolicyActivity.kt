@@ -311,11 +311,8 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     /**
      * Submits a change to the built-in block exemptions at the policy boundary.
      *
-     * Authorization is decided there, not here: a loosening change needs the
-     * live administrator session when it is written, while a removal is a
-     * tightening and is accepted without one. The change is committed durably,
-     * applied at once and audited with its verified outcome; until Android
-     * confirms a removal, its row reads as pending.
+     * The policy controller checks authorization again before saving. The
+     * console refreshes the live Android state after the protection pass.
      */
     fun submitExemption(
         trigger: String,

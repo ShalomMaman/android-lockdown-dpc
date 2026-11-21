@@ -158,6 +158,21 @@ public final class SystemPolicyLocaleParityTest {
     }
 
     @Test
+    public void exemptionWarningsReferToLiveStateInBothLocales() {
+        String refused = "system_policy_exempt_containment_refused";
+        assertTrue(english.get(refused).contains("protection pass retries"));
+        assertTrue(english.get(refused).contains("row for its current state"));
+        assertTrue(hebrew.get(refused).contains("בדיקת ההגנה מנסה לחסום אותה שוב"));
+        assertTrue(hebrew.get(refused).contains("המצב הנוכחי מופיע בשורה"));
+
+        String unreadable = "system_policy_exempt_social_signer_unreadable_row";
+        assertTrue(english.get(unreadable).contains("not shown as approved"));
+        assertTrue(english.get(unreadable).contains("current state below"));
+        assertTrue(hebrew.get(unreadable).contains("אינה מוצגת כמאושרת"));
+        assertTrue(hebrew.get(unreadable).contains("המצב הנוכחי שלה מופיע למטה"));
+    }
+
+    @Test
     public void thePlayCompatibilityBoundaryIsStatedInBothLocales() {
         // The console must describe this mode honestly in both languages. An
         // operator reading the Hebrew screen has to learn the same thing: the

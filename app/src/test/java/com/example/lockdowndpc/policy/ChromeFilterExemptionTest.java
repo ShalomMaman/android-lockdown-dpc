@@ -5,6 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Observed;
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Record;
+import com.example.lockdowndpc.policy.BuiltInBlockExemptions.Settings;
 import com.example.lockdowndpc.policy.ChromeFilterExemption.Containment;
 import com.example.lockdowndpc.policy.ChromeFilterExemption.Decision;
 
@@ -144,6 +146,37 @@ public final class ChromeFilterExemptionTest {
         };
         stuck.refuseHide = true;
         assertFalse(ChromeFilterExemption.containForRevocation(stuck));
+    }
+
+    @Test
+    public void aNormalPassKeepsChromeHiddenAfterItsRevocationFailsToSave() {
+        Settings approved = Settings.NONE.withChrome(true);
+        BuiltInExemptionsPersistence persistence = new BuiltInExemptionsPersistence(
+                new BuiltInExemptionsPersistence.Backing() {
+                    private Settings memory = approved;
+
+                    @Override public Record read() { return new Record(memory); }
+                    @Override public Object snapshot() { return memory; }
+                    @Override public void restore(Object snapshot) { memory = (Settings) snapshot; }
+
+                    @Override
+                    public boolean commit(Settings settings) {
+                        memory = settings;
+                        return false;
+                    }
+                });
+        FakeChrome chrome = visibleChrome();
+        chrome.restrictions = new LinkedHashMap<>(BuiltInBlockExemptions.chromeRestrictions(PAC));
+        assertTrue(ChromeFilterExemption.containForRevocation(chrome));
+        assertFalse(persistence.write(Settings.NONE));
+        assertEquals(approved, persistence.record().enforced());
+        assertTrue(persistence.untrusted());
+
+        // Even with a working filter, the pass reads the latched enforcement settings.
+        assertEquals(Decision.NOT_EXEMPTED,
+                pass(chrome, persistence.read().chrome(), true, true, new ArrayList<>()));
+        assertEquals(Observed.HIDDEN, ChromeFilterExemption.observe(chrome));
+        assertFalse(chrome.calls.contains("hide=false"));
     }
 
     @Test

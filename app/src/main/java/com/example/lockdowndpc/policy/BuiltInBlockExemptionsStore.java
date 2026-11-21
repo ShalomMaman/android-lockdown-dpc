@@ -9,6 +9,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 /**
  * Stored exemptions from the built-in block catalogues, the last read-back and
@@ -328,22 +329,31 @@ public final class BuiltInBlockExemptionsStore {
     }
 
     /**
-     * Records the social packages Android refused to contain on this pass and
-     * returns the audit lines for a change, see
+     * Audits changes to the social packages Android refused to contain before
+     * persisting the new set, see
      * {@link BuiltInBlockExemptions#containmentAuditTransition}.
      */
-    static java.util.List<String> containmentOutcome(
+    static void containmentOutcome(
             Context context, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
-        return containmentOutcome(readbackPrefs(context), refusedNow, confirmedNow, approvedNow);
+        containmentOutcome(readbackPrefs(context), refusedNow, confirmedNow, approvedNow,
+                line -> AuditLog.appendCommitted(context, line));
     }
 
-    static java.util.List<String> containmentOutcome(
-            SharedPreferences prefs, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
+    static void containmentOutcome(
+            SharedPreferences prefs, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow,
+            Predicate<String> appendCommitted) {
         Set<String> was = new LinkedHashSet<>(prefs.getStringSet(KEY_CONTAINMENT_REFUSED, Set.of()));
-        if (!was.equals(refusedNow)) {
-            prefs.edit().putStringSet(KEY_CONTAINMENT_REFUSED, new LinkedHashSet<>(refusedNow)).commit();
+        if (was.equals(refusedNow)) {
+            return;
         }
-        return BuiltInBlockExemptions.containmentAuditTransition(was, refusedNow, confirmedNow, approvedNow);
+        // If an append fails, leave the previous set so the next pass can retry.
+        for (String line : BuiltInBlockExemptions.containmentAuditTransition(
+                was, refusedNow, confirmedNow, approvedNow)) {
+            if (!appendCommitted.test(line)) {
+                return;
+            }
+        }
+        prefs.edit().putStringSet(KEY_CONTAINMENT_REFUSED, new LinkedHashSet<>(refusedNow)).commit();
     }
 
     /** The last read-back, or {@code null} when none was recorded. */

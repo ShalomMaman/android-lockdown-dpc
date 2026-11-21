@@ -167,13 +167,13 @@
     <string name="system_policy_exempt_chrome_reason_not_available_webview">Not available on this device: Android reports Chrome as the system WebView</string>
     <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">Not available on this device: Chrome may serve as the system WebView here</string>
     <string name="system_policy_exempt_chrome_reason_not_available_android_version">Not available on this Android version</string>
-    <string name="system_policy_exempt_social_signer_unreadable_row">Approved, but the app\'s signer could not be read, so it stays hidden</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">The app is not shown as approved because its signer could not be read. See its current state below.</string>
     <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
     <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
     <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
     <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Device Guard block it again. Remove its administrator access in Android Settings first.</string>
     <string name="system_policy_exempt_admins_unreadable">The app was not approved: Device Guard could not check the device administrators. Try again.</string>
-    <string name="system_policy_exempt_containment_refused">The approval was removed, but Android refused to block the app, so it can still be opened. Device Guard keeps trying on every check. If the app is a device administrator, remove that access in Android Settings.</string>
+    <string name="system_policy_exempt_containment_refused">The approval was removed. Android refused to block an app before the removal was saved. The protection pass retries the block. Check the app\'s row for its current state.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>

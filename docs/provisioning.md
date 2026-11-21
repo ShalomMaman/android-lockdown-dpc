@@ -303,15 +303,16 @@ and [Tailscale exit nodes](https://tailscale.com/docs/features/exit-nodes).
 With protection on, every browser, application store and well-known social or
 messaging app is hidden. **System policy → Exemptions from the built-in block**
 offers two narrow, default-off exceptions. Adding either needs the
-administrator PIN session; removing either is accepted without it. Approvals
-can only be changed while protection is on ("Resume protection to change
-approvals" otherwise); each change is committed, written to the audit log
-(before → after) and applied at once by a protected pass. A change that fails to persist is not applied
-and the console reports it; until a later save succeeds, every policy pass
-treats all exemptions as absent, while the next edit still starts from the
-last saved decision; any save in that state, a removal included, needs the
-administrator session. A removal made after the administrator session expired is
-audited as such.
+administrator PIN session, as does clearing all approvals. An ordinary removal
+can start without a session. If a session ends while a change is in progress,
+the change is refused before saving. Edits require protection to be on
+("Resume protection to change approvals" otherwise). Each save is written to
+the audit log (before → after) and followed by a protected pass. If a save
+fails, the console reports the failure and the running process ignores all
+exemptions on subsequent passes until a save succeeds. The next edit still
+starts from the last saved decision. Any save while the failure is unresolved,
+including a removal, requires an administrator session. The audit log records
+when a removal was saved without a session.
 
 **Chrome.** Only `com.android.chrome`, only on Android 10 or later, and only
 while Chrome is not the system WebView provider; otherwise the exemption is
@@ -368,11 +369,11 @@ restore) and pausing protection use the same settled state, from one helper
 turn-off as off.
 Chrome can be approved only while the filter is on, nothing is pending, and its
 CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
-keeps the CA from being removed in Android Settings for the approval's whole
-life: it is set and read back before a Chrome approval is saved (also while
-protection is paused; no lock, no save), each pass confirms it before the CA
-check that Chrome's release relies on, and it is released only when the
-teardown guard would allow a teardown, so a refused hide keeps it. Every save
+restricts CA removal in Android Settings during the approval, subject to the
+confirmation limit below. Device Guard sets and reads it back before saving a
+Chrome approval. Each pass confirms the restriction before checking the CA
+for Chrome's release. The teardown guard must allow teardown before Device
+Guard lifts the restriction, so a refused hide keeps it in force. Every save
 writes a format marker, and one parser reads the record for every use
 (enforcement, kiosk eligibility, the teardown guard, the console and edits): a
 file that exists without the marker — zero bytes, damaged, or an older format —
@@ -380,7 +381,7 @@ is unreadable, enforces no approval and refuses filter teardown. Pausing first
 removes the evidence a later pass would use to continue a verified one, and is
 refused if Android does not persist that. If the
 stored exemption record cannot be read, no exemption applies, ordinary edits
-are refused, and only an explicit "Clear all approvals" replaces it; a failed
+are refused, and only an explicit "Clear all approvals" replaces it. A failed
 save restores the exact stored record. A Chrome that is
 disabled in Android is never shown. A home filter save that
 fails to persist restores the previous settings in memory and still runs a
@@ -399,8 +400,8 @@ always-on VPN in lockdown; Chrome does not re-prove it.
 list (`BuiltInBlockExemptions.EXEMPTABLE_SOCIAL`). Each approval pins the
 app's single current signer digest. Every pass (package changes trigger one)
 re-reads it with the hidden-package query and shows the app only on an exact
-match; a different or unreadable signer keeps it hidden. Such an app can be a
-single-app kiosk target only while its exemption verifies. Application stores
+match. A different or unreadable signer requires containment. Such an app can
+be a single-app kiosk target only while its exemption verifies. Application stores
 and browsers can never be approved this way, and a built-in blocked package
 cannot be configured as the home filter's VPN.
 
@@ -411,6 +412,14 @@ cannot be configured as the home filter's VPN.
   managed configuration — the mandatory filter proxy — and the always-on VPN
   lockdown still apply in that window, and the first pass hides it unless it
   continues the last verified pass.
+- A CA-removal confirmation already open in Android Settings when a Chrome
+  approval is saved can still complete because the confirmation handler does
+  not recheck `DISALLOW_CONFIG_CREDENTIALS`. The next protection pass detects
+  the missing CA and tries to reinstall it. If the pass cannot verify the CA,
+  it hides Chrome. Chrome may stay visible if reinstallation succeeds and
+  the pass verifies the filter. Chrome's managed PAC and the always-on VPN
+  lockdown stay in force.
+  [AOSP confirmation handler](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/main/src/com/android/settings/TrustedCredentialsDialogBuilder.java#163)
 - A failed link-routing step does not hide Chrome or fail the pass: links
   fall back to the blocked page and the failure is logged on every pass and
   audited once, when it starts and again when it recovers.
@@ -421,9 +430,13 @@ cannot be configured as the home filter's VPN.
   `CONTAINMENT_REFUSED` for it (audited when the set of such apps changes).
   Remove the app's administrator access in Android Settings.
 - Removing an approval, or clearing all approvals, first hides (or suspends)
-  the affected apps, Chrome included, and only then saves the removal. If
-  Android refuses, the removal is still saved, the console reports it, and
-  every pass keeps trying. Pausing protection lifts such a suspension too.
+  the affected apps, including Chrome when its exemption is in scope, and
+  only then saves the removal. For an unreadable record, this includes every
+  installed social app in the approval catalogue. If Android refuses, the
+  removal is still saved, the console reports it, and every pass keeps trying.
+  After a failed save, the running process keeps enforcing containment on
+  later protection passes until a save succeeds. Pausing protection lifts a
+  containment suspension too.
 
 - Web content that another app renders itself (its own WebView or in-app
   browser) does not follow Chrome's policies; it is filtered only at the

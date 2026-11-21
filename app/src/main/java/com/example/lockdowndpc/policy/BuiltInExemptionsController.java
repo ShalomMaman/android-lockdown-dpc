@@ -6,14 +6,16 @@ import com.example.lockdowndpc.security.AdminSession;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.UnaryOperator;
 
 /**
  * The policy boundary for built-in block exemptions.
  *
  * <p>A change that makes anything newly available needs a live administrator
- * session at the moment it is written, on the policy thread. A removal tightens
- * the device and is accepted without one. The decision is committed, then its
+ * session at the moment it is written, on the policy thread. An ordinary
+ * removal may start without a session. An edit started with a live session
+ * is refused if it expires before the write. The decision is committed, then its
  * audit entry is committed, and only then does a policy pass run. A write that
  * does not persist changes nothing: no pass runs and the caller shows an error.
  * While protection is paused every exemption edit is refused, so each edit runs
@@ -105,7 +107,7 @@ public final class BuiltInExemptionsController {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> change(
                 BuiltInBlockExemptionsStore.readForEdit(context),
                 operation,
-                AdminSession.isUnlocked(),
+                AdminSession::isUnlocked,
                 trigger,
                 androidSink(context)));
     }
@@ -117,7 +119,7 @@ public final class BuiltInExemptionsController {
      */
     public static Outcome clearApprovals(Context context) {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> clear(
-                AdminSession.isUnlocked(), androidSink(context)));
+                AdminSession::isUnlocked, androidSink(context)));
     }
 
     private static Sink androidSink(Context context) {
@@ -207,10 +209,11 @@ public final class BuiltInExemptionsController {
     static Outcome change(
             BuiltInBlockExemptions.Settings before,
             UnaryOperator<BuiltInBlockExemptions.Settings> operation,
-            boolean sessionUnlocked,
+            BooleanSupplier sessionUnlocked,
             String trigger,
             Sink sink
     ) {
+        boolean sessionWasUnlocked = sessionUnlocked.getAsBoolean();
         if (!sink.protectionActive()) {
             return new Outcome(Status.PAUSED_REFUSED, null);
         }
@@ -224,7 +227,7 @@ public final class BuiltInExemptionsController {
         if (before.equals(after)) {
             return new Outcome(Status.UNCHANGED, null);
         }
-        if ((before.loosensTo(after) || sink.exemptionsUntrusted()) && !sessionUnlocked) {
+        if ((before.loosensTo(after) || sink.exemptionsUntrusted()) && !sessionWasUnlocked) {
             throw new SecurityException("An unlocked administrator session is required");
         }
         if (after.chrome() && !before.chrome() && !sink.filterSteadyForChrome()) {
@@ -249,45 +252,54 @@ public final class BuiltInExemptionsController {
             return new Outcome(Status.NOT_SAVED, null);
         }
         return commit(before.auditText(), BuiltInBlockExemptions.revoked(before, after),
-                after, sessionUnlocked, trigger, sink);
+                after, sessionWasUnlocked, sessionUnlocked, trigger, sink);
     }
 
-    static Outcome clear(boolean sessionUnlocked, Sink sink) {
+    static Outcome clear(BooleanSupplier sessionUnlocked, Sink sink) {
         if (!sink.protectionActive()) {
             return new Outcome(Status.PAUSED_REFUSED, null);
         }
-        if (!sessionUnlocked) {
+        if (!sessionUnlocked.getAsBoolean()) {
             throw new SecurityException("An unlocked administrator session is required");
         }
-        // The prior state is logged as it was read: "unreadable" when it was.
-        // An unreadable record enforces nothing, so there is nothing to contain.
         BuiltInBlockExemptions.Record record = sink.record();
-        return commit(record.auditText(),
-                BuiltInBlockExemptions.revoked(record.enforced(), BuiltInBlockExemptions.Settings.NONE),
-                BuiltInBlockExemptions.Settings.NONE, true, "clear-approvals", sink);
+        // An unreadable record could have previously approved any catalogue app.
+        BuiltInBlockExemptions.Revocation revocation = record.unreadable()
+                ? new BuiltInBlockExemptions.Revocation(BuiltInBlockExemptions.EXEMPTABLE_SOCIAL, true)
+                : BuiltInBlockExemptions.revoked(record.enforced(), BuiltInBlockExemptions.Settings.NONE);
+        return commit(record.auditText(), revocation, BuiltInBlockExemptions.Settings.NONE,
+                true, sessionUnlocked, "clear-approvals", sink);
     }
 
     private static Outcome commit(
             String beforeText,
             BuiltInBlockExemptions.Revocation revocation,
             BuiltInBlockExemptions.Settings after,
-            boolean sessionUnlocked,
+            boolean sessionWasUnlocked,
+            BooleanSupplier sessionUnlocked,
             String trigger,
             Sink sink
     ) {
         // Tighten before revoking: what the change takes away is contained
         // first, so no interruption can leave a revoked app launchable without
         // its saved approval. A refusal still saves the removal — the next pass
-        // keeps trying — and is reported. If the save then fails, the next pass
-        // re-applies the approval that is still stored.
+        // keeps trying — and is reported. After a failed save, passes enforce
+        // no exemptions until a later save succeeds.
         boolean contained = revocation.isEmpty() || sink.containRevoked(revocation);
+        boolean sessionStillUnlocked = sessionUnlocked.getAsBoolean();
+        if (sessionWasUnlocked && !sessionStillUnlocked) {
+            if (after.chrome()) {
+                sink.reconcileCredentialsLock();
+            }
+            throw new SecurityException("An unlocked administrator session is required");
+        }
         if (!sink.write(after)) {
             // The record was restored; a lock set for this failed grant must not
             // outlive it, so the lock is brought in line with what is stored.
             sink.reconcileCredentialsLock();
             return new Outcome(Status.NOT_SAVED, null);
         }
-        String actor = sessionUnlocked
+        String actor = sessionStillUnlocked
                 ? "administrator " + trigger
                 : trigger + " (no administrator session)";
         String entry = "builtin-exemption: " + actor + ": "

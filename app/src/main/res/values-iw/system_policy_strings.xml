@@ -159,13 +159,13 @@
     <string name="system_policy_exempt_chrome_reason_not_available_webview">לא זמין במכשיר הזה: Android מדווח ש-Chrome הוא רכיב WebView של המערכת</string>
     <string name="system_policy_exempt_chrome_reason_not_available_webview_unconfirmed">לא זמין במכשיר הזה: ייתכן ש-Chrome משמש כאן כרכיב WebView של המערכת</string>
     <string name="system_policy_exempt_chrome_reason_not_available_android_version">לא זמין בגרסת Android הזו</string>
-    <string name="system_policy_exempt_social_signer_unreadable_row">מאושר, אך לא ניתן היה לקרוא את חתימת היישום, ולכן הוא נשאר מוסתר</string>
+    <string name="system_policy_exempt_social_signer_unreadable_row">לא ניתן היה לקרוא את חתימת האפליקציה, ולכן היא אינה מוצגת כמאושרת. המצב הנוכחי שלה מופיע למטה.</string>
     <string name="system_policy_exempt_record_unreadable">לא ניתן היה לקרוא את ההחרגות השמורות. עד שהן ינוקו, אף החרגה לא חלה ושינויים רגילים נדחים.</string>
     <string name="system_policy_exempt_clear_approvals">ניקוי כל האישורים</string>
     <string name="system_policy_exempt_paused_refused">יש לחדש את ההגנה כדי לשנות אישורים.</string>
     <string name="system_policy_exempt_active_admin_refused">האפליקציה לא אושרה: היא מנהלת מכשיר פעילה, ו-Android לא יאפשר לחסום אותה שוב. יש להסיר קודם את הרשאת הניהול שלה בהגדרות.</string>
     <string name="system_policy_exempt_admins_unreadable">האפליקציה לא אושרה: Device Guard לא הצליח לבדוק את מנהלי המכשיר. יש לנסות שוב.</string>
-    <string name="system_policy_exempt_containment_refused">האישור הוסר, אבל Android סירב לחסום את האפליקציה, ולכן עדיין אפשר לפתוח אותה. Device Guard ממשיך לנסות בכל בדיקה. אם האפליקציה מנהלת מכשיר, יש להסיר את הרשאת הניהול שלה בהגדרות.</string>
+    <string name="system_policy_exempt_containment_refused">האישור הוסר. לפני שמירת השינוי, Android סירב לחסום אפליקציה. בדיקת ההגנה מנסה לחסום אותה שוב. המצב הנוכחי מופיע בשורה של האפליקציה.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">השינוי נשמר, אך המדיניות לא אומתה (%1$s), ולא ניתן היה לרשום את השינוי ביומן הביקורת.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">לא ניתן היה לקרוא את חתימת Chrome</string>
     <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>

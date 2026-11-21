@@ -1206,8 +1206,8 @@ public final class LockdownPolicyController {
     /**
      * The social half of the exemptions for one pass: each approved package's
      * single current signer, read once with the hidden-package query, against
-     * the digest pinned at approval. An unreadable signer is not verified, so
-     * the package stays hidden.
+     * the digest pinned at approval. An unreadable signer leaves the package
+     * unverified and subject to containment.
      */
     private static final class SocialPass {
         private final BuiltInBlockExemptions.Settings settings;
@@ -1269,10 +1269,7 @@ public final class LockdownPolicyController {
                 confirmed.add(packageName);
             }
         }
-        for (String line : BuiltInBlockExemptionsStore.containmentOutcome(
-                context, refused, confirmed, social.verified())) {
-            AuditLog.append(context, line);
-        }
+        BuiltInBlockExemptionsStore.containmentOutcome(context, refused, confirmed, social.verified());
     }
 
     /**
