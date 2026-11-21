@@ -266,7 +266,8 @@ public final class DeviceHealthReport {
      * <p>The format is one {@code key=value} line per fact, ASCII only, in a fixed
      * order, so a diff between two exports of the same device is readable and a
      * script can parse it without a library. It is written when an administrator
-     * asks for it and at no other time.
+     * asks for it and at no other time. Each {@code auditCodes} line carries an
+     * epoch-millis timestamp, a space, and a stable event code.
      */
     public static String export(DeviceHealthSnapshot snapshot, long generatedAtMillis) {
         DeviceHealthSnapshot device = DeviceHealthRedaction.redact(snapshot);
@@ -331,7 +332,7 @@ public final class DeviceHealthReport {
         entry(out, "platform.app-version-code", platform.applicationVersionCode());
 
         for (AuditEvent event : device.audit()) {
-            entry(out, "audit", event.atMillis() + " " + event.eventCode());
+            entry(out, "auditCodes", event.atMillis() + " " + event.eventCode());
         }
 
         return out.toString().strip();

@@ -203,10 +203,12 @@ public final class LockdownPolicyController {
                     Log.w(TAG, "Chrome link routing unverified: " + summary);
                 }
                 // Audited only on a change: the first failure and the recovery.
-                String auditLine = BuiltInBlockExemptionsStore.routingOutcome(
-                        context, !routingWarnings.isEmpty(), summary);
+                boolean routingFailed = !routingWarnings.isEmpty();
+                String auditLine = BuiltInBlockExemptionsStore.routingOutcome(context, routingFailed, summary);
                 if (auditLine != null) {
-                    AuditLog.append(context, auditLine);
+                    AuditLog.append(context, routingFailed
+                            ? AuditEvent.EXEMPTION_ROUTING_UNVERIFIED
+                            : AuditEvent.EXEMPTION_ROUTING_RECOVERED, auditLine);
                 }
             } else if (!routedAway) {
                 routeLinks(context, dpm, admin, false, errors);
@@ -227,7 +229,7 @@ public final class LockdownPolicyController {
         } else {
             String summary = summarizeErrors(errors);
             AllowedAppsStore.markApplyFailed(context, summary);
-            AuditLog.append(context, "Policy apply failed: " + summary);
+            AuditLog.append(context, AuditEvent.POLICY_APPLY_FAILED, "Policy apply failed: " + summary);
             Log.e(TAG, "Policy apply failed verification: " + summary);
         }
         return new PolicyResult(true, verified, packageCounts[0], packageCounts[1], errors);
@@ -345,7 +347,7 @@ public final class LockdownPolicyController {
         } else {
             String summary = summarizeErrors(errors);
             AllowedAppsStore.markPauseFailed(context, summary);
-            AuditLog.append(context, "Policy pause failed: " + summary);
+            AuditLog.append(context, AuditEvent.POLICY_PAUSE_FAILED, "Policy pause failed: " + summary);
             Log.e(TAG, "Policy pause failed verification: " + summary);
         }
         return new PolicyResult(true, verified, 0, visibleCount, errors);
@@ -475,7 +477,7 @@ public final class LockdownPolicyController {
             MaintenanceStore.clearRestorePending(context);
             MaintenanceGuard.arm(context, null);
             if (hadWindow) {
-                AuditLog.append(context, "maintenance:closed-by-" + reason);
+                AuditLog.append(context, AuditEvent.MAINTENANCE_CLOSED, "maintenance:closed-by-" + reason);
             }
         } catch (RuntimeException exception) {
             // The enclosing policy pass still enforces its own restrictions.
@@ -528,6 +530,7 @@ public final class LockdownPolicyController {
             }
             AuditLog.append(
                     context,
+                    AuditEvent.SYSTEM_POLICY_UNVERIFIED,
                     context.getString(R.string.audit_system_policy_unverified, status.summary())
             );
         }
@@ -839,6 +842,7 @@ public final class LockdownPolicyController {
                     + revalidation.revokedSummary());
             AuditLog.append(
                     context,
+                    AuditEvent.SYSTEM_SELECTION_REVOKED,
                     "system-selection-revoked:" + revalidation.revokedSummary());
         }
         return revalidation.managed();
@@ -1406,8 +1410,9 @@ public final class LockdownPolicyController {
                 ChromeFilterExemption.observe(new AndroidChromeGateway(context, dpm, admin));
         BuiltInBlockExemptionsStore.Readback previous = BuiltInBlockExemptionsStore.readback(context);
         if (previous != null && previous.chromeObserved() != chromeObserved) {
-            AuditLog.append(context, "builtin-exemption: chrome android=" + chromeObserved.name()
-                    + " (was " + previous.chromeObserved().name() + ", decision=" + chrome.name() + ")");
+            AuditLog.append(context, AuditEvent.EXEMPTION_VISIBILITY_CHANGED,
+                    "builtin-exemption: chrome android=" + chromeObserved.name()
+                            + " (was " + previous.chromeObserved().name() + ", decision=" + chrome.name() + ")");
         }
         boolean saved = BuiltInBlockExemptionsStore.saveReadback(context,
                 new BuiltInBlockExemptionsStore.Readback(exemptions.auditText(), chrome, chromeObserved));

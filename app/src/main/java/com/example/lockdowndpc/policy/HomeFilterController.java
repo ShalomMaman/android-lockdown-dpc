@@ -129,7 +129,8 @@ public final class HomeFilterController {
                     runPass(context);
                     throw failedWrite;
                 }
-                AuditLog.append(context, "Home filter settings changed by administrator");
+                AuditLog.append(context, AuditEvent.HOME_FILTER_CHANGED,
+                        "Home filter settings changed by administrator");
             }
             runPass(context);
             return read(context);

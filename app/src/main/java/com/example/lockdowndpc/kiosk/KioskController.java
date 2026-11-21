@@ -15,8 +15,9 @@ import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskAction;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
-import com.example.lockdowndpc.policy.BuiltInExemptionsController;
+import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.policy.BuiltInExemptionsController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.security.AdminSession;
 
@@ -147,7 +148,7 @@ public final class KioskController {
             return settle(Result.denied(from, outcome.reason()), onPolicyReconciled);
         }
         KioskConfigStore.clear(app);
-        AuditLog.append(app, app.getString(R.string.audit_kiosk_cleared));
+        AuditLog.append(app, AuditEvent.KIOSK_CLEARED, app.getString(R.string.audit_kiosk_cleared));
         return applyNow(app, KioskState.OFF, outcome.reason(), onPolicyReconciled);
     }
 
@@ -170,12 +171,13 @@ public final class KioskController {
             KioskConfigValidator.Validation validation
     ) {
         switch (config.mode()) {
-            case SINGLE_APP -> AuditLog.append(app, app.getString(
+            case SINGLE_APP -> AuditLog.append(app, AuditEvent.KIOSK_CONFIGURED, app.getString(
                     R.string.audit_kiosk_configured_app, config.targetPackage()));
-            case SINGLE_SITE -> AuditLog.append(app, app.getString(
+            case SINGLE_SITE -> AuditLog.append(app, AuditEvent.KIOSK_CONFIGURED, app.getString(
                     R.string.audit_kiosk_configured_site,
                     validation.origin() == null ? "" : validation.origin().value()));
-            default -> AuditLog.append(app, app.getString(R.string.audit_kiosk_configured_off));
+            default -> AuditLog.append(app, AuditEvent.KIOSK_CONFIGURED,
+                    app.getString(R.string.audit_kiosk_configured_off));
         }
     }
 
@@ -210,10 +212,10 @@ public final class KioskController {
             return Result.denied(settings.state(), outcome.reason());
         }
         if (outcome.state() == KioskState.FAULT) {
-            AuditLog.append(app, app.getString(
+            AuditLog.append(app, AuditEvent.KIOSK_RESTORE_FAILED, app.getString(
                     R.string.audit_kiosk_restore_failed, String.join(", ", validation.errors())));
         } else {
-            AuditLog.append(app, app.getString(R.string.audit_kiosk_restored));
+            AuditLog.append(app, AuditEvent.KIOSK_RESTORED, app.getString(R.string.audit_kiosk_restored));
         }
         KioskConfigStore.writeState(app, outcome.state(), faultReason(validation));
         return applyNow(app, outcome.state(), outcome.reason(), null);
@@ -233,7 +235,7 @@ public final class KioskController {
             return Result.denied(from, outcome.reason());
         }
         KioskConfigStore.writeState(app, KioskState.FAULT, reason);
-        AuditLog.append(app, app.getString(R.string.audit_kiosk_fault, reason));
+        AuditLog.append(app, AuditEvent.KIOSK_FAULTED, app.getString(R.string.audit_kiosk_fault, reason));
         return new Result(true, KioskState.FAULT, outcome.reason(), List.of());
     }
 
@@ -253,7 +255,7 @@ public final class KioskController {
             // administrator sees after a target was uninstalled, a session
             // expired, or a stored configuration went stale.
             if (action == KioskAction.ENTER) {
-                AuditLog.append(app, app.getString(
+                AuditLog.append(app, AuditEvent.KIOSK_START_FAILED, app.getString(
                         R.string.audit_kiosk_activation_failed, outcome.reason()));
             }
             return settle(
@@ -263,11 +265,11 @@ public final class KioskController {
         }
         KioskConfigStore.writeState(app, outcome.state(), "");
         if (action == KioskAction.ENTER) {
-            AuditLog.append(app, app.getString(R.string.audit_kiosk_activated));
+            AuditLog.append(app, AuditEvent.KIOSK_STARTED, app.getString(R.string.audit_kiosk_activated));
         }
         Consumer<Boolean> completion = verified -> {
             if (action == KioskAction.EXIT && verified) {
-                AuditLog.append(app, app.getString(R.string.audit_kiosk_exited));
+                AuditLog.append(app, AuditEvent.KIOSK_EXITED, app.getString(R.string.audit_kiosk_exited));
             }
             if (onPolicyReconciled != null) {
                 onPolicyReconciled.accept(verified);

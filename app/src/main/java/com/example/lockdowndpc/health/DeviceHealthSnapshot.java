@@ -438,13 +438,11 @@ public record DeviceHealthSnapshot(
     /**
      * One administrator action, as a stable event code rather than as prose.
      *
-     * <p>{@code AuditLog} stores localized sentences today, which is right for the
-     * screen an administrator reads and wrong for anything that leaves the device:
-     * a sentence can carry whatever a call site interpolated into it. The export
-     * therefore carries codes only, and {@link DeviceHealthRedaction} drops every
-     * entry whose code it does not recognise.
+     * <p>The collector supplies only timestamps and codes from the audit log.
+     * {@link DeviceHealthRedaction} also strips any detail supplied by a caller
+     * and drops entries whose codes it does not recognise.
      *
-     * @param detail free text kept for the local report; never exported
+     * @param detail optional free text, always removed from the export
      */
     public record AuditEvent(long atMillis, String eventCode, String detail) {
         public AuditEvent {

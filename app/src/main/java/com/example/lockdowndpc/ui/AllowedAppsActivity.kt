@@ -79,6 +79,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
@@ -174,9 +175,9 @@ class AllowedAppsActivity : AppCompatActivity() {
 
         AllowedAppsStore.setAdminSelectedSystemPackages(this, adminSelectedSystem)
         AllowedAppsStore.setAllowedPackages(this, selection, managed)
-        AuditLog.append(this, getString(R.string.audit_apps_saved))
+        AuditLog.append(this, AuditEvent.POLICY_ALLOWLIST_SAVED, getString(R.string.audit_apps_saved))
         if (hadSystemSelection) {
-            AuditLog.append(this, getString(R.string.sysinv_audit_system_saved))
+            AuditLog.append(this, AuditEvent.SYSTEM_SELECTION_SAVED, getString(R.string.sysinv_audit_system_saved))
         }
         // The controller owns the requested → applied/failed contract and marks
         // the policy state itself. Nothing here may pre-announce success.

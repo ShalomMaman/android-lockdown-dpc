@@ -81,6 +81,7 @@ import com.example.lockdowndpc.kiosk.KioskController
 import com.example.lockdowndpc.kiosk.KioskLabels
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.AllowedAppsStore
+import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.LockdownPolicyController
@@ -370,6 +371,7 @@ private fun AdminConsole(
             val code = AdminPinStore.rotateRecoveryCode(context)
             AuditLog.append(
                 context,
+                if (replacingPin) AuditEvent.PIN_REPLACED else AuditEvent.PIN_SET,
                 context.getString(
                     if (replacingPin) R.string.audit_pin_replaced else R.string.audit_pin_set
                 ),
@@ -451,7 +453,7 @@ private fun AdminConsole(
                 message = failure
                 applyFailureMessage = failure
             } else {
-                AuditLog.append(context, context.getString(R.string.audit_apply))
+                AuditLog.append(context, AuditEvent.POLICY_APPLIED, context.getString(R.string.audit_apply))
                 showAdmin()
                 val blocked = result.blockedPackages()
                 message = UiMessage(
@@ -488,7 +490,7 @@ private fun AdminConsole(
                     isError = true,
                 )
             } else {
-                AuditLog.append(context, context.getString(R.string.audit_pause))
+                AuditLog.append(context, AuditEvent.POLICY_PAUSED, context.getString(R.string.audit_pause))
                 showAdmin()
                 message = UiMessage(context.getString(R.string.admin_pause_ok), isError = false)
             }
@@ -500,7 +502,7 @@ private fun AdminConsole(
             return
         }
         try {
-            AuditLog.append(context, context.getString(R.string.audit_recovery))
+            AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, context.getString(R.string.audit_recovery))
             showRecovery(AdminPinStore.rotateRecoveryCode(context))
         } catch (exception: RuntimeException) {
             message = UiMessage(context.getString(R.string.admin_error_recovery), isError = true)
@@ -824,6 +826,7 @@ private fun AdminConsole(
                     AllowedAppsStore.setProtectionMode(context, chosen)
                     AuditLog.append(
                         context,
+                        AuditEvent.POLICY_MODE_CHANGED,
                         context.getString(
                             if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
                                 R.string.audit_mode_allow

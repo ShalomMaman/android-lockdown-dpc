@@ -34,6 +34,7 @@ public final class BuiltInExemptionsControllerTest {
         Set<String> activeAdmins = Set.of();
         boolean containSucceeds = true;
         Settings written;
+        AuditEvent auditedEvent;
 
         @Override
         public boolean write(Settings settings) {
@@ -45,7 +46,8 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
-        public boolean audit(String entry) {
+        public boolean audit(AuditEvent event, String entry) {
+            auditedEvent = event;
             calls.add("audit:" + entry);
             return auditSucceeds;
         }
@@ -179,6 +181,7 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
                 Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), () -> true,
                 "approve:com.whatsapp", sink).status());
+        assertEquals(AuditEvent.EXEMPTION_GRANTED, sink.auditedEvent);
     }
 
     // --- Tighten before revoking --------------------------------------------------------
@@ -194,6 +197,7 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals("contain:[org.telegram.messenger],chrome=false", sink.calls.get(0));
         assertEquals("write", sink.calls.get(1));
         assertTrue(sink.calls.get(2).startsWith("audit:"));
+        assertEquals(AuditEvent.EXEMPTION_REVOKED, sink.auditedEvent);
         assertEquals("pass", sink.calls.get(3));
     }
 
@@ -229,6 +233,7 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals(Status.APPLIED, BuiltInExemptionsController.clear(() -> true, sink).status());
         assertEquals("contain:[com.whatsapp],chrome=true", sink.calls.get(0));
         assertEquals("write", sink.calls.get(1));
+        assertEquals(AuditEvent.EXEMPTIONS_CLEARED, sink.auditedEvent);
     }
 
     @Test

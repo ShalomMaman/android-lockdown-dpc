@@ -65,17 +65,8 @@ import java.util.Set;
  * {@link DeviceHealthReport#export} turns it into a string; an administrator
  * decides what happens to that string.
  *
- * <h2>The audit tail is empty today, deliberately</h2>
- *
- * <p>Rule 4 above is enforced, but as of 0.5.2 nothing produces the codes it
- * allows: {@code AuditLog} stores localized prose with no machine code, so
- * {@code DeviceHealthCollector} passes an empty audit list and every export
- * carries no audit section at all. That is the fail-closed end of the
- * behaviour — nothing untrusted escapes — but it must not be read as "the export
- * carries a redacted audit trail", because it currently carries none. The
- * allowlist is the contract a future {@code AuditLog} event code has to satisfy
- * before an entry may travel; it is not evidence that entries are travelling.
- * The gap is recorded in {@code docs/production-roadmap.md}.
+ * <p>The collector reads timestamps and codes from the audit log. This class
+ * checks them against the catalogue and removes detail from any snapshot.
  */
 public final class DeviceHealthRedaction {
 
@@ -98,37 +89,11 @@ public final class DeviceHealthRedaction {
      *
      * <p>An allowlist rather than a denylist, because the failure being prevented
      * is an event code nobody reviewed carrying whatever a future call site
-     * interpolates into it. A code that is not here is dropped, which loses
-     * information in the export and is the correct trade: the local report still
-     * shows every entry to the administrator in front of the device.
+     * interpolates into it. The catalogue contains only fixed codes, plus the
+     * marker for entries written before codes existed.
      */
-    public static final Set<String> ALLOWED_AUDIT_EVENT_CODES = Set.of(
-            "policy.apply",
-            "policy.apply.failed",
-            "policy.pause",
-            "policy.pause.failed",
-            "policy.allowlist.saved",
-            "policy.mode.changed",
-            "policy.system-selection.saved",
-            "policy.system-control.changed",
-            "policy.system-control.unverified",
-            "policy.reconciliation.failed",
-            "policy.reconciliation.crashed",
-            "kiosk.configured",
-            "kiosk.entered",
-            "kiosk.exited",
-            "kiosk.cleared",
-            "kiosk.faulted",
-            "update.checked",
-            "update.installed",
-            "update.failed",
-            "admin.pin.changed",
-            "admin.recovery.rotated",
-            "admin.session.locked",
-            "admin.locale.changed",
-            "device.boot",
-            "health.exported"
-    );
+    public static final Set<String> ALLOWED_AUDIT_EVENT_CODES =
+            com.example.lockdowndpc.policy.AuditEvent.knownCodes();
 
     private DeviceHealthRedaction() {}
 

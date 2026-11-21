@@ -13,12 +13,21 @@ import java.util.List;
 public final class AuditLog {
     private static final String PREFS = "admin_audit";
     private static final String KEY_ENTRIES = "entries";
+    private static final String KEY_HAS_CODES = "entries_have_codes";
     private static final int MAX_ENTRIES = 50;
 
     private AuditLog() {}
 
-    public static synchronized void append(Context context, String event) {
-        edit(context, event).apply();
+    /**
+     * @deprecated Kept for one release. Use {@link #append(Context, AuditEvent, String)}.
+     */
+    @Deprecated
+    public static void append(Context context, String text) {
+        append(context, AuditEvent.GENERIC, text);
+    }
+
+    public static synchronized void append(Context context, AuditEvent event, String text) {
+        edit(preferences(context), event, text).apply();
     }
 
     /**
@@ -27,42 +36,102 @@ public final class AuditLog {
      *
      * @return whether the entry was persisted
      */
-    public static synchronized boolean appendCommitted(Context context, String event) {
-        return edit(context, event).commit();
+    public static synchronized boolean appendCommitted(Context context, AuditEvent event, String text) {
+        return edit(preferences(context), event, text).commit();
     }
 
-    private static SharedPreferences.Editor edit(Context context, String event) {
-        SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    static SharedPreferences.Editor edit(SharedPreferences prefs, AuditEvent event, String text) {
         ArrayList<String> entries = new ArrayList<>(rawEntries(prefs));
-        entries.add(System.currentTimeMillis() + "|" + event.replace('\n', ' '));
+        // Old text could begin with a code and a pipe. Migrate using the
+        // preference marker, and write the marker and all rows in one edit.
+        if (!prefs.getBoolean(KEY_HAS_CODES, false)) {
+            entries.replaceAll(line -> {
+                Entry entry = parse(line, false);
+                return entry == null ? line : entry.encode();
+            });
+        }
+        entries.add(new Entry(System.currentTimeMillis(), event.code(), text).encode());
         int first = Math.max(0, entries.size() - MAX_ENTRIES);
-        return prefs.edit().putString(KEY_ENTRIES, String.join("\n", entries.subList(first, entries.size())));
+        return prefs.edit()
+                .putString(KEY_ENTRIES, String.join("\n", entries.subList(first, entries.size())))
+                .putBoolean(KEY_HAS_CODES, true);
     }
 
     public static synchronized String formatted(Context context) {
-        List<String> entries = rawEntries(context.getSharedPreferences(PREFS, Context.MODE_PRIVATE));
+        SharedPreferences prefs = preferences(context);
+        List<String> entries = rawEntries(prefs);
         if (entries.isEmpty()) {
             return context.getString(R.string.audit_empty);
         }
-        DateFormat formatter = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT);
+        return format(entries, prefs.getBoolean(KEY_HAS_CODES, false),
+                DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT));
+    }
+
+    static String format(List<String> entries, boolean hasCodes, DateFormat formatter) {
         StringBuilder result = new StringBuilder();
         for (int index = entries.size() - 1; index >= 0; index--) {
-            String entry = entries.get(index);
-            int separator = entry.indexOf('|');
-            if (separator <= 0) {
-                continue;
-            }
-            try {
-                long timestamp = Long.parseLong(entry.substring(0, separator));
-                result.append(formatter.format(new Date(timestamp)))
+            Entry entry = parse(entries.get(index), hasCodes);
+            if (entry != null) {
+                result.append(formatter.format(new Date(entry.atMillis())))
                         .append(" — ")
-                        .append(entry.substring(separator + 1))
+                        .append(entry.text())
                         .append('\n');
-            } catch (NumberFormatException ignored) {
-                // Ignore a corrupted historic entry.
             }
         }
         return result.toString().trim();
+    }
+
+    /** An exportable audit record. */
+    public record CodeEntry(long atMillis, String code) {}
+
+    /** Returns the retained timestamps and codes, oldest first. */
+    public static synchronized List<CodeEntry> codes(Context context) {
+        return readCodes(preferences(context));
+    }
+
+    static List<CodeEntry> readCodes(SharedPreferences prefs) {
+        boolean hasCodes = prefs.getBoolean(KEY_HAS_CODES, false);
+        List<CodeEntry> result = new ArrayList<>();
+        for (String line : rawEntries(prefs)) {
+            Entry entry = parse(line, hasCodes);
+            if (entry != null) {
+                result.add(new CodeEntry(entry.atMillis(), entry.code()));
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    record Entry(long atMillis, String code, String text) {
+        String encode() {
+            return atMillis + "|" + code + "|" + text.replace('\n', ' ');
+        }
+    }
+
+    static Entry parse(String line, boolean hasCodes) {
+        int separator = line.indexOf('|');
+        if (separator <= 0) {
+            return null;
+        }
+        try {
+            long atMillis = Long.parseLong(line.substring(0, separator));
+            if (!hasCodes) {
+                return new Entry(atMillis, AuditEvent.LEGACY_CODE, line.substring(separator + 1));
+            }
+            int textSeparator = line.indexOf('|', separator + 1);
+            if (textSeparator < 0) {
+                return null;
+            }
+            String code = line.substring(separator + 1, textSeparator);
+            return AuditEvent.knownCodes().contains(code)
+                    ? new Entry(atMillis, code, line.substring(textSeparator + 1))
+                    : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private static SharedPreferences preferences(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
     private static List<String> rawEntries(SharedPreferences prefs) {

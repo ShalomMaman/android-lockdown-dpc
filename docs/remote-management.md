@@ -122,13 +122,13 @@ depends on them is merged.
 | Offline signing pattern | OpenSSL with an external PEM key never copied; passphrase from a named environment variable | `tools/publish_update.py` |
 | Provisioning payload | QR builder; refuses admin-extras keys containing `credential`, `passcode`, `passphrase`, `password`, `pin`, `recovery`, `secret`, `token` (not `ticket`) | `tools/provisioning_payload.py` |
 | Health report | Redacted snapshot; package census as counts | `health/` |
-| Audit log | Prose only, no event codes | `policy/AuditLog.java` |
+| Audit log | PR 2 implemented: stable event codes in storage and the redacted health export; existing prose stays readable on-device | `policy/AuditLog.java`, `policy/AuditEvent.java` |
 
 ### Gaps v1 must close
 
 1. No `GET_PROVISIONING_MODE` / `ADMIN_POLICY_COMPLIANCE` activities
    ([`provisioning.md`](provisioning.md)).
-2. No audit event codes.
+2. Audit event codes implemented (PR 2).
 3. Store setters trust their caller and write asynchronously.
 4. The first-PIN path is open to anyone holding a Device Owner device with no
    PIN.
@@ -970,7 +970,7 @@ the baseline is applied through its journal.
 2. Enrolment identity proven end to end: challenge, proof of possession, and
    offline verification by the admin tooling.
 3. Final production application ID and signer.
-4. Audit event codes (PR 2).
+4. Resolved by PR 2: audit event codes are stored and exported with timestamps.
 5. An owner decision on server hosting, operation and server-key protection.
    Nothing in this repository may name it.
 6. Fleet policy key custody: where the offline key lives and who may sign.
