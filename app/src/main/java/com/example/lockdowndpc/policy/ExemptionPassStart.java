@@ -19,6 +19,11 @@ import java.util.List;
  *       that record, which is the state the pass actually runs under.</li>
  * </ol>
  *
+ * <p>When Android did not confirm Chrome's hide and the home filter is being
+ * turned off (or its CA removed), the start says to hold that teardown: the
+ * VPN lockdown, the PAC and the CA stay until a later pass confirms Chrome is
+ * contained.
+ *
  * <p>Later steps may only show a package through the verified path. The
  * Android side is the {@link Steps} the controller supplies, so the order is a
  * JVM test.
@@ -29,13 +34,19 @@ final class ExemptionPassStart {
 
     enum Stop { NONE, CORRUPT_HOME_FILTER, NOT_DEVICE_OWNER }
 
-    /** Where the pass stopped, and Chrome's decision when it did not. */
-    record Start(Stop stop, ChromeFilterExemption.Decision chrome) {}
+    /**
+     * Where the pass stopped, Chrome's decision when it did not, and whether
+     * the home filter's teardown must wait for a confirmed Chrome containment.
+     */
+    record Start(Stop stop, ChromeFilterExemption.Decision chrome, boolean holdFilterTeardown) {}
 
     interface Steps {
         boolean deviceOwner();
 
         boolean homeFilterReadable();
+
+        /** The stored filter asks Android to remove its VPN, PAC or CA on this pass. */
+        boolean filterTeardownRequested();
 
         /** Hides every catalogue social package without a verified exemption. */
         void containSocial(List<String> errors);
@@ -71,15 +82,17 @@ final class ExemptionPassStart {
             if (deviceOwner) {
                 steps.recordEarlyReadback(errors);
             }
-            return new Start(Stop.CORRUPT_HOME_FILTER, null);
+            return new Start(Stop.CORRUPT_HOME_FILTER, null, false);
         }
         steps.markApplyStarted();
         if (!deviceOwner) {
-            return new Start(Stop.NOT_DEVICE_OWNER, null);
+            return new Start(Stop.NOT_DEVICE_OWNER, null, false);
         }
         ChromeFilterExemption.Decision decision = chrome == null
                 ? ChromeFilterExemption.Decision.NOT_AVAILABLE
                 : steps.decideChrome(chrome, steps.protectionActive(), errors);
-        return new Start(Stop.NONE, decision);
+        boolean holdFilterTeardown = chrome == ChromeFilterExemption.Containment.REFUSED
+                && steps.filterTeardownRequested();
+        return new Start(Stop.NONE, decision, holdFilterTeardown);
     }
 }

@@ -163,6 +163,8 @@
     <string name="system_policy_exempt_chrome_reason_config_unverified">Android did not confirm it stored Chrome\'s managed settings</string>
     <string name="system_policy_exempt_chrome_reason_filter_unconfirmed">The home filter did not confirm its settings on the last pass</string>
     <string name="system_policy_exempt_chrome_reason_show_unverified">Android did not confirm showing Chrome, so it was hidden again</string>
+    <string name="system_policy_exempt_observed_disabled">disabled</string>
+    <string name="system_policy_exempt_chrome_reason_hide_refused">Chrome had to be hidden, but Android did not confirm the hide</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>
     <string name="system_policy_exempt_social_approved">Approved</string>
     <string name="system_policy_exempt_social_not_approved">Not approved</string>

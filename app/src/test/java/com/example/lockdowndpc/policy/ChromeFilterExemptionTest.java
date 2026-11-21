@@ -35,6 +35,7 @@ public final class ChromeFilterExemptionTest {
         boolean keepRestrictions = true;
         boolean hidden;
         boolean suspended;
+        boolean enabled = true;
         boolean refuseHide;
         RuntimeException throwOnRead;
         RuntimeException throwOnObserve;
@@ -89,6 +90,7 @@ public final class ChromeFilterExemptionTest {
         }
 
         @Override public boolean suspended() { return suspended; }
+        @Override public boolean enabled() { return enabled; }
     }
 
     /**
@@ -303,6 +305,38 @@ public final class ChromeFilterExemptionTest {
         ChromeFilterExemption.release(Decision.NOT_EXEMPTED, true, chrome, errors);
         assertTrue("an unknown state is contained again",
                 chrome.calls.contains("hide=true"));
+    }
+
+    @Test
+    public void aRefusedRecoveryHideIsReportedAsRefusedNotAsHidden() {
+        FakeChrome chrome = new FakeChrome();
+        chrome.hidden = true;
+        chrome.observeFailsAfterShow = true;
+        // The opening hide works; the recovery hide after the failed show does not.
+        List<String> errors = new ArrayList<>();
+        String pac = PAC;
+        Containment containment = ChromeFilterExemption.contain(true, true, pac, chrome, errors);
+        Decision decision = ChromeFilterExemption.decide(containment, true, true, true, pac, chrome, errors);
+        chrome.refuseHide = true;
+        Decision released = ChromeFilterExemption.release(decision, true, chrome, errors);
+        assertEquals(Decision.HIDE_REFUSED, released);
+        assertFalse(released.shown());
+        assertTrue(errors.stream().anyMatch(e -> e.startsWith(ChromeFilterExemption.CONTAIN_UNVERIFIED_ERROR)));
+    }
+
+    @Test
+    public void aRefusedHideInTheReleaseStepIsReportedAsRefused() {
+        FakeChrome chrome = visibleChrome();
+        chrome.refuseHide = true;
+        assertEquals(Decision.HIDE_REFUSED,
+                ChromeFilterExemption.release(Decision.NOT_EXEMPTED, true, chrome, new ArrayList<>()));
+    }
+
+    @Test
+    public void aDisabledChromeIsObservedAsDisabledNotAvailable() {
+        FakeChrome chrome = visibleChrome();
+        chrome.enabled = false;
+        assertEquals(Observed.DISABLED, ChromeFilterExemption.observe(chrome));
     }
 
     @Test

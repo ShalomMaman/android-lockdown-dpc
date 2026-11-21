@@ -53,6 +53,8 @@ public final class ChromeFilterExemption {
         FILTER_UNCONFIRMED(false),
         /** Shown, but Android did not confirm it, so Chrome was hidden again. */
         SHOW_UNVERIFIED(false),
+        /** Chrome had to be hidden after the decision and Android did not confirm the hide. */
+        HIDE_REFUSED(false),
         ERROR(false),
         SHOWN(true);
 
@@ -96,6 +98,9 @@ public final class ChromeFilterExemption {
         void setSuspended(boolean suspended);
 
         boolean suspended();
+
+        /** Whether the package is enabled (an app disabled in Settings cannot launch). */
+        boolean enabled();
     }
 
     /**
@@ -178,7 +183,9 @@ public final class ChromeFilterExemption {
      * reconciliation. Shows it only for {@link Decision#SHOWN} and only when
      * that reconciliation reported no error; a show Android does not confirm
      * visible is undone. In every other case Chrome is hidden if Android does
-     * not already report it hidden or suspended.
+     * not already report it hidden or suspended. Every hide is read back, and a
+     * hide Android does not confirm is reported as {@link Decision#HIDE_REFUSED}
+     * rather than as a hidden Chrome.
      *
      * @param filterConfirmed the home filter's reconciliation in this pass
      *                        reported no error
@@ -201,8 +208,9 @@ public final class ChromeFilterExemption {
             } catch (RuntimeException exception) {
                 errors.add(SHOW_UNVERIFIED_ERROR + ":" + exception.getClass().getSimpleName());
             }
-            hide(gateway, errors);
-            return Decision.SHOW_UNVERIFIED;
+            return hide(gateway, errors) == Containment.CONTAINED
+                    ? Decision.SHOW_UNVERIFIED
+                    : Decision.HIDE_REFUSED;
         }
         Decision result = decision;
         if (decision.shown()) {
@@ -210,9 +218,13 @@ public final class ChromeFilterExemption {
             result = Decision.FILTER_UNCONFIRMED;
         }
         BuiltInBlockExemptions.Observed observed = observe(gateway);
-        if (observed == BuiltInBlockExemptions.Observed.VISIBLE
-                || observed == BuiltInBlockExemptions.Observed.UNKNOWN) {
-            hide(gateway, errors);
+        if ((observed == BuiltInBlockExemptions.Observed.VISIBLE
+                || observed == BuiltInBlockExemptions.Observed.DISABLED
+                || observed == BuiltInBlockExemptions.Observed.UNKNOWN)
+                && hide(gateway, errors) != Containment.CONTAINED) {
+            // CONTAIN_UNVERIFIED already says the hide was refused, and that
+            // the configuration was therefore left alone; keep it.
+            return decision == Decision.CONTAIN_UNVERIFIED ? decision : Decision.HIDE_REFUSED;
         }
         return result;
     }
@@ -226,9 +238,12 @@ public final class ChromeFilterExemption {
             if (gateway.hidden()) {
                 return BuiltInBlockExemptions.Observed.HIDDEN;
             }
-            return gateway.suspended()
-                    ? BuiltInBlockExemptions.Observed.SUSPENDED
-                    : BuiltInBlockExemptions.Observed.VISIBLE;
+            if (gateway.suspended()) {
+                return BuiltInBlockExemptions.Observed.SUSPENDED;
+            }
+            return gateway.enabled()
+                    ? BuiltInBlockExemptions.Observed.VISIBLE
+                    : BuiltInBlockExemptions.Observed.DISABLED;
         } catch (RuntimeException exception) {
             return BuiltInBlockExemptions.Observed.UNKNOWN;
         }

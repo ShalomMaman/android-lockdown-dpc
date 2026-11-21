@@ -95,16 +95,27 @@ public final class HomeFilterController {
             HomeFilterPolicy.Settings before = requireSettings(context);
             HomeFilterPolicy.Settings after = operation.apply(before);
             if (!before.equals(after)) {
-                HomeFilterStore.write(context, after);
+                try {
+                    HomeFilterStore.write(context, after);
+                } catch (IllegalStateException failedWrite) {
+                    // The previous settings were restored in memory; a pass
+                    // still runs so every package is contained against them.
+                    runPass(context);
+                    throw failedWrite;
+                }
                 AuditLog.append(context, "Home filter settings changed by administrator");
             }
-            if (AllowedAppsStore.isProtectionEnabled(context)) {
-                LockdownPolicyController.apply(context);
-            } else {
-                LockdownPolicyController.pause(context);
-            }
+            runPass(context);
             return read(context);
         });
+    }
+
+    private static void runPass(Context context) {
+        if (AllowedAppsStore.isProtectionEnabled(context)) {
+            LockdownPolicyController.apply(context);
+        } else {
+            LockdownPolicyController.pause(context);
+        }
     }
 
     /** Device-owner lifecycle entry point. It only reasserts saved administrator intent. */

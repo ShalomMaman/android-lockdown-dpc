@@ -155,6 +155,8 @@
     <string name="system_policy_exempt_chrome_reason_config_unverified">‏Android לא אישר ששמר את ההגדרות המנוהלות של Chrome</string>
     <string name="system_policy_exempt_chrome_reason_filter_unconfirmed">סינון הבית לא אישר את ההגדרות שלו במעבר האחרון</string>
     <string name="system_policy_exempt_chrome_reason_show_unverified">‏Android לא אישר את הצגת Chrome, ולכן הוא הוסתר שוב</string>
+    <string name="system_policy_exempt_observed_disabled">מושבת</string>
+    <string name="system_policy_exempt_chrome_reason_hide_refused">היה צריך להסתיר את Chrome, אך Android לא אישר את ההסתרה</string>
     <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>
     <string name="system_policy_exempt_social_approved">מאושר</string>
     <string name="system_policy_exempt_social_not_approved">לא מאושר</string>

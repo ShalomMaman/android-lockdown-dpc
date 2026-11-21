@@ -111,6 +111,8 @@ internal fun chromeReasonRes(decision: ChromeFilterExemption.Decision): Int = wh
         R.string.system_policy_exempt_chrome_reason_filter_unconfirmed
     ChromeFilterExemption.Decision.SHOW_UNVERIFIED ->
         R.string.system_policy_exempt_chrome_reason_show_unverified
+    ChromeFilterExemption.Decision.HIDE_REFUSED ->
+        R.string.system_policy_exempt_chrome_reason_hide_refused
     ChromeFilterExemption.Decision.ERROR -> R.string.system_policy_exempt_chrome_reason_error
 }
 
@@ -119,6 +121,7 @@ internal fun observedRes(state: BuiltInBlockExemptions.Observed?): Int = when (s
     BuiltInBlockExemptions.Observed.VISIBLE -> R.string.system_policy_exempt_observed_visible
     BuiltInBlockExemptions.Observed.HIDDEN -> R.string.system_policy_exempt_observed_hidden
     BuiltInBlockExemptions.Observed.SUSPENDED -> R.string.system_policy_exempt_observed_suspended
+    BuiltInBlockExemptions.Observed.DISABLED -> R.string.system_policy_exempt_observed_disabled
     BuiltInBlockExemptions.Observed.UNKNOWN -> R.string.system_policy_exempt_observed_unknown
     BuiltInBlockExemptions.Observed.NOT_INSTALLED, null ->
         R.string.system_policy_exempt_observed_not_installed

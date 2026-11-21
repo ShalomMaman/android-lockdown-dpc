@@ -74,7 +74,34 @@ final class HomeFilterStore {
     }
 
     static void write(Context context, HomeFilterPolicy.Settings settings) {
-        SharedPreferences.Editor editor = prefs(context).edit().remove(READBACK);
+        write(prefs(context), settings);
+    }
+
+    /**
+     * Persists the settings. Android's {@code commit()} updates the in-memory
+     * map before writing to disk, so after a failed commit every later reader
+     * would see the new values anyway; the previous values are therefore written
+     * back before the failure is reported, which restores memory whatever the
+     * disk does.
+     */
+    static void write(SharedPreferences prefs, HomeFilterPolicy.Settings settings) {
+        HomeFilterPolicy.Settings previous;
+        try {
+            previous = read(prefs);
+        } catch (RuntimeException exception) {
+            previous = null;
+        }
+        if (edit(prefs, settings).commit()) {
+            return;
+        }
+        if (previous != null) {
+            edit(prefs, previous).commit();
+        }
+        throw new IllegalStateException("Could not persist home filter settings");
+    }
+
+    private static SharedPreferences.Editor edit(SharedPreferences prefs, HomeFilterPolicy.Settings settings) {
+        SharedPreferences.Editor editor = prefs.edit().remove(READBACK);
         if (settings.configured()) {
             HomeFilterPolicy.Config config = settings.config();
             HomeFilterPolicy.Routing routing = config.routing();
@@ -94,9 +121,7 @@ final class HomeFilterStore {
         } else {
             editor.clear();
         }
-        if (!editor.commit()) {
-            throw new IllegalStateException("Could not persist home filter settings");
-        }
+        return editor;
     }
 
     static void saveReadback(Context context, HomeFilterPolicy.Report report) {

@@ -73,6 +73,12 @@ public final class LockdownPolicyController {
             }
 
             @Override
+            public boolean filterTeardownRequested() {
+                return homeFilter != null && homeFilter.configured()
+                        && (!homeFilter.enabled() || homeFilter.removeCa());
+            }
+
+            @Override
             public void containSocial(List<String> containErrors) {
                 containUnexemptedSocial(context, dpm, admin, social, containErrors);
             }
@@ -152,7 +158,13 @@ public final class LockdownPolicyController {
                 playCompatibility, homeFilter, social, chromeInScope, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, homeFilter, errors);
         int errorsBeforeFilter = errors.size();
-        HomeFilterController.reconcile(context, dpm, admin, errors);
+        if (start.holdFilterTeardown()) {
+            // Android did not confirm Chrome's hide: keep the VPN lockdown, the
+            // PAC and the CA in place; the next pass retries the hide first.
+            errors.add("home-filter:teardown-held-chrome-not-contained");
+        } else {
+            HomeFilterController.reconcile(context, dpm, admin, errors);
+        }
         if (chromeInScope) {
             // Chrome is released only now, after the home filter's own
             // reconciliation, and only if it reported no error. Links follow
@@ -1224,7 +1236,9 @@ public final class LockdownPolicyController {
                         ? BuiltInBlockExemptions.Observed.HIDDEN
                         : dpm.isPackageSuspended(admin, packageName)
                             ? BuiltInBlockExemptions.Observed.SUSPENDED
-                            : BuiltInBlockExemptions.Observed.VISIBLE;
+                            : isEnabled(pm, packageName)
+                                ? BuiltInBlockExemptions.Observed.VISIBLE
+                                : BuiltInBlockExemptions.Observed.DISABLED;
             } catch (PackageManager.NameNotFoundException | RuntimeException exception) {
                 state = BuiltInBlockExemptions.Observed.UNKNOWN;
             }
@@ -1316,6 +1330,11 @@ public final class LockdownPolicyController {
         }
 
         @Override
+        public boolean enabled() {
+            return isEnabled(context.getPackageManager(), BuiltInBlockExemptions.CHROME);
+        }
+
+        @Override
         public void setSuspended(boolean suspended) {
             String[] failed = dpm.setPackagesSuspended(
                     admin, new String[]{BuiltInBlockExemptions.CHROME}, suspended);
@@ -1331,6 +1350,27 @@ public final class LockdownPolicyController {
             } catch (PackageManager.NameNotFoundException exception) {
                 throw new IllegalStateException("chrome-missing", exception);
             }
+        }
+    }
+
+    /**
+     * Whether the installed package is enabled. Hidden packages answer only
+     * queries that include uninstalled packages.
+     */
+    private static boolean isEnabled(PackageManager pm, String packageName) {
+        try {
+            long flags = PackageManager.MATCH_UNINSTALLED_PACKAGES
+                    | PackageManager.MATCH_DISABLED_COMPONENTS;
+            ApplicationInfo info;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                info = pm.getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(flags));
+            } else {
+                //noinspection deprecation
+                info = pm.getApplicationInfo(packageName, (int) flags);
+            }
+            return info.enabled;
+        } catch (PackageManager.NameNotFoundException exception) {
+            throw new IllegalStateException("package-missing", exception);
         }
     }
 
