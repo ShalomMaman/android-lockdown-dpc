@@ -31,6 +31,7 @@ import com.example.lockdowndpc.ui.BlockedBrowserActivity;
 
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -161,6 +162,14 @@ public final class LockdownPolicyController {
             errors.add(PlayStoreCompatibility.INSTALL_LOCK_UNVERIFIED_ERROR);
         }
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
+        // Night and work hours are evaluated once per pass from the clock; no
+        // stored "in window" flag is trusted. While a window is active, the
+        // packages the schedule suspended are not released by the exemption
+        // step below, so an approved app is not briefly unsuspended each pass.
+        ScheduleSettings schedule = ScheduleStore.read(context);
+        Instant scheduleNow = Instant.now();
+        Set<String> scheduleHolding = ScheduleSuspension.holding(
+                schedule, scheduleNow, readScheduleOwnedQuietly(context));
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
         // routeLinks below re-registers the managed-filtering ones.
@@ -170,7 +179,7 @@ public final class LockdownPolicyController {
         }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
-                playCompatibility, enforcedFilter, social, chromeInScope, errors);
+                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHolding, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, enforcedFilter, errors);
         // The credentials lock first, so the CA check that follows cannot be
         // undone from Android Settings before Chrome is released on it.
@@ -214,6 +223,10 @@ public final class LockdownPolicyController {
                 routeLinks(context, dpm, admin, false, errors);
             }
         }
+        // Last of the package steps, so a package an earlier step made visible
+        // in this pass (Chrome's release included) is covered by an active window.
+        reconcileSchedule(context, dpm, admin, schedule, scheduleNow, trustedManagement,
+                enforcedFilter, playCompatibility, social, chromeInScope, chrome, errors);
         recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
         boolean verified = errors.isEmpty();
         if (verified) {
@@ -330,6 +343,9 @@ public final class LockdownPolicyController {
             }
         }
         unsuspendBrowserProviders(dpm, admin, errors);
+        // Pause releases night and work hours like every other protection, and
+        // cancels the boundary alarm until protection is applied again.
+        ScheduleSuspension.releaseAll(new ScheduleDeviceGateway(context, dpm, admin), errors);
         protectManagementApps(context, dpm, admin, resolveTrustedManagementPackages(context, errors), errors);
         // Pausing managed filtering is not a way out of kiosk: an active kiosk
         // keeps its lock task allowlist and re-registers the HOME preference that
@@ -879,6 +895,7 @@ public final class LockdownPolicyController {
             HomeFilterPolicy.Settings homeFilter,
             SocialPass social,
             boolean chromeInScope,
+            Set<String> scheduleHolding,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -898,12 +915,7 @@ public final class LockdownPolicyController {
         String webViewProvider = resolveWebViewProvider(pm);
         KioskConfigStore.Settings kiosk = KioskConfigStore.read(context);
         boolean kioskActive = KioskConfigStore.isContainmentState(kiosk.state());
-        String requestedKioskTarget = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
-                ? kiosk.config().targetPackage()
-                : "";
-        String kioskTarget = KioskAppCatalog.isProtectedFromKiosk(requestedKioskTarget, social.verified())
-                ? ""
-                : requestedKioskTarget;
+        String kioskTarget = kioskTarget(kiosk, social);
         int blockedCount = 0;
         int allowedCount = 0;
 
@@ -1091,9 +1103,11 @@ public final class LockdownPolicyController {
                 errors.add("package-policy:" + packageName + ":"
                         + exception.getClass().getSimpleName());
             }
-            if (exempted) {
+            if (exempted && !scheduleHolding.contains(packageName)) {
                 // An approved package may have been suspended by an earlier
-                // containment fallback; an approval releases that too.
+                // containment fallback; an approval releases that too. A
+                // suspension an active night or work window holds is not this
+                // step's to lift.
                 releaseSuspension(dpm, admin, packageName, errors);
             }
         }
@@ -1102,6 +1116,108 @@ public final class LockdownPolicyController {
             KioskConfigStore.setEscapeSurfaceHidingApplied(context, kioskActive);
         }
         return new int[]{blockedCount, allowedCount};
+    }
+
+    /** The validated single-app kiosk target while kiosk contains the device, else empty. */
+    private static String kioskTarget(KioskConfigStore.Settings kiosk, SocialPass social) {
+        boolean kioskActive = KioskConfigStore.isContainmentState(kiosk.state());
+        String requested = kioskActive && kiosk.config().mode() == KioskMode.SINGLE_APP
+                ? kiosk.config().targetPackage()
+                : "";
+        return KioskAppCatalog.isProtectedFromKiosk(requested, social.verified()) ? "" : requested;
+    }
+
+    /** The recorded schedule suspensions; an unreadable record holds nothing back. */
+    private static Set<String> readScheduleOwnedQuietly(Context context) {
+        try {
+            return ScheduleStore.readOwned(context);
+        } catch (RuntimeException exception) {
+            return Set.of();
+        }
+    }
+
+    /**
+     * Night and work hours: suspends every launchable app outside the
+     * always-available core while a window is active, releases what the
+     * schedule suspended once none is, and re-arms the boundary alarm.
+     *
+     * <p>The schedule is the only step that suspends for a time window, and it
+     * suspends only: hiding stays with {@link #applyPackagePolicy}. A package
+     * another step of this pass contains (a catalogue social app without a
+     * verified exemption, Chrome while its exemption is not shown, a
+     * browser-backed WebView provider) is never released by the schedule.
+     * A device that never stored a schedule makes no suspension call here.
+     */
+    private static void reconcileSchedule(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            ScheduleSettings schedule,
+            Instant now,
+            Set<String> trustedManagement,
+            HomeFilterPolicy.Settings homeFilter,
+            PlayStoreCompatibility.State playCompatibility,
+            SocialPass social,
+            boolean chromeInScope,
+            ChromeFilterExemption.Decision chrome,
+            List<String> errors
+    ) {
+        ScheduleDeviceGateway gateway = new ScheduleDeviceGateway(context, dpm, admin);
+        if (!schedule.enforcing() && readScheduleOwnedQuietly(context).isEmpty()) {
+            // The default: nothing stored, nothing held. Only clear an alarm a
+            // disabled schedule may have left behind.
+            ScheduleSuspension.reconcile(schedule, now,
+                    new ScheduleSuspension.Device(Set.of(), Set.of()), gateway, errors);
+            return;
+        }
+        PackageManager pm = context.getPackageManager();
+        LinkedHashSet<String> core = new LinkedHashSet<>();
+        core.add(context.getPackageName());
+        core.addAll(trustedManagement);
+        if (homeFilter.enabled()) {
+            core.add(homeFilter.config().vpnPackage());
+        }
+        core.addAll(LockdownPackages.ESSENTIAL_SYSTEM);
+        core.addAll(ScheduleDeviceGateway.roleApps(context));
+        // Android refuses to suspend an active device administrator; asking on
+        // every pass would only fail every pass.
+        Set<String> activeAdmins = activeAdminPackages(dpm);
+        if (activeAdmins != null) {
+            core.addAll(activeAdmins);
+        }
+        String webViewProvider = resolveWebViewProvider(pm);
+        if (webViewProvider != null) {
+            core.add(webViewProvider);
+        }
+        String kioskTarget = kioskTarget(KioskConfigStore.read(context), social);
+        if (!kioskTarget.isEmpty()) {
+            // Suspending the pinned app would break lock task mid-session.
+            core.add(kioskTarget);
+        }
+        MaintenanceWindow window = liveMaintenanceWindow(context);
+        if (MaintenanceAppPolicy.opensApplicationStores(window)
+                && !(homeFilter.enabled() && conflictsWithHomeFilter(window))) {
+            core.addAll(MaintenanceAppPolicy.managedStorePackages());
+        }
+        if (playCompatibility.keepsPlayStoreAvailable()) {
+            // Kept for the apps that depend on it; installation stays blocked.
+            core.add(PlayStoreCompatibility.PLAY_STORE_PACKAGE);
+        }
+
+        LinkedHashSet<String> heldByOthers = new LinkedHashSet<>(BuiltInBlockExemptions.EXEMPTABLE_SOCIAL);
+        heldByOthers.removeAll(social.verified());
+        if (chromeInScope && !chrome.shown()) {
+            heldByOthers.add(BuiltInBlockExemptions.CHROME);
+        }
+        if (webViewProvider != null && LockdownPackages.ALWAYS_BLOCKED.contains(webViewProvider)) {
+            heldByOthers.add(webViewProvider);
+        }
+        ScheduleSuspension.Result result = ScheduleSuspension.reconcile(schedule, now,
+                new ScheduleSuspension.Device(core, heldByOthers), gateway, errors);
+        if (!result.activeWindows().isEmpty()) {
+            Log.i(TAG, "Schedule windows active: " + result.activeWindows()
+                    + ", suspended=" + result.suspended().size());
+        }
     }
 
     private static String resolveWebViewProvider(PackageManager pm) {

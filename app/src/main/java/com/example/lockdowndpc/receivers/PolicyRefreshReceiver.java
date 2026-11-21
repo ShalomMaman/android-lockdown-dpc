@@ -7,13 +7,22 @@ import android.content.Intent;
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
+import com.example.lockdowndpc.policy.ScheduleAlarm;
 import com.example.lockdowndpc.updates.UpdateScheduler;
 import com.example.lockdowndpc.updates.SecureUpdateManager;
 
 public final class PolicyRefreshReceiver extends BroadcastReceiver {
+    /** Sent by {@code AlarmManager} when exact alarm access is granted or revoked (API 31+). */
+    private static final String ACTION_EXACT_ALARM_PERMISSION_CHANGED =
+            "android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED";
+
     @Override
     public void onReceive(Context context, Intent intent) {
         String action = intent.getAction();
+        if (isScheduleTrigger(action)) {
+            reconcileForSchedule(context, action);
+            return;
+        }
         boolean supportedAction = Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         if (!supportedAction) {
@@ -58,6 +67,38 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
                         pendingResult::finish
                 );
             }
+            dispatched = true;
+        } finally {
+            if (!dispatched) {
+                pendingResult.finish();
+            }
+        }
+    }
+
+    /**
+     * A night or work hours boundary, a wall-clock or timezone change, or a
+     * change in exact alarm access. Each one can move the device into or out of
+     * a window, so it gets a full policy pass, which recomputes the windows from
+     * the clock and re-arms the boundary alarm. Nothing else the boot path does
+     * (update scheduling, maintenance refresh, kiosk restore) is repeated here.
+     * While protection is paused there is nothing to enforce: the pause pass
+     * already released the schedule and cancelled its alarm.
+     */
+    static boolean isScheduleTrigger(String action) {
+        return ScheduleAlarm.ACTION_BOUNDARY.equals(action)
+                || Intent.ACTION_TIME_CHANGED.equals(action)
+                || Intent.ACTION_TIMEZONE_CHANGED.equals(action)
+                || ACTION_EXACT_ALARM_PERMISSION_CHANGED.equals(action);
+    }
+
+    private void reconcileForSchedule(Context context, String action) {
+        if (!AllowedAppsStore.isProtectionEnabled(context)) {
+            return;
+        }
+        PendingResult pendingResult = goAsync();
+        boolean dispatched = false;
+        try {
+            PolicyReconciliationCoordinator.reconcileAsync(context, action, pendingResult::finish);
             dispatched = true;
         } finally {
             if (!dispatched) {

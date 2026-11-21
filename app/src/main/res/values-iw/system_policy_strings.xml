@@ -183,6 +183,20 @@
     <string name="system_policy_exempt_confirm_social_title">לאפשר את היישום הזה?</string>
     <string name="system_policy_exempt_confirm_social_body">%1$s לא ייחסם עוד ברשימה המובנית של רשתות חברתיות והודעות כל עוד ההגנה פועלת. האישור קשור לחתימה הנוכחית של היישום. כיבוי שלו בהמשך יחסום אותו שוב מיד.</string>
     <!-- יומן ביקורת -->
+    <!-- שעות לילה ושעות עבודה (Issue #86) -->
+    <string name="system_policy_section_schedule">שעות לילה ושעות עבודה</string>
+    <string name="system_policy_schedule_row">השעיית יישומים בלילה ובשעות העבודה</string>
+    <string name="system_policy_schedule_body">כשהאפשרות פעילה, כל היישומים מושעים מ־23:00 עד 06:00 בכל לילה ומ־09:00 עד 17:00 בימים ראשון עד חמישי, חוץ מהטלפון, ההודעות, השעון, מסך הבית והמקלדת, יישומי מערכת חיוניים ויישומי הניהול. יישומים מושעים נשארים מותקנים ושומרים על הנתונים שלהם, אבל אי אפשר לפתוח אותם וההתראות שלהם מוסתרות. השעות נקבעות לפי אזור הזמן שהיה במכשיר כשהאפשרות הופעלה. השהיית ההגנה משחררת את ההשעיות האלה.</string>
+    <string name="system_policy_schedule_state_off">כבוי</string>
+    <string name="system_policy_schedule_state_on">פעיל</string>
+    <string name="system_policy_schedule_state_unreadable">לא ניתן היה לקרוא את לוח הזמנים השמור, ולכן שעות הלילה נאכפות וההגנה מדווחת כלא מאומתת</string>
+    <string name="system_policy_schedule_inexact">התראות מדויקות אינן מותרות ל־⁦Device Guard⁩, ולכן חלון עלול להתחיל או להסתיים באיחור של עד עשר דקות. לתזמון מדויק, אפשרו ל־⁦Device Guard⁩ את ההרשאה „שעונים מעוררים ותזכורות” בהגדרות ⁦Android⁩.</string>
+    <string name="system_policy_schedule_confirm_enable_title">להפעיל שעות לילה ושעות עבודה?</string>
+    <string name="system_policy_schedule_confirm_enable_body">אם חלון כבר בתוקף, יישומים שאינם בקבוצה הזמינה תמיד יושעו עכשיו, ושוב בתחילת כל חלון.</string>
+    <string name="system_policy_schedule_confirm_disable_title">לכבות את שעות הלילה ושעות העבודה?</string>
+    <string name="system_policy_schedule_confirm_disable_body">יישומים שלוח הזמנים השעה ישוחררו עכשיו, ואף חלון לא יגביל את המכשיר עד שלוח הזמנים יופעל שוב. השינוי נרשם ביומן הביקורת.</string>
+    <string name="system_policy_schedule_not_saved">לא ניתן היה לשמור את השינוי בלוח הזמנים. לוח הזמנים הקודם נשאר בתוקף.</string>
+
     <string name="audit_play_compatibility_changed">תאימות ל-Google Play שונתה: %1$s</string>
     <string name="audit_system_policy_unverified">מדיניות מערכת לא אומתה: %1$s</string>
     <string name="audit_system_policy_changed">בקרת מדיניות מערכת שונתה: %1$s</string>
