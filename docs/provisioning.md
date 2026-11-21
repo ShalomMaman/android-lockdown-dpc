@@ -420,6 +420,10 @@ cannot be configured as the home filter's VPN.
   Android refuses that too, the app stays launchable and every pass reports
   `CONTAINMENT_REFUSED` for it (audited when the set of such apps changes).
   Remove the app's administrator access in Android Settings.
+- Removing an approval, or clearing all approvals, first hides (or suspends)
+  the affected apps, Chrome included, and only then saves the removal. If
+  Android refuses, the removal is still saved, the console reports it, and
+  every pass keeps trying. Pausing protection lifts such a suspension too.
 
 - Web content that another app renders itself (its own WebView or in-app
   browser) does not follow Chrome's policies; it is filtered only at the

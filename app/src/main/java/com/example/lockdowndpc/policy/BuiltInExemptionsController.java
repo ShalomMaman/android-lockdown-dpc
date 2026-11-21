@@ -44,7 +44,15 @@ public final class BuiltInExemptionsController {
          * Not approved: the application is an active device administrator, which
          * Android would refuse to hide again. Nothing was saved.
          */
-        ACTIVE_ADMIN_REFUSED
+        ACTIVE_ADMIN_REFUSED,
+        /** Not approved: Android's list of device administrators could not be read. Nothing was saved. */
+        ADMINS_UNREADABLE,
+        /**
+         * The removal was stored and a pass ran, but Android refused to hide or
+         * suspend a revoked application before the removal was saved; passes
+         * keep trying and report {@code CONTAINMENT_REFUSED}.
+         */
+        CONTAINMENT_REFUSED
     }
 
     public record Outcome(Status status, LockdownPolicyController.PolicyResult result) {}
@@ -77,6 +85,14 @@ public final class BuiltInExemptionsController {
 
         /** Packages with an active device-administrator component; {@code null} when unreadable. */
         Set<String> activeAdminPackages();
+
+        /**
+         * Hides (or, when Android refuses, suspends) what a change revokes,
+         * before the change is saved.
+         *
+         * @return whether Android confirmed every revoked application contained
+         */
+        boolean containRevoked(BuiltInBlockExemptions.Revocation revocation);
 
         LockdownPolicyController.PolicyResult applyPass();
     }
@@ -158,6 +174,11 @@ public final class BuiltInExemptionsController {
             }
 
             @Override
+            public boolean containRevoked(BuiltInBlockExemptions.Revocation revocation) {
+                return LockdownPolicyController.containRevoked(context, revocation);
+            }
+
+            @Override
             public LockdownPolicyController.PolicyResult applyPass() {
                 return LockdownPolicyController.apply(context);
             }
@@ -216,7 +237,10 @@ public final class BuiltInExemptionsController {
             // Android refuses to hide an active device administrator, so such an
             // approval could not be taken back; it is never granted.
             Set<String> activeAdmins = sink.activeAdminPackages();
-            if (activeAdmins == null || granted.stream().anyMatch(activeAdmins::contains)) {
+            if (activeAdmins == null) {
+                return new Outcome(Status.ADMINS_UNREADABLE, null);
+            }
+            if (granted.stream().anyMatch(activeAdmins::contains)) {
                 return new Outcome(Status.ACTIVE_ADMIN_REFUSED, null);
             }
         }
@@ -224,7 +248,8 @@ public final class BuiltInExemptionsController {
             // The lock covers the approval from before it exists; no lock, no save.
             return new Outcome(Status.NOT_SAVED, null);
         }
-        return commit(before.auditText(), after, sessionUnlocked, trigger, sink);
+        return commit(before.auditText(), BuiltInBlockExemptions.revoked(before, after),
+                after, sessionUnlocked, trigger, sink);
     }
 
     static Outcome clear(boolean sessionUnlocked, Sink sink) {
@@ -235,17 +260,27 @@ public final class BuiltInExemptionsController {
             throw new SecurityException("An unlocked administrator session is required");
         }
         // The prior state is logged as it was read: "unreadable" when it was.
-        return commit(sink.record().auditText(), BuiltInBlockExemptions.Settings.NONE,
-                true, "clear-approvals", sink);
+        // An unreadable record enforces nothing, so there is nothing to contain.
+        BuiltInBlockExemptions.Record record = sink.record();
+        return commit(record.auditText(),
+                BuiltInBlockExemptions.revoked(record.enforced(), BuiltInBlockExemptions.Settings.NONE),
+                BuiltInBlockExemptions.Settings.NONE, true, "clear-approvals", sink);
     }
 
     private static Outcome commit(
             String beforeText,
+            BuiltInBlockExemptions.Revocation revocation,
             BuiltInBlockExemptions.Settings after,
             boolean sessionUnlocked,
             String trigger,
             Sink sink
     ) {
+        // Tighten before revoking: what the change takes away is contained
+        // first, so no interruption can leave a revoked app launchable without
+        // its saved approval. A refusal still saves the removal — the next pass
+        // keeps trying — and is reported. If the save then fails, the next pass
+        // re-applies the approval that is still stored.
+        boolean contained = revocation.isEmpty() || sink.containRevoked(revocation);
         if (!sink.write(after)) {
             // The record was restored; a lock set for this failed grant must not
             // outlive it, so the lock is brought in line with what is stored.
@@ -256,11 +291,15 @@ public final class BuiltInExemptionsController {
                 ? "administrator " + trigger
                 : trigger + " (no administrator session)";
         String entry = "builtin-exemption: " + actor + ": "
-                + beforeText + " -> " + after.auditText();
+                + beforeText + " -> " + after.auditText()
+                + (contained ? "" : " (" + SocialContainment.REFUSED_ERROR + ")");
         boolean audited = sink.audit(entry);
         // The decision is already persisted, so the pass runs either way: a
         // stored removal must take effect even if its audit line did not.
         LockdownPolicyController.PolicyResult result = sink.applyPass();
+        if (!contained) {
+            return new Outcome(Status.CONTAINMENT_REFUSED, result);
+        }
         return new Outcome(audited ? Status.APPLIED : Status.AUDIT_NOT_SAVED, result);
     }
 }

@@ -315,7 +315,10 @@ public final class LockdownPolicyController {
                 boolean hidden = dpm.isApplicationHidden(admin, packageName);
                 if (hidden || (!updated && wasHidden)) {
                     errors.add("package-release-unverified:" + packageName);
-                } else {
+                } else if (!BuiltInBlockExemptions.isExemptableSocial(packageName)
+                        || releaseSuspension(dpm, admin, packageName, errors)) {
+                    // A catalogue social app may also carry a containment-fallback
+                    // suspension; it is visible only once that is lifted too.
                     visibleCount++;
                 }
             } catch (IllegalArgumentException ignored) {
@@ -1252,6 +1255,7 @@ public final class LockdownPolicyController {
     ) {
         PackageManager pm = context.getPackageManager();
         LinkedHashSet<String> refused = new LinkedHashSet<>();
+        LinkedHashSet<String> confirmed = new LinkedHashSet<>();
         for (String packageName : BuiltInBlockExemptions.EXEMPTABLE_SOCIAL) {
             if (social.visible(packageName) || !isInstalled(pm, packageName)) {
                 continue;
@@ -1261,29 +1265,75 @@ public final class LockdownPolicyController {
             if (result == SocialContainment.Result.REFUSED) {
                 refused.add(packageName);
                 Log.e(TAG, SocialContainment.REFUSED_ERROR + ": " + packageName + " stays launchable");
+            } else {
+                confirmed.add(packageName);
             }
         }
-        String auditLine = BuiltInBlockExemptionsStore.containmentOutcome(context, refused);
-        if (auditLine != null) {
-            AuditLog.append(context, auditLine);
+        for (String line : BuiltInBlockExemptionsStore.containmentOutcome(
+                context, refused, confirmed, social.verified())) {
+            AuditLog.append(context, line);
         }
     }
 
-    /** Lifts a suspension from an approved package; a failure is a pass error. */
-    private static void releaseSuspension(
+    /**
+     * Contains what an approval change revokes, before the change is saved:
+     * each removed social package hidden (or suspended when Android refuses),
+     * and Chrome the same way when its exemption is in scope.
+     *
+     * @return whether Android confirmed everything contained
+     */
+    static synchronized boolean containRevoked(Context context, BuiltInBlockExemptions.Revocation revocation) {
+        DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+        if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
+            // Without Device Owner nothing was ever shown by an exemption.
+            return true;
+        }
+        ComponentName admin = LockdownAdminReceiver.componentName(context);
+        PackageManager pm = context.getPackageManager();
+        boolean contained = true;
+        ArrayList<String> refusals = new ArrayList<>();
+        for (String packageName : revocation.social()) {
+            if (isInstalled(pm, packageName) && SocialContainment.contain(packageName,
+                    new AndroidSocialGateway(dpm, admin, packageName), refusals)
+                    == SocialContainment.Result.REFUSED) {
+                contained = false;
+            }
+        }
+        if (revocation.chrome()
+                && ChromeFilterExemption.inScope(Build.VERSION.SDK_INT, resolveWebViewProvider(pm))
+                && !ChromeFilterExemption.containForRevocation(new AndroidChromeGateway(context, dpm, admin))) {
+            refusals.add(SocialContainment.REFUSED_ERROR + ":" + BuiltInBlockExemptions.CHROME);
+            contained = false;
+        }
+        if (!contained) {
+            Log.e(TAG, "Revocation containment refused: " + summarizeErrors(refusals));
+        }
+        return contained;
+    }
+
+    /**
+     * Lifts a containment-fallback suspension from a social package; a failure
+     * is a pass error.
+     *
+     * @return whether Android reports the package not suspended
+     */
+    private static boolean releaseSuspension(
             DevicePolicyManager dpm, ComponentName admin, String packageName, List<String> errors) {
         try {
             if (!dpm.isPackageSuspended(admin, packageName)) {
-                return;
+                return true;
             }
             String[] failed = dpm.setPackagesSuspended(admin, new String[]{packageName}, false);
             if ((failed != null && failed.length > 0) || dpm.isPackageSuspended(admin, packageName)) {
                 errors.add("social-release-unverified:" + packageName);
+                return false;
             }
+            return true;
         } catch (PackageManager.NameNotFoundException ignored) {
-            // Not installed.
+            return true;
         } catch (RuntimeException exception) {
             errors.add("social-release:" + packageName + ":" + exception.getClass().getSimpleName());
+            return false;
         }
     }
 

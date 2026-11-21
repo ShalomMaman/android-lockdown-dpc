@@ -366,6 +366,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     context.getString(R.string.system_policy_exempt_change_refused),
                     isError = true,
                 )
+                changed?.status() == BuiltInExemptionsController.Status.CONTAINMENT_REFUSED -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_containment_refused),
+                    isError = true,
+                )
                 result != null && !result.applied() -> UiMessage(
                     context.getString(
                         if (changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED) {
@@ -392,6 +396,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 )
                 changed?.status() == BuiltInExemptionsController.Status.ACTIVE_ADMIN_REFUSED -> UiMessage(
                     context.getString(R.string.system_policy_exempt_active_admin_refused),
+                    isError = true,
+                )
+                changed?.status() == BuiltInExemptionsController.Status.ADMINS_UNREADABLE -> UiMessage(
+                    context.getString(R.string.system_policy_exempt_admins_unreadable),
                     isError = true,
                 )
                 result == null -> null

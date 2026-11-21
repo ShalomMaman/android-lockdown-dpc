@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.policy;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -496,6 +497,21 @@ public final class BuiltInBlockExemptions {
                 && socialVisible(packageName, settings, currentSignerSha256);
     }
 
+    /** What a change takes away: approved social packages it removes, and Chrome. */
+    public record Revocation(Set<String> social, boolean chrome) {
+        public static final Revocation NONE = new Revocation(Set.of(), false);
+
+        public boolean isEmpty() {
+            return social.isEmpty() && !chrome;
+        }
+    }
+
+    public static Revocation revoked(Settings before, Settings after) {
+        java.util.LinkedHashSet<String> removed = new java.util.LinkedHashSet<>(before.socialPins().keySet());
+        removed.removeAll(after.socialPins().keySet());
+        return new Revocation(Collections.unmodifiableSet(removed), before.chrome() && !after.chrome());
+    }
+
     /**
      * The packages a change newly approves or re-pins: those an approval save
      * must check against the active device administrators.
@@ -511,21 +527,57 @@ public final class BuiltInBlockExemptions {
     }
 
     /**
-     * The audit line for social packages Android refused to contain, only when
-     * that set changes, so a lasting refusal cannot crowd out administrator
-     * entries; the pass result reports it every time.
+     * The audit lines for social packages Android refused to contain, only for
+     * a change, so a lasting refusal cannot crowd out administrator entries;
+     * the pass result reports it every time.
      *
-     * @return the line to audit, or {@code null} when nothing changed
+     * <ul>
+     *   <li>Newly refused: {@code CONTAINMENT_REFUSED}.</li>
+     *   <li>Previously refused, and Android confirmed a hide or suspension this
+     *       pass: containment restored.</li>
+     *   <li>Previously refused, but this pass did not contain it — approved and
+     *       verified again, or no longer installed — containment is no longer
+     *       needed; nothing was confirmed, so nothing is called restored.</li>
+     * </ul>
+     *
+     * @param refusedNow   packages Android refused to hide and to suspend on this pass
+     * @param confirmedNow packages Android confirmed hidden or suspended on this pass
+     * @param approvedNow  packages this pass allows (approved, signer verified)
      */
-    public static String containmentAuditTransition(Set<String> wasRefused, Set<String> refusedNow) {
-        if (wasRefused.equals(refusedNow)) {
-            return null;
+    public static List<String> containmentAuditTransition(
+            Set<String> wasRefused, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
+        ArrayList<String> lines = new ArrayList<>();
+        java.util.TreeSet<String> newlyRefused = new java.util.TreeSet<>(refusedNow);
+        newlyRefused.removeAll(wasRefused);
+        java.util.TreeSet<String> restored = new java.util.TreeSet<>();
+        java.util.TreeSet<String> approvedAgain = new java.util.TreeSet<>();
+        java.util.TreeSet<String> gone = new java.util.TreeSet<>();
+        for (String packageName : wasRefused) {
+            if (refusedNow.contains(packageName)) {
+                continue;
+            }
+            if (confirmedNow.contains(packageName)) {
+                restored.add(packageName);
+            } else if (approvedNow.contains(packageName)) {
+                approvedAgain.add(packageName);
+            } else {
+                gone.add(packageName);
+            }
         }
-        if (refusedNow.isEmpty()) {
-            return "builtin-exemption: social containment restored";
+        if (!newlyRefused.isEmpty()) {
+            lines.add("builtin-exemption: " + SocialContainment.REFUSED_ERROR + ": " + String.join(",", newlyRefused));
         }
-        return "builtin-exemption: " + SocialContainment.REFUSED_ERROR + ": "
-                + String.join(",", new java.util.TreeSet<>(refusedNow));
+        if (!restored.isEmpty()) {
+            lines.add("builtin-exemption: social containment restored: " + String.join(",", restored));
+        }
+        if (!approvedAgain.isEmpty()) {
+            lines.add("builtin-exemption: approved again; containment no longer needed: "
+                    + String.join(",", approvedAgain));
+        }
+        if (!gone.isEmpty()) {
+            lines.add("builtin-exemption: not installed; containment no longer needed: " + String.join(",", gone));
+        }
+        return lines;
     }
 
     public static boolean chromeSignerVerified(String currentSignerSha256) {

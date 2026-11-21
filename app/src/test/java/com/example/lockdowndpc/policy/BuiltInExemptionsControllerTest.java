@@ -30,6 +30,7 @@ public final class BuiltInExemptionsControllerTest {
         boolean lockSucceeds = true;
         BuiltInBlockExemptions.Record record = BuiltInBlockExemptions.Record.EMPTY;
         Set<String> activeAdmins = Set.of();
+        boolean containSucceeds = true;
         Settings written;
 
         @Override
@@ -84,6 +85,12 @@ public final class BuiltInExemptionsControllerTest {
         }
 
         @Override
+        public boolean containRevoked(BuiltInBlockExemptions.Revocation revocation) {
+            calls.add("contain:" + new java.util.TreeSet<>(revocation.social()) + ",chrome=" + revocation.chrome());
+            return containSucceeds;
+        }
+
+        @Override
         public LockdownPolicyController.PolicyResult applyPass() {
             calls.add("pass");
             return new LockdownPolicyController.PolicyResult(true, true, 0, 0, List.of());
@@ -120,10 +127,10 @@ public final class BuiltInExemptionsControllerTest {
     }
 
     @Test
-    public void unreadableAdministratorsRefuseAnApproval() {
+    public void unreadableAdministratorsRefuseAnApprovalWithTheirOwnStatus() {
         RecordingSink sink = new RecordingSink();
         sink.activeAdmins = null;
-        assertEquals(Status.ACTIVE_ADMIN_REFUSED, BuiltInExemptionsController.change(
+        assertEquals(Status.ADMINS_UNREADABLE, BuiltInExemptionsController.change(
                 Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), true,
                 "approve:com.whatsapp", sink).status());
         assertTrue(sink.calls.isEmpty());
@@ -136,6 +143,64 @@ public final class BuiltInExemptionsControllerTest {
         assertEquals(Status.APPLIED, BuiltInExemptionsController.change(
                 Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER), true,
                 "approve:com.whatsapp", sink).status());
+    }
+
+    // --- Tighten before revoking --------------------------------------------------------
+
+    @Test
+    public void aRevocationContainsTheAppBeforeTheRemovalIsCommitted() {
+        RecordingSink sink = new RecordingSink();
+        Settings before = Settings.NONE.withSocial("org.telegram.messenger", SIGNER).withSocial("com.whatsapp", SIGNER);
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                before, settings -> settings.withoutSocial("org.telegram.messenger"), false,
+                "remove:org.telegram.messenger", sink);
+        assertEquals(Status.APPLIED, outcome.status());
+        assertEquals("contain:[org.telegram.messenger],chrome=false", sink.calls.get(0));
+        assertEquals("write", sink.calls.get(1));
+        assertTrue(sink.calls.get(2).startsWith("audit:"));
+        assertEquals("pass", sink.calls.get(3));
+    }
+
+    @Test
+    public void aRefusedContainmentStillCommitsTheRemovalAndIsReported() {
+        RecordingSink sink = new RecordingSink();
+        sink.containSucceeds = false;
+        Settings before = Settings.NONE.withSocial("org.telegram.messenger", SIGNER);
+        BuiltInExemptionsController.Outcome outcome = BuiltInExemptionsController.change(
+                before, settings -> settings.withoutSocial("org.telegram.messenger"), false,
+                "remove:org.telegram.messenger", sink);
+        assertEquals(Status.CONTAINMENT_REFUSED, outcome.status());
+        assertEquals(Settings.NONE, sink.written);
+        assertTrue(sink.calls.get(2), sink.calls.get(2).endsWith("(CONTAINMENT_REFUSED)"));
+        assertEquals("the next pass keeps trying", "pass", sink.calls.get(3));
+    }
+
+    @Test
+    public void aFailedCommitAfterContainmentSavesNothingElse() {
+        RecordingSink sink = new RecordingSink();
+        sink.writeSucceeds = false;
+        Settings before = Settings.NONE.withChrome(true);
+        assertEquals(Status.NOT_SAVED, BuiltInExemptionsController.change(
+                before, settings -> settings.withChrome(false), true, "remove:chrome", sink).status());
+        assertEquals(List.of("contain:[],chrome=true", "write", "lock-reconcile"), sink.calls);
+    }
+
+    @Test
+    public void clearingContainsEveryApprovedAppFirst() {
+        RecordingSink sink = new RecordingSink();
+        sink.record = new BuiltInBlockExemptions.Record(
+                Settings.NONE.withChrome(true).withSocial("com.whatsapp", SIGNER));
+        assertEquals(Status.APPLIED, BuiltInExemptionsController.clear(true, sink).status());
+        assertEquals("contain:[com.whatsapp],chrome=true", sink.calls.get(0));
+        assertEquals("write", sink.calls.get(1));
+    }
+
+    @Test
+    public void aGrantContainsNothing() {
+        RecordingSink sink = new RecordingSink();
+        BuiltInExemptionsController.change(Settings.NONE, settings -> settings.withSocial("com.whatsapp", SIGNER),
+                true, "approve:com.whatsapp", sink);
+        assertFalse(sink.calls.stream().anyMatch(call -> call.startsWith("contain:")));
     }
 
     @Test
@@ -166,12 +231,13 @@ public final class BuiltInExemptionsControllerTest {
                 before, settings -> settings.withChrome(false), false, "remove:chrome", sink);
         assertEquals(Status.APPLIED, outcome.status());
         assertEquals(before.withChrome(false), sink.written);
-        assertEquals(3, sink.calls.size());
-        assertEquals("write", sink.calls.get(0));
-        assertTrue(sink.calls.get(1).startsWith(
+        assertEquals(4, sink.calls.size());
+        assertEquals("contained before the removal is saved", "contain:[],chrome=true", sink.calls.get(0));
+        assertEquals("write", sink.calls.get(1));
+        assertTrue(sink.calls.get(2).startsWith(
                 "audit:builtin-exemption: remove:chrome (no administrator session): "));
-        assertTrue(sink.calls.get(1).contains("chrome=true") && sink.calls.get(1).contains("-> chrome=false"));
-        assertEquals("pass", sink.calls.get(2));
+        assertTrue(sink.calls.get(2).contains("chrome=true") && sink.calls.get(2).contains("-> chrome=false"));
+        assertEquals("pass", sink.calls.get(3));
     }
 
     @Test
@@ -211,7 +277,7 @@ public final class BuiltInExemptionsControllerTest {
         RecordingSink sink = new RecordingSink();
         BuiltInExemptionsController.change(Settings.NONE.withChrome(true),
                 settings -> settings.withChrome(false), false, "remove:chrome", sink);
-        String audit = sink.calls.get(1);
+        String audit = sink.calls.get(2);
         assertTrue(audit, audit.contains("remove:chrome (no administrator session)"));
         assertFalse(audit, audit.contains("administrator remove"));
     }

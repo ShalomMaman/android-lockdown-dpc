@@ -343,6 +343,32 @@ public final class ChromeFilterExemption {
         return null;
     }
 
+    /**
+     * Contains Chrome before its approval is revoked: hidden, or suspended when
+     * Android refuses the hide.
+     *
+     * @return whether Android confirmed Chrome contained (or it is not installed)
+     */
+    public static boolean containForRevocation(Gateway gateway) {
+        try {
+            if (!gateway.installed()) {
+                return true;
+            }
+            gateway.setHidden(true);
+            if (gateway.hidden()) {
+                return true;
+            }
+        } catch (RuntimeException ignored) {
+            // Refused; fall back to suspension.
+        }
+        try {
+            gateway.setSuspended(true);
+            return gateway.suspended();
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
     private static Containment hide(Gateway gateway, List<String> errors) {
         try {
             gateway.setHidden(true);

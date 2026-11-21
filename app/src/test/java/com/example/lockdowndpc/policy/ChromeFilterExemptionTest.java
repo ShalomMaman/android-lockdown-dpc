@@ -121,6 +121,32 @@ public final class ChromeFilterExemptionTest {
     // --- Scope ----------------------------------------------------------------------
 
     @Test
+    public void aRevocationHidesChromeOrSuspendsItWhenTheHideIsRefused() {
+        FakeChrome chrome = new FakeChrome();
+        assertTrue(ChromeFilterExemption.containForRevocation(chrome));
+        assertEquals(List.of("hide=true"), chrome.calls);
+
+        FakeChrome refusing = new FakeChrome();
+        refusing.refuseHide = true;
+        assertTrue(ChromeFilterExemption.containForRevocation(refusing));
+        assertEquals(List.of("hide=true", "suspend=true"), refusing.calls);
+
+        FakeChrome missing = new FakeChrome();
+        missing.installed = false;
+        assertTrue(ChromeFilterExemption.containForRevocation(missing));
+        assertTrue(missing.calls.isEmpty());
+
+        FakeChrome stuck = new FakeChrome() {
+            @Override
+            public void setSuspended(boolean value) {
+                throw new IllegalStateException("suspension-refused");
+            }
+        };
+        stuck.refuseHide = true;
+        assertFalse(ChromeFilterExemption.containForRevocation(stuck));
+    }
+
+    @Test
     public void onlyAReleaseThatUnhidChromeMayContinueThePass() {
         assertTrue(ChromeFilterExemption.unhidByRelease(Observed.HIDDEN, Decision.SHOWN));
         assertFalse("already visible: no package event",

@@ -329,18 +329,21 @@ public final class BuiltInBlockExemptionsStore {
 
     /**
      * Records the social packages Android refused to contain on this pass and
-     * returns the audit line for a change in that set, or {@code null}.
+     * returns the audit lines for a change, see
+     * {@link BuiltInBlockExemptions#containmentAuditTransition}.
      */
-    static String containmentOutcome(Context context, Set<String> refusedNow) {
-        return containmentOutcome(readbackPrefs(context), refusedNow);
+    static java.util.List<String> containmentOutcome(
+            Context context, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
+        return containmentOutcome(readbackPrefs(context), refusedNow, confirmedNow, approvedNow);
     }
 
-    static String containmentOutcome(SharedPreferences prefs, Set<String> refusedNow) {
+    static java.util.List<String> containmentOutcome(
+            SharedPreferences prefs, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
         Set<String> was = new LinkedHashSet<>(prefs.getStringSet(KEY_CONTAINMENT_REFUSED, Set.of()));
         if (!was.equals(refusedNow)) {
             prefs.edit().putStringSet(KEY_CONTAINMENT_REFUSED, new LinkedHashSet<>(refusedNow)).commit();
         }
-        return BuiltInBlockExemptions.containmentAuditTransition(was, refusedNow);
+        return BuiltInBlockExemptions.containmentAuditTransition(was, refusedNow, confirmedNow, approvedNow);
     }
 
     /** The last read-back, or {@code null} when none was recorded. */

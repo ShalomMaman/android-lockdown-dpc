@@ -290,15 +290,43 @@ public final class BuiltInBlockExemptionsTest {
     }
 
     @Test
-    public void refusedContainmentIsAuditedOnlyWhenTheSetChanges() {
-        assertNull(BuiltInBlockExemptions.containmentAuditTransition(Set.of(), Set.of()));
-        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
-                BuiltInBlockExemptions.containmentAuditTransition(Set.of(), Set.of(TELEGRAM)));
-        assertNull(BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of(TELEGRAM)));
-        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + WHATSAPP + "," + TELEGRAM,
-                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of(TELEGRAM, WHATSAPP)));
-        assertEquals("builtin-exemption: social containment restored",
-                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), Set.of()));
+    public void refusedContainmentIsAuditedOnlyWhenItChanges() {
+        Set<String> none = Set.of();
+        assertEquals(List.of(), BuiltInBlockExemptions.containmentAuditTransition(none, none, Set.of(TELEGRAM), none));
+        assertEquals(List.of("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM),
+                BuiltInBlockExemptions.containmentAuditTransition(none, Set.of(TELEGRAM), none, none));
+        assertEquals("still refused", List.of(), BuiltInBlockExemptions.containmentAuditTransition(
+                Set.of(TELEGRAM), Set.of(TELEGRAM), none, none));
+        assertEquals(List.of("builtin-exemption: CONTAINMENT_REFUSED: " + WHATSAPP),
+                BuiltInBlockExemptions.containmentAuditTransition(
+                        Set.of(TELEGRAM), Set.of(TELEGRAM, WHATSAPP), none, none));
+    }
+
+    @Test
+    public void restoredIsClaimedOnlyWhenAndroidConfirmedTheContainment() {
+        Set<String> none = Set.of();
+        assertEquals(List.of("builtin-exemption: social containment restored: " + TELEGRAM),
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), none, Set.of(TELEGRAM), none));
+        assertEquals("eligible again, nothing confirmed",
+                List.of("builtin-exemption: approved again; containment no longer needed: " + TELEGRAM),
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), none, none, Set.of(TELEGRAM)));
+        assertEquals(List.of("builtin-exemption: not installed; containment no longer needed: " + TELEGRAM),
+                BuiltInBlockExemptions.containmentAuditTransition(Set.of(TELEGRAM), none, none, none));
+    }
+
+    @Test
+    public void aRevocationIsWhatAChangeTakesAway() {
+        Settings before = Settings.NONE.withChrome(true).withSocial(TELEGRAM, SIGNER_A).withSocial(WHATSAPP, SIGNER_A);
+        BuiltInBlockExemptions.Revocation removal = BuiltInBlockExemptions.revoked(before, before.withoutSocial(TELEGRAM));
+        assertEquals(Set.of(TELEGRAM), removal.social());
+        assertFalse(removal.chrome());
+        BuiltInBlockExemptions.Revocation clear = BuiltInBlockExemptions.revoked(before, Settings.NONE);
+        assertEquals(Set.of(TELEGRAM, WHATSAPP), clear.social());
+        assertTrue(clear.chrome());
+        assertTrue("a grant takes nothing away",
+                BuiltInBlockExemptions.revoked(Settings.NONE, before).isEmpty());
+        assertTrue("re-pinning keeps the package approved",
+                BuiltInBlockExemptions.revoked(before, before.withSocial(TELEGRAM, "bb".repeat(32))).isEmpty());
     }
 
     @Test

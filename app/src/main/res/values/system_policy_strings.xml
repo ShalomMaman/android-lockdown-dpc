@@ -172,6 +172,8 @@
     <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
     <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
     <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Device Guard block it again. Remove its administrator access in Android Settings first.</string>
+    <string name="system_policy_exempt_admins_unreadable">The app was not approved: Device Guard could not check the device administrators. Try again.</string>
+    <string name="system_policy_exempt_containment_refused">The approval was removed, but Android refused to block the app, so it can still be opened. Device Guard keeps trying on every check. If the app is a device administrator, remove that access in Android Settings.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
     <string name="system_policy_exempt_chrome_reason_error">The last check failed</string>

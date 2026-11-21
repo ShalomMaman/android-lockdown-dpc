@@ -161,12 +161,20 @@ public final class BuiltInBlockExemptionsStoreTest {
     @Test
     public void refusedContainmentIsAuditedThroughTheStoreOnlyOnAChange() {
         SharedPreferences prefs = androidLikePreferences(new HashMap<>(), new boolean[]{false});
-        assertEquals(null, BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of()));
-        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
-                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM)));
-        assertEquals(null, BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM)));
-        assertEquals("builtin-exemption: social containment restored",
-                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of()));
+        Set<String> none = Set.of();
+        assertEquals(java.util.List.of(), BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none));
+        assertEquals(java.util.List.of("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM),
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM), none, none));
+        assertEquals(java.util.List.of(),
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM), none, none));
+        // Approved again: the refused set clears without a "restored" claim.
+        assertEquals(java.util.List.of("builtin-exemption: approved again; containment no longer needed: " + TELEGRAM),
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, Set.of(TELEGRAM)));
+        assertEquals(java.util.List.of(), BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none));
+        // Refused again, then Android confirms a suspension: restored.
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, Set.of(TELEGRAM), none, none);
+        assertEquals(java.util.List.of("builtin-exemption: social containment restored: " + TELEGRAM),
+                BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, Set.of(TELEGRAM), none));
     }
 
     // --- Routing warning audit -----------------------------------------------------------

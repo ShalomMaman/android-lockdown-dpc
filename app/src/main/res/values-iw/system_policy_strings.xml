@@ -164,6 +164,8 @@
     <string name="system_policy_exempt_clear_approvals">ניקוי כל האישורים</string>
     <string name="system_policy_exempt_paused_refused">יש לחדש את ההגנה כדי לשנות אישורים.</string>
     <string name="system_policy_exempt_active_admin_refused">האפליקציה לא אושרה: היא מנהלת מכשיר פעילה, ו-Android לא יאפשר לחסום אותה שוב. יש להסיר קודם את הרשאת הניהול שלה בהגדרות.</string>
+    <string name="system_policy_exempt_admins_unreadable">האפליקציה לא אושרה: Device Guard לא הצליח לבדוק את מנהלי המכשיר. יש לנסות שוב.</string>
+    <string name="system_policy_exempt_containment_refused">האישור הוסר, אבל Android סירב לחסום את האפליקציה, ולכן עדיין אפשר לפתוח אותה. Device Guard ממשיך לנסות בכל בדיקה. אם האפליקציה מנהלת מכשיר, יש להסיר את הרשאת הניהול שלה בהגדרות.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">השינוי נשמר, אך המדיניות לא אומתה (%1$s), ולא ניתן היה לרשום את השינוי ביומן הביקורת.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">לא ניתן היה לקרוא את חתימת Chrome</string>
     <string name="system_policy_exempt_chrome_reason_error">הבדיקה האחרונה נכשלה</string>
