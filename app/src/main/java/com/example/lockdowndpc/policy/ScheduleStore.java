@@ -19,9 +19,10 @@ import java.util.function.BooleanSupplier;
  * suspended) live in separate preference files, so rolling back a failed
  * configuration write can never rewrite the enforcement record. Every write to
  * either is a synchronous {@code commit()} rolled back on failure; the rules
- * are in {@link SchedulePersistence}. The catch-up hint lives in a third file
- * of its own and is written best effort, so it can never make a failed write
- * to the other two durable.
+ * are in {@link SchedulePersistence}, including the markers that tell a damaged
+ * file from an empty one. The catch-up hint lives in a third file of its own
+ * and is written best effort, so it can never make a failed write to the other
+ * two durable.
  */
 public final class ScheduleStore {
     private static final String PREFS = "schedule";
@@ -30,12 +31,16 @@ public final class ScheduleStore {
     private static final String KEY_JSON = "schedule_json";
     private static final String KEY_ALLOWLIST = "allowlist";
     private static final String KEY_FORMAT = "format";
+    private static final String KEY_STATE = "state";
     private static final String KEY_OWNED = "suspended_by_schedule";
-    private static final String KEY_RECONCILED_AT = "reconciled_at";
+    private static final String KEY_OWNED_FORMAT = "format";
+    private static final String KEY_VERIFIED_AT = "verified_at";
+    private static final String KEY_FAILED_ATTEMPTS = "failed_attempts";
+    private static final String KEY_RETRY_AT = "retry_at";
 
     private ScheduleStore() {}
 
-    /** What a policy pass enforces; an unreadable record is the fail-closed night window. */
+    /** What a policy pass enforces; an unreadable record is the fail-closed default schedule. */
     public static ScheduleSettings read(Context context) {
         return SchedulePersistence.read(backing(context), deviceZone());
     }
@@ -45,52 +50,56 @@ public final class ScheduleStore {
         return SchedulePersistence.write(backing(context), settings);
     }
 
-    /** Packages the schedule suspended. A wrong-typed record throws. */
+    /**
+     * Packages the schedule suspended.
+     *
+     * @throws IllegalStateException when the record is unreadable, including a
+     *         damaged file Android loaded as empty; ownership is then unknown
+     */
     static Set<String> readOwned(Context context) {
-        return SchedulePersistence.decodeOwned(state(context).getString(KEY_OWNED, null));
+        return SchedulePersistence.readOwned(ownedBacking(context));
     }
 
     static boolean saveOwned(Context context, Set<String> owned) {
-        SharedPreferences prefs = state(context);
-        return SchedulePersistence.saveOwned(new SchedulePersistence.OwnedBacking() {
-            @Override
-            public String snapshot() {
-                return prefs.getString(KEY_OWNED, null);
-            }
-
-            @Override
-            public boolean commit(String value) {
-                SharedPreferences.Editor editor = prefs.edit();
-                if (value == null) {
-                    editor.remove(KEY_OWNED);
-                } else {
-                    editor.putString(KEY_OWNED, value);
-                }
-                return editor.commit();
-            }
-        }, owned);
+        return SchedulePersistence.saveOwned(ownedBacking(context), owned);
     }
 
     /**
-     * When the schedule step of a policy pass last ran, as a hint for the
-     * catch-up check only ({@link ScheduleCatchUp}); never a statement about
-     * which window is in force. {@code null} when unknown or unreadable.
+     * The catch-up hint ({@link ScheduleCatchUp}); never a statement about
+     * which window is in force. {@link ScheduleCatchUp.State#UNKNOWN} when
+     * absent or unreadable, which asks for a pass.
      */
-    static Instant lastReconciled(Context context) {
+    static ScheduleCatchUp.State catchUpState(Context context) {
         try {
             SharedPreferences prefs = catchUp(context);
-            return prefs.contains(KEY_RECONCILED_AT)
-                    ? Instant.ofEpochMilli(prefs.getLong(KEY_RECONCILED_AT, 0L))
+            Instant verified = prefs.contains(KEY_VERIFIED_AT)
+                    ? Instant.ofEpochMilli(prefs.getLong(KEY_VERIFIED_AT, 0L))
                     : null;
+            Instant retryAt = prefs.contains(KEY_RETRY_AT)
+                    ? Instant.ofEpochMilli(prefs.getLong(KEY_RETRY_AT, 0L))
+                    : null;
+            return new ScheduleCatchUp.State(verified, prefs.getInt(KEY_FAILED_ATTEMPTS, 0), retryAt);
         } catch (RuntimeException exception) {
-            return null;
+            return ScheduleCatchUp.State.UNKNOWN;
         }
     }
 
-    /** Records the instant the pass evaluated the schedule at; best effort. */
-    static void markReconciled(Context context, Instant at) {
+    /** Records the catch-up hint; best effort. */
+    static void saveCatchUpState(Context context, ScheduleCatchUp.State state) {
         try {
-            catchUp(context).edit().putLong(KEY_RECONCILED_AT, at.toEpochMilli()).apply();
+            SharedPreferences.Editor editor = catchUp(context).edit();
+            if (state.lastVerified() == null) {
+                editor.remove(KEY_VERIFIED_AT);
+            } else {
+                editor.putLong(KEY_VERIFIED_AT, state.lastVerified().toEpochMilli());
+            }
+            editor.putInt(KEY_FAILED_ATTEMPTS, state.failedAttempts());
+            if (state.retryAt() == null) {
+                editor.remove(KEY_RETRY_AT);
+            } else {
+                editor.putLong(KEY_RETRY_AT, state.retryAt().toEpochMilli());
+            }
+            editor.apply();
         } catch (RuntimeException ignored) {
             // A missing hint only makes the next catch-up check run a pass.
         }
@@ -118,7 +127,8 @@ public final class ScheduleStore {
                 return new String[]{
                         prefs.getString(KEY_JSON, null),
                         prefs.getString(KEY_ALLOWLIST, null),
-                        prefs.getString(KEY_FORMAT, null)};
+                        prefs.getString(KEY_FORMAT, null),
+                        prefs.getString(KEY_STATE, null)};
             }
 
             @Override
@@ -128,28 +138,84 @@ public final class ScheduleStore {
 
             @Override
             public boolean commit(String json, String allowlist) {
-                return edit(prefs, json, allowlist, SchedulePersistence.FORMAT).commit();
+                return edit(prefs, json, allowlist, SchedulePersistence.FORMAT,
+                        json == null ? SchedulePersistence.STATE_OFF : SchedulePersistence.STATE_SCHEDULE).commit();
             }
 
             @Override
             public void restore(String[] snapshot, boolean fileExisted) {
-                edit(prefs, snapshot[0], snapshot[1], snapshot[2]).commit();
-                if (!fileExisted && snapshot[0] == null && snapshot[1] == null && snapshot[2] == null) {
-                    // Delete the file itself, not through deleteSharedPreferences,
-                    // so the cached preference instance stays the only one.
-                    file.delete();
-                    new File(file.getPath() + ".bak").delete();
+                edit(prefs, snapshot[0], snapshot[1], snapshot[2], snapshot[3]).commit();
+                if (!fileExisted && allNull(snapshot)) {
+                    deleteFile(file);
                 }
             }
         };
     }
 
+    private static SchedulePersistence.OwnedBacking ownedBacking(Context context) {
+        Context app = context.getApplicationContext() == null ? context : context.getApplicationContext();
+        SharedPreferences prefs = app.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
+        File file = new File(app.getApplicationInfo().dataDir, "shared_prefs/" + STATE_PREFS + ".xml");
+        BooleanSupplier fileExists = BuiltInBlockExemptionsStore.fileOrBackupExists(file);
+        return new SchedulePersistence.OwnedBacking() {
+            @Override
+            public String[] snapshot() {
+                // getString throws ClassCastException for a wrong-typed value,
+                // which SchedulePersistence reads as unreadable.
+                return new String[]{prefs.getString(KEY_OWNED, null), prefs.getString(KEY_OWNED_FORMAT, null)};
+            }
+
+            @Override
+            public boolean fileExists() {
+                return fileExists.getAsBoolean();
+            }
+
+            @Override
+            public boolean commit(String packages) {
+                SharedPreferences.Editor editor = prefs.edit();
+                editor.putString(KEY_OWNED, packages);
+                editor.putString(KEY_OWNED_FORMAT, SchedulePersistence.FORMAT);
+                return editor.commit();
+            }
+
+            @Override
+            public void restore(String[] snapshot, boolean fileExisted) {
+                SharedPreferences.Editor editor = prefs.edit();
+                put(editor, KEY_OWNED, snapshot[0]);
+                put(editor, KEY_OWNED_FORMAT, snapshot[1]);
+                editor.commit();
+                if (!fileExisted && allNull(snapshot)) {
+                    deleteFile(file);
+                }
+            }
+        };
+    }
+
+    private static boolean allNull(String[] values) {
+        for (String value : values) {
+            if (value != null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Deletes the file itself, not through deleteSharedPreferences, so the
+     * cached preference instance stays the only one.
+     */
+    private static void deleteFile(File file) {
+        file.delete();
+        new File(file.getPath() + ".bak").delete();
+    }
+
     private static SharedPreferences.Editor edit(
-            SharedPreferences prefs, String json, String allowlist, String format) {
+            SharedPreferences prefs, String json, String allowlist, String format, String state) {
         SharedPreferences.Editor editor = prefs.edit();
         put(editor, KEY_JSON, json);
         put(editor, KEY_ALLOWLIST, allowlist);
         put(editor, KEY_FORMAT, format);
+        put(editor, KEY_STATE, state);
         return editor;
     }
 
@@ -159,10 +225,6 @@ public final class ScheduleStore {
         } else {
             editor.putString(key, value);
         }
-    }
-
-    private static SharedPreferences state(Context context) {
-        return context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE);
     }
 
     private static SharedPreferences catchUp(Context context) {

@@ -8,8 +8,12 @@ package com.example.lockdowndpc.policy;
  * restrict the device further. A loosening needs a live administrator session,
  * checked here at the moment of the write rather than when a screen opened, and
  * every saved change is audited. A record that is currently unreadable is
- * compared as the fail-closed night window it is enforced as, and any readable
- * replacement that is not looser than that may repair it.
+ * compared as the fail-closed default schedule it is enforced as, and any
+ * readable replacement that is not looser than that may repair it.
+ *
+ * <p>An enforcing schedule is saved only while the device clock is locked
+ * ({@link ScheduleClock}): on Android 8.0/8.1 that means Android confirmed
+ * automatic date and time is required. Otherwise nothing is written.
  */
 public final class ScheduleChange {
 
@@ -21,7 +25,9 @@ public final class ScheduleChange {
         /** A loosening without a live administrator session; nothing written. */
         SESSION_REQUIRED,
         /** The store did not persist it; the previous record stays in force. */
-        NOT_SAVED
+        NOT_SAVED,
+        /** An enforcing schedule while the device clock is not locked; nothing written. */
+        CLOCK_UNLOCKED
     }
 
     public record Outcome(Status status, SchedulePolicy.Change change) {}
@@ -32,6 +38,12 @@ public final class ScheduleChange {
 
         /** Re-read at the write boundary. */
         boolean sessionUnlocked();
+
+        /**
+         * Locks the device clock where that is needed and reports whether it
+         * is locked; asked only before an enforcing schedule is written.
+         */
+        boolean clockLocked();
 
         /** @return whether the settings were persisted */
         boolean commit(ScheduleSettings settings);
@@ -52,6 +64,9 @@ public final class ScheduleChange {
         }
         if (change == SchedulePolicy.Change.LOOSEN && !gateway.sessionUnlocked()) {
             return new Outcome(Status.SESSION_REQUIRED, change);
+        }
+        if (next.enforcing() && !gateway.clockLocked()) {
+            return new Outcome(Status.CLOCK_UNLOCKED, change);
         }
         if (!gateway.commit(next)) {
             return new Outcome(Status.NOT_SAVED, change);

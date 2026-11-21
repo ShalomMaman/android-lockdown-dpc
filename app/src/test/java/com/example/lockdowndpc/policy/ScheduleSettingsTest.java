@@ -50,7 +50,7 @@ public final class ScheduleSettingsTest {
     }
 
     @Test
-    public void anythingStoredThatDoesNotParseIsTheFailClosedNightWindow() {
+    public void anythingStoredThatDoesNotParseIsTheFailClosedDefaultSchedule() {
         List<String[]> corrupt = new ArrayList<>();
         corrupt.add(new String[]{"{not json", null});
         corrupt.add(new String[]{"", null});
@@ -66,10 +66,9 @@ public final class ScheduleSettingsTest {
                     settings.unreadable());
             assertTrue(settings.enforcing());
             assertEquals(Set.of(), settings.allowlist());
-            assertNull("no work window when unreadable", settings.schedule().work());
-            assertEquals(ScheduleSettings.NIGHT_START, settings.schedule().night().start());
-            assertEquals(ScheduleSettings.NIGHT_END, settings.schedule().night().end());
-            assertEquals(UTC, settings.schedule().timezone());
+            // Both default windows: a damaged record never restricts less.
+            assertEquals(ScheduleSettings.defaultSchedule(UTC, true), settings.schedule());
+            assertTrue(settings.bothWindowsEnabled());
         }
     }
 
@@ -122,9 +121,14 @@ public final class ScheduleSettingsTest {
         // Moving the zone is a loosening.
         assertEquals(Change.LOOSEN, ScheduleSettings.classify(on(Set.of()),
                 new ScheduleSettings(ScheduleSettings.defaultSchedule(UTC, true), Set.of(), false)));
-        // The fail-closed night window to the full defaults is a tightening.
-        assertEquals(Change.TIGHTEN, ScheduleSettings.classify(
+        // The fail-closed record is the full defaults: repairing it with them
+        // changes nothing, and turning it off is a loosening.
+        assertEquals(Change.UNCHANGED, ScheduleSettings.classify(
                 ScheduleSettings.failClosed(JERUSALEM), on(Set.of())));
+        assertEquals(Change.LOOSEN, ScheduleSettings.classify(
+                ScheduleSettings.failClosed(JERUSALEM), off()));
+        assertEquals(Change.LOOSEN, ScheduleSettings.classify(
+                ScheduleSettings.failClosed(JERUSALEM), on(Set.of("com.example.a"))));
     }
 
     @Test

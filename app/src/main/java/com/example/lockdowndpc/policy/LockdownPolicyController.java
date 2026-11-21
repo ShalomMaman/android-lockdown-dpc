@@ -163,23 +163,25 @@ public final class LockdownPolicyController {
         }
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
         // Night and work hours are evaluated once per pass from the clock; no
-        // stored "in window" flag is trusted. While a window is active, the
-        // packages the schedule suspended are not released by the exemption
-        // step below, so an approved app is not briefly unsuspended each pass.
+        // stored "in window" flag is trusted.
         ScheduleSettings schedule = ScheduleStore.read(context);
         Instant scheduleNow = Instant.now();
-        Set<String> scheduleHolding = ScheduleSuspension.holding(
-                schedule, scheduleNow, readScheduleOwnedQuietly(context));
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
         // routeLinks below re-registers the managed-filtering ones.
         KioskController.reconcile(context, dpm, admin, errors);
+        // Settled once, after kiosk (whose target stays available) and before
+        // every package step: while a window is active, no step lifts a
+        // suspension on a window target, whatever the ownership record says.
+        ScheduleDeviceGateway scheduleGateway = new ScheduleDeviceGateway(context, dpm, admin);
+        ScheduleSuspension.Hold scheduleHold = scheduleHold(context, dpm, schedule, scheduleNow,
+                trustedManagement, enforcedFilter, playCompatibility, social, scheduleGateway);
         if (!chrome.shown()) {
             routeLinks(context, dpm, admin, false, errors);
         }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
-                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHolding, errors);
+                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, enforcedFilter, errors);
         // The credentials lock first, so the CA check that follows cannot be
         // undone from Android Settings before Chrome is released on it.
@@ -194,11 +196,11 @@ public final class LockdownPolicyController {
             filterConfirmed = filterConfirmed && lockConfirmed;
             boolean routedAway = !chrome.shown();
             BuiltInBlockExemptions.Observed beforeRelease = ChromeFilterExemption.observe(chromeGateway);
-            // A suspension an active window holds is never lifted here, the
-            // same guard the social exemption step uses: the schedule step
-            // below may fail, and must not find Chrome already released.
+            // Inside a window that targets Chrome, the release suspends it
+            // before showing it and never lifts that suspension: the schedule
+            // step below may fail, and must not find Chrome launchable.
             chrome = ChromeFilterExemption.release(chrome, filterConfirmed,
-                    scheduleHolding.contains(BuiltInBlockExemptions.CHROME), chromeGateway, errors);
+                    scheduleHold.targets(BuiltInBlockExemptions.CHROME), chromeGateway, errors);
             if (ChromeFilterExemption.unhidByRelease(beforeRelease, chrome)) {
                 // This pass changed Chrome from hidden to visible on confirmed
                 // evidence; the package event Android sends for that may
@@ -229,10 +231,11 @@ public final class LockdownPolicyController {
         }
         // Last of the package steps, so a package an earlier step made visible
         // in this pass (Chrome's release included) is covered by an active window.
-        reconcileSchedule(context, dpm, admin, schedule, scheduleNow, trustedManagement,
-                enforcedFilter, playCompatibility, social, chromeInScope, chrome, errors);
+        reconcileSchedule(context, dpm, admin, schedule, scheduleNow, scheduleHold, scheduleGateway,
+                chromeInScope, chrome, social, errors);
         recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
         boolean verified = errors.isEmpty();
+        recordScheduleOutcome(context, schedule, scheduleNow, verified);
         if (verified) {
             if (enforcedFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
                 clearMaintenanceWindow(context, "home-filter");
@@ -899,7 +902,7 @@ public final class LockdownPolicyController {
             HomeFilterPolicy.Settings homeFilter,
             SocialPass social,
             boolean chromeInScope,
-            Set<String> scheduleHolding,
+            ScheduleSuspension.Hold scheduleHold,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -1107,11 +1110,12 @@ public final class LockdownPolicyController {
                 errors.add("package-policy:" + packageName + ":"
                         + exception.getClass().getSimpleName());
             }
-            if (exempted && !scheduleHolding.contains(packageName)) {
+            if (exempted && !scheduleHold.targets(packageName)) {
                 // An approved package may have been suspended by an earlier
-                // containment fallback; an approval releases that too. A
-                // suspension an active night or work window holds is not this
-                // step's to lift.
+                // containment fallback; an approval releases that too. Inside
+                // a window that targets it, the suspension stays: the schedule
+                // leaves it unrecorded, and the first pass after the window
+                // lifts it here.
                 releaseSuspension(dpm, admin, packageName, errors);
             }
         }
@@ -1131,51 +1135,34 @@ public final class LockdownPolicyController {
         return KioskAppCatalog.isProtectedFromKiosk(requested, social.verified()) ? "" : requested;
     }
 
-    /** The recorded schedule suspensions; an unreadable record holds nothing back. */
-    private static Set<String> readScheduleOwnedQuietly(Context context) {
-        try {
-            return ScheduleStore.readOwned(context);
-        } catch (RuntimeException exception) {
-            return Set.of();
-        }
-    }
-
     /**
-     * Night and work hours: suspends every launchable app outside the
-     * always-available core while a window is active, releases what the
-     * schedule suspended once none is, and re-arms the boundary alarm.
+     * Who an active night or work window targets in this pass, settled before
+     * any package step runs so every step follows the same rule: none lifts a
+     * suspension on a window target. Outside a window nothing is computed.
      *
-     * <p>The schedule is the only step that suspends for a time window, and it
-     * suspends only: hiding stays with {@link #applyPackagePolicy}. A package
-     * another step of this pass contains (a catalogue social app without a
-     * verified exemption, Chrome while its exemption is not shown, a
-     * browser-backed WebView provider) is never released by the schedule.
-     * A device that never stored a schedule makes no suspension call here.
+     * <p>The always-available core: this app, the trusted management and VPN
+     * apps, essential system packages, the default dialer, SMS, clock and
+     * launcher, the active input method, active device administrators, the
+     * WebView provider, the kiosk target and, while they apply, the maintenance
+     * stores and the Play Store kept for compatibility. When the role apps
+     * cannot be read, the core is partial: more packages count as targets,
+     * which only ever keeps a suspension in place, and {@code gateway} is told
+     * so the schedule suspends nothing new against a partial core.
      */
-    private static void reconcileSchedule(
+    private static ScheduleSuspension.Hold scheduleHold(
             Context context,
             DevicePolicyManager dpm,
-            ComponentName admin,
             ScheduleSettings schedule,
             Instant now,
             Set<String> trustedManagement,
             HomeFilterPolicy.Settings homeFilter,
             PlayStoreCompatibility.State playCompatibility,
             SocialPass social,
-            boolean chromeInScope,
-            ChromeFilterExemption.Decision chrome,
-            List<String> errors
+            ScheduleDeviceGateway gateway
     ) {
-        ScheduleDeviceGateway gateway = new ScheduleDeviceGateway(context, dpm, admin);
-        if (!schedule.enforcing() && readScheduleOwnedQuietly(context).isEmpty()) {
-            // The default: nothing stored, nothing held. Only clear an alarm a
-            // disabled schedule may have left behind.
-            ScheduleSuspension.reconcile(schedule, now,
-                    new ScheduleSuspension.Device(Set.of(), Set.of()), gateway, errors);
-            ScheduleStore.markReconciled(context, now);
-            return;
+        if (ScheduleSuspension.activeWindows(schedule, now).isEmpty()) {
+            return ScheduleSuspension.Hold.NONE;
         }
-        PackageManager pm = context.getPackageManager();
         LinkedHashSet<String> core = new LinkedHashSet<>();
         core.add(context.getPackageName());
         core.addAll(trustedManagement);
@@ -1186,9 +1173,8 @@ public final class LockdownPolicyController {
         try {
             core.addAll(ScheduleDeviceGateway.roleApps(context));
         } catch (RuntimeException exception) {
-            // Without the role apps the always-available core is unknown, and
-            // suspending against a partial core could strand the dialer or
-            // the home screen. Treated as a failed inventory: nothing new is
+            // Suspending against a partial core could strand the dialer or the
+            // home screen: treated as a failed inventory. Nothing new is
             // suspended, nothing held is released, and the pass reports it.
             gateway.inventoryFailed(exception);
         }
@@ -1198,7 +1184,7 @@ public final class LockdownPolicyController {
         if (activeAdmins != null) {
             core.addAll(activeAdmins);
         }
-        String webViewProvider = resolveWebViewProvider(pm);
+        String webViewProvider = resolveWebViewProvider(context.getPackageManager());
         if (webViewProvider != null) {
             core.add(webViewProvider);
         }
@@ -1216,25 +1202,86 @@ public final class LockdownPolicyController {
             // Kept for the apps that depend on it; installation stays blocked.
             core.add(PlayStoreCompatibility.PLAY_STORE_PACKAGE);
         }
+        return ScheduleSuspension.Hold.of(schedule, now, core);
+    }
 
+    /**
+     * Night and work hours: suspends every window target while a window is
+     * active, releases what the schedule suspended once none is, and re-arms
+     * the boundary alarm.
+     *
+     * <p>The schedule is the only step that suspends for a time window, and it
+     * suspends only: hiding stays with {@link #applyPackagePolicy}. A package
+     * another step of this pass contains (a catalogue social app without a
+     * verified exemption, Chrome while its exemption is not shown, a
+     * browser-backed WebView provider) is never released by the schedule.
+     * A device that never stored a schedule makes no suspension call here.
+     */
+    private static void reconcileSchedule(
+            Context context,
+            DevicePolicyManager dpm,
+            ComponentName admin,
+            ScheduleSettings schedule,
+            Instant now,
+            ScheduleSuspension.Hold hold,
+            ScheduleDeviceGateway gateway,
+            boolean chromeInScope,
+            ChromeFilterExemption.Decision chrome,
+            SocialPass social,
+            List<String> errors
+    ) {
+        if (schedule.enforcing() && !ScheduleClock.lock(context, dpm, admin)) {
+            // Android 8.0/8.1 only: the windows keep being enforced, but the
+            // pass is not verified while the clock can be changed.
+            errors.add(ScheduleClock.UNLOCKED_ERROR);
+        }
         LinkedHashSet<String> heldByOthers = new LinkedHashSet<>(BuiltInBlockExemptions.EXEMPTABLE_SOCIAL);
         heldByOthers.removeAll(social.verified());
         if (chromeInScope && !chrome.shown()) {
             heldByOthers.add(BuiltInBlockExemptions.CHROME);
         }
+        String webViewProvider = resolveWebViewProvider(context.getPackageManager());
         if (webViewProvider != null && LockdownPackages.ALWAYS_BLOCKED.contains(webViewProvider)) {
             heldByOthers.add(webViewProvider);
         }
         ScheduleSuspension.Result result = ScheduleSuspension.reconcile(schedule, now,
-                new ScheduleSuspension.Device(core, heldByOthers), gateway, errors);
-        // The instant this pass evaluated the schedule at, for the catch-up
-        // check only. Recorded once the step ran, even with errors, so a
-        // failing step is not re-run on every screen-on; a step that crashed
-        // records nothing and the next check asks for a pass again.
-        ScheduleStore.markReconciled(context, now);
+                new ScheduleSuspension.Device(hold.exempt(), heldByOthers), gateway, errors);
         if (!result.activeWindows().isEmpty()) {
             Log.i(TAG, "Schedule windows active: " + result.activeWindows()
                     + ", suspended=" + result.suspended().size());
+        }
+    }
+
+    /**
+     * Records the pass for the night and work hours catch-up: only a verified
+     * pass advances the instant a missed boundary is measured from. A failed
+     * pass with an enforcing schedule is retried by the sweep job with backoff.
+     */
+    private static void recordScheduleOutcome(
+            Context context, ScheduleSettings schedule, Instant now, boolean verified) {
+        if (verified) {
+            ScheduleCatchUp.State before = ScheduleStore.catchUpState(context);
+            ScheduleStore.saveCatchUpState(context, ScheduleCatchUp.afterVerified(now));
+            if (before.failedAttempts() > 0 || before.retryAt() != null) {
+                try {
+                    ScheduleAlarm.cancelRetry(context);
+                } catch (RuntimeException exception) {
+                    // A stale retry finds nothing due and finishes.
+                    Log.w(TAG, "Schedule retry not cancelled", exception);
+                }
+            }
+            return;
+        }
+        if (!schedule.enforcing()) {
+            return;
+        }
+        ScheduleCatchUp.State next = ScheduleCatchUp.afterFailed(ScheduleStore.catchUpState(context), now);
+        ScheduleStore.saveCatchUpState(context, next);
+        try {
+            ScheduleAlarm.scheduleRetry(context, ScheduleCatchUp.retryDelay(next.failedAttempts()));
+        } catch (RuntimeException exception) {
+            // The periodic sweep and the screen-on check still retry.
+            Log.e(TAG, "Schedule retry not scheduled", exception);
         }
     }
 

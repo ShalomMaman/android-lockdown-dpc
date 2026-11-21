@@ -4,13 +4,15 @@ import android.app.job.JobParameters;
 import android.app.job.JobService;
 
 /**
- * The periodic night and work hours sweep, armed only while a schedule is
- * enforcing and cancelled with the boundary alarm.
+ * The night and work hours sweep: the periodic job, armed only while a
+ * schedule is enforcing and cancelled with the boundary alarm, and the one-off
+ * retry after a pass that was not verified.
  *
  * <p>It carries no rules of its own: on the shared policy thread it runs
  * {@link ScheduleAlarm#catchUp}, which reads the stored schedule and queues a
- * full policy pass only when a boundary passed without one. A sweep that finds
- * nothing missed reads two preference files and finishes.
+ * full policy pass only when a boundary passed without a verified one and no
+ * retry backoff is pending. A run that finds nothing due reads two preference
+ * files and finishes. A queued pass that fails schedules the next retry itself.
  */
 public final class ScheduleSweepJobService extends JobService {
 
@@ -21,7 +23,8 @@ public final class ScheduleSweepJobService extends JobService {
             try {
                 // The job stays running until a queued pass ends, so Doze does
                 // not suspend the process between the check and the pass.
-                queued = ScheduleAlarm.catchUp(getApplicationContext(), "sweep",
+                String trigger = params.getJobId() == ScheduleAlarm.RETRY_JOB_ID ? "retry" : "sweep";
+                queued = ScheduleAlarm.catchUp(getApplicationContext(), trigger,
                         () -> jobFinished(params, false));
             } finally {
                 if (!queued) {

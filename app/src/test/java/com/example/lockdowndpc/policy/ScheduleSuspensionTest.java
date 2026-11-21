@@ -86,6 +86,8 @@ public final class ScheduleSuspensionTest {
         boolean inventoryThrows;
         boolean saveFails;
         boolean readThrows;
+        /** The ownership record is damaged until the next successful save. */
+        boolean ownedUnreadable;
 
         FakeGateway(AndroidState state) {
             this.state = state;
@@ -131,6 +133,9 @@ public final class ScheduleSuspensionTest {
 
         @Override
         public Set<String> owned() {
+            if (ownedUnreadable) {
+                throw new IllegalStateException("ownership-unmarked");
+            }
             return new TreeSet<>(state.owned);
         }
 
@@ -142,6 +147,7 @@ public final class ScheduleSuspensionTest {
             }
             state.owned.clear();
             state.owned.addAll(owned);
+            ownedUnreadable = false;
             return true;
         }
 
@@ -284,11 +290,19 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
-    public void holdingIsTheOwnedSetOnlyWhileAWindowIsActive() {
-        Set<String> owned = Set.of(GAME, SOCIAL);
-        assertEquals(owned, ScheduleSuspension.holding(enabled(), at(19, 23, 30), owned));
-        assertEquals(Set.of(), ScheduleSuspension.holding(enabled(), at(20, 7, 0), owned));
-        assertEquals(Set.of(), ScheduleSuspension.holding(ScheduleSettings.OFF, at(19, 23, 30), owned));
+    public void theHoldTargetsEveryPackageOutsideTheCoreAndAllowlistOnlyInsideAWindow() {
+        ScheduleSuspension.Hold night = ScheduleSuspension.Hold.of(enabled(Set.of(WORK_APP)), at(19, 23, 30), CORE);
+        assertTrue(night.windowActive());
+        assertTrue(night.targets(GAME));
+        assertTrue("a hidden or never-recorded app is a target too", night.targets(BuiltInBlockExemptions.CHROME));
+        assertFalse(night.targets(DIALER));
+        assertFalse(night.targets(WORK_APP));
+        assertFalse(ScheduleSuspension.Hold.of(enabled(), at(20, 7, 0), CORE).targets(GAME));
+        assertFalse(ScheduleSuspension.Hold.of(ScheduleSettings.OFF, at(19, 23, 30), CORE).targets(GAME));
+        assertFalse(ScheduleSuspension.Hold.NONE.targets(GAME));
+        // An unreadable record holds too: both default windows.
+        ScheduleSettings corrupt = ScheduleSettings.fromStored("{not json", null, JERUSALEM);
+        assertTrue(ScheduleSuspension.Hold.of(corrupt, at(19, 10, 0), CORE).targets(GAME));
     }
 
     // --------------------------------------------------------- read-back failures
@@ -374,7 +388,7 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
-    public void anUnreadableRecordEnforcesTheNightWindowAndFailsThePass() {
+    public void anUnreadableRecordEnforcesBothDefaultWindowsAndFailsThePass() {
         AndroidState state = new AndroidState();
         FakeGateway gateway = new FakeGateway(state);
         List<String> errors = new ArrayList<>();
@@ -383,10 +397,162 @@ public final class ScheduleSuspensionTest {
         assertEquals(List.of(ScheduleSettings.UNREADABLE_ERROR), errors);
         assertEquals(Set.of(SchedulePolicy.WINDOW_NIGHT), result.activeWindows());
         assertTrue(state.suspended.contains(GAME));
-        // No work window in the fail-closed record.
+        // Work hours too: a damaged record never restricts less than the default.
         errors.clear();
-        pass(corrupt, at(19, 10, 0), gateway, errors);
+        result = pass(corrupt, at(19, 10, 0), gateway, errors);
+        assertEquals(Set.of(SchedulePolicy.WINDOW_WORK), result.activeWindows());
+        assertTrue(state.suspended.contains(GAME));
+        // Between the windows it releases.
+        errors.clear();
+        pass(corrupt, at(19, 18, 0), gateway, errors);
         assertFalse(state.suspended.contains(GAME));
+    }
+
+    // ---------------------------------------------------- unreadable ownership
+
+    @Test
+    public void unknownOwnershipOutsideAWindowIsRecoveredFromTheReadBack() {
+        AndroidState state = new AndroidState();
+        state.suspended.add(SOCIAL); // the containment fallback
+        FakeGateway gateway = new FakeGateway(state);
+        ScheduleSuspension.Device contained = new ScheduleSuspension.Device(CORE, Set.of(SOCIAL));
+        ScheduleSuspension.reconcile(enabled(), at(19, 23, 30), contained, gateway, new ArrayList<>());
+        assertTrue(state.suspended.contains(GAME));
+        gateway.ownedUnreadable = true;
+        List<String> errors = new ArrayList<>();
+        ScheduleSuspension.reconcile(enabled(), at(20, 7, 0), contained, gateway, errors);
+        // Reported once, so the pass is retried and verified next time.
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException"), errors);
+        assertEquals("only what another step holds stays suspended", Set.of(SOCIAL), state.suspended);
+        assertFalse("the record is rewritten", gateway.ownedUnreadable);
+        assertEquals(Set.of(), state.owned);
+        assertTrue("the next boundary is still armed", state.alarm != null);
+        errors.clear();
+        ScheduleSuspension.reconcile(enabled(), at(20, 7, 5), contained, gateway, errors);
+        assertEquals(List.of(), errors);
+    }
+
+    @Test
+    public void aRecoveryReleaseAndroidIgnoresStaysRecorded() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
+        gateway.ownedUnreadable = true;
+        gateway.ignore.add(GAME);
+        List<String> errors = new ArrayList<>();
+        pass(enabled(), at(20, 7, 0), gateway, errors);
+        assertTrue(errors.contains(ScheduleSuspension.RELEASE_UNVERIFIED + ":" + GAME));
+        assertEquals(Set.of(GAME), state.owned);
+        assertEquals(Set.of(GAME), state.suspended);
+    }
+
+    @Test
+    public void unknownOwnershipOnADeviceWithTheScheduleOffIsRecoveredToo() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
+        gateway.ownedUnreadable = true;
+        List<String> errors = new ArrayList<>();
+        pass(disabled(), at(19, 23, 40), gateway, errors);
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException"), errors);
+        assertEquals(Set.of(), state.suspended);
+        assertFalse(gateway.ownedUnreadable);
+    }
+
+    @Test
+    public void unknownOwnershipOutsideAWindowWithoutAnInventoryReleasesNothing() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
+        Set<String> held = new TreeSet<>(state.suspended);
+        gateway.ownedUnreadable = true;
+        gateway.inventoryThrows = true;
+        List<String> errors = new ArrayList<>();
+        pass(enabled(), at(20, 7, 0), gateway, errors);
+        assertEquals(held, state.suspended);
+        assertTrue("the record is kept", gateway.ownedUnreadable);
+        assertTrue(errors.contains(ScheduleSuspension.INVENTORY_FAILED + ":IllegalStateException"));
+    }
+
+    @Test
+    public void unknownOwnershipInsideAWindowIsRewrittenFromTheReadBack() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
+        // A new app arrives and the record is damaged.
+        state.installed.add("com.example.newgame");
+        state.launchable.add("com.example.newgame");
+        gateway.ownedUnreadable = true;
+        List<String> errors = new ArrayList<>();
+        pass(enabled(), at(20, 1, 0), gateway, errors);
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException"), errors);
+        assertFalse(gateway.ownedUnreadable);
+        assertEquals(new TreeSet<>(Set.of(GAME, VIDEO, WORK_APP, SOCIAL, "com.example.newgame")), state.owned);
+        assertEquals(state.owned, state.suspended);
+        for (String call : gateway.suspensionCalls()) {
+            assertFalse(call, call.startsWith("release:"));
+        }
+        // Once readable again, the window's end releases everything.
+        errors.clear();
+        pass(enabled(), at(20, 7, 0), gateway, errors);
+        assertEquals(List.of(), errors);
+        assertEquals(Set.of(), state.suspended);
+    }
+
+    @Test
+    public void aRewriteNeverAdoptsWhatAnotherStepHolds() {
+        AndroidState state = new AndroidState();
+        state.suspended.add(SOCIAL); // the containment fallback
+        FakeGateway gateway = new FakeGateway(state);
+        gateway.ownedUnreadable = true;
+        ScheduleSuspension.Device contained = new ScheduleSuspension.Device(CORE, Set.of(SOCIAL));
+        List<String> errors = new ArrayList<>();
+        ScheduleSuspension.reconcile(enabled(), at(19, 23, 30), contained, gateway, errors);
+        assertFalse(state.owned.contains(SOCIAL));
+        assertTrue(state.owned.contains(GAME));
+        ScheduleSuspension.reconcile(enabled(), at(20, 7, 0), contained, gateway, errors);
+        assertEquals(Set.of(SOCIAL), state.suspended);
+    }
+
+    @Test
+    public void unknownOwnershipWithoutAnInventoryKeepsTheRecordAndSuspendsNothing() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        gateway.ownedUnreadable = true;
+        gateway.inventoryThrows = true;
+        List<String> errors = new ArrayList<>();
+        pass(enabled(), at(19, 23, 30), gateway, errors);
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException",
+                ScheduleSuspension.INVENTORY_FAILED + ":IllegalStateException"), errors);
+        assertTrue(gateway.ownedUnreadable);
+        assertEquals(List.of(), gateway.suspensionCalls());
+    }
+
+    @Test
+    public void unknownOwnershipThatCannotBeRewrittenSuspendsNothing() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        gateway.ownedUnreadable = true;
+        gateway.saveFails = true;
+        List<String> errors = new ArrayList<>();
+        pass(enabled(), at(19, 23, 30), gateway, errors);
+        assertTrue(errors.contains(ScheduleSuspension.OWNERSHIP_UNSAVED));
+        assertTrue(gateway.ownedUnreadable);
+        assertEquals(List.of(), gateway.suspensionCalls());
+    }
+
+    @Test
+    public void pauseWithUnknownOwnershipReleasesFromTheReadBackAndReportsIt() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        pass(enabled(), at(19, 23, 30), gateway, new ArrayList<>());
+        gateway.ownedUnreadable = true;
+        List<String> errors = new ArrayList<>();
+        ScheduleSuspension.releaseAll(gateway, errors);
+        assertEquals(List.of(ScheduleSuspension.OWNERSHIP_UNREADABLE + ":IllegalStateException"), errors);
+        assertEquals(Set.of(), state.suspended);
+        assertFalse(gateway.ownedUnreadable);
+        assertEquals(null, state.alarm);
     }
 
     // -------------------------------------------------- clock jumps and reboots

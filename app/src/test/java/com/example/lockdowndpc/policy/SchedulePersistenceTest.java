@@ -24,6 +24,7 @@ public final class SchedulePersistenceTest {
         String json;
         String allowlist;
         String format;
+        String state;
         boolean fileExists;
         boolean diskFails;
         boolean wrongType;
@@ -35,7 +36,7 @@ public final class SchedulePersistenceTest {
             if (wrongType) {
                 throw new ClassCastException("java.lang.Integer cannot be cast to java.lang.String");
             }
-            return new String[]{json, allowlist, format};
+            return new String[]{json, allowlist, format, state};
         }
 
         @Override
@@ -51,6 +52,7 @@ public final class SchedulePersistenceTest {
             this.json = json;
             this.allowlist = allowlist;
             this.format = SchedulePersistence.FORMAT;
+            this.state = json == null ? SchedulePersistence.STATE_OFF : SchedulePersistence.STATE_SCHEDULE;
             // A failed write can still leave a file behind.
             fileExists = true;
             return !diskFails;
@@ -62,7 +64,8 @@ public final class SchedulePersistenceTest {
             json = snapshot[0];
             allowlist = snapshot[1];
             format = snapshot[2];
-            if (!fileExisted && json == null && allowlist == null && format == null) {
+            state = snapshot[3];
+            if (!fileExisted && json == null && allowlist == null && format == null && state == null) {
                 fileExists = false;
             }
         }
@@ -72,6 +75,7 @@ public final class SchedulePersistenceTest {
             json = null;
             allowlist = null;
             format = null;
+            state = null;
             fileExists = true;
         }
     }
@@ -79,23 +83,48 @@ public final class SchedulePersistenceTest {
     /** The ownership record with Android commit semantics. */
     static final class OwnedLikeBacking implements SchedulePersistence.OwnedBacking {
         String value;
+        String format;
+        boolean fileExists;
         boolean diskFails;
         boolean wrongType;
         final List<String> commits = new ArrayList<>();
 
         @Override
-        public String snapshot() {
+        public String[] snapshot() {
             if (wrongType) {
                 throw new ClassCastException("wrong type");
             }
-            return value;
+            return new String[]{value, format};
         }
 
         @Override
-        public boolean commit(String value) {
-            commits.add(String.valueOf(value));
-            this.value = value;
+        public boolean fileExists() {
+            return fileExists;
+        }
+
+        @Override
+        public boolean commit(String packages) {
+            commits.add(String.valueOf(packages));
+            value = packages;
+            format = SchedulePersistence.FORMAT;
+            fileExists = true;
             return !diskFails;
+        }
+
+        @Override
+        public void restore(String[] snapshot, boolean fileExisted) {
+            value = snapshot[0];
+            format = snapshot[1];
+            if (!fileExisted && value == null && format == null) {
+                fileExists = false;
+            }
+        }
+
+        /** Android loading a damaged file: the file is there, the map is empty. */
+        void loadDamaged() {
+            value = null;
+            format = null;
+            fileExists = true;
         }
     }
 
@@ -139,12 +168,12 @@ public final class SchedulePersistenceTest {
     }
 
     @Test
-    public void aWrongTypedRecordReadsAsTheFailClosedNightWindow() {
+    public void aWrongTypedRecordReadsAsTheFailClosedDefaultSchedule() {
         AndroidLikeBacking backing = new AndroidLikeBacking();
         backing.wrongType = true;
         ScheduleSettings settings = SchedulePersistence.read(backing, UTC);
         assertTrue(settings.unreadable());
-        assertTrue(settings.enforcing());
+        assertTrue(settings.bothWindowsEnabled());
     }
 
     @Test
@@ -164,12 +193,13 @@ public final class SchedulePersistenceTest {
     }
 
     @Test
-    public void ownedPackagesRoundTripAndDropMalformedEntries() {
-        assertEquals(Set.of(), SchedulePersistence.decodeOwned(null));
+    public void ownedPackagesRoundTripAndAnyMalformedEntryIsUnreadable() {
         assertEquals(Set.of(), SchedulePersistence.decodeOwned(""));
         Set<String> owned = Set.of("com.example.b", "com.example.a");
         assertEquals(owned, SchedulePersistence.decodeOwned(SchedulePersistence.encodeOwned(owned)));
-        assertEquals(Set.of("com.example.a"), SchedulePersistence.decodeOwned("com.example.a,,bad name"));
+        // A dropped entry would be a schedule suspension nobody releases.
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.decodeOwned("com.example.a,,bad name"));
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.decodeOwned("com.example.a,com.example.a"));
     }
 
     // --- The format marker ------------------------------------------------------------
@@ -181,13 +211,13 @@ public final class SchedulePersistenceTest {
     }
 
     @Test
-    public void aDamagedFileLoadedAsEmptyReadsAsTheFailClosedNightWindow() {
+    public void aDamagedFileLoadedAsEmptyReadsAsTheFailClosedDefaultSchedule() {
         AndroidLikeBacking backing = new AndroidLikeBacking();
         assertTrue(SchedulePersistence.write(backing, on(Set.of("com.example.a"))));
         backing.loadDamaged();
         ScheduleSettings settings = SchedulePersistence.read(backing, UTC);
         assertTrue(settings.unreadable());
-        assertTrue(settings.enforcing());
+        assertTrue("work hours too, not only night", settings.bothWindowsEnabled());
     }
 
     @Test
@@ -200,11 +230,33 @@ public final class SchedulePersistenceTest {
     }
 
     @Test
-    public void aWrittenOffRecordKeepsTheMarkerAndReadsAsOff() {
+    public void aWrittenOffRecordIsAnExplicitOffAndReadsAsOff() {
         AndroidLikeBacking backing = new AndroidLikeBacking();
         assertTrue(SchedulePersistence.write(backing, ScheduleSettings.OFF));
         assertEquals(SchedulePersistence.FORMAT, backing.format);
+        assertEquals(SchedulePersistence.STATE_OFF, backing.state);
         assertEquals(ScheduleSettings.OFF, SchedulePersistence.read(backing, UTC));
+    }
+
+    @Test
+    public void aMarkerWithoutAStatedContentIsUnreadableNotOff() {
+        AndroidLikeBacking backing = new AndroidLikeBacking();
+        backing.format = SchedulePersistence.FORMAT;
+        backing.fileExists = true;
+        assertTrue(SchedulePersistence.read(backing, UTC).unreadable());
+        backing.state = "something-else";
+        assertTrue(SchedulePersistence.read(backing, UTC).unreadable());
+    }
+
+    @Test
+    public void aStateItsValuesContradictIsUnreadable() {
+        AndroidLikeBacking backing = new AndroidLikeBacking();
+        assertTrue(SchedulePersistence.write(backing, on(Set.of())));
+        backing.state = SchedulePersistence.STATE_OFF;
+        assertTrue("off with a schedule stored", SchedulePersistence.read(backing, UTC).unreadable());
+        assertTrue(SchedulePersistence.write(backing, ScheduleSettings.OFF));
+        backing.state = SchedulePersistence.STATE_SCHEDULE;
+        assertTrue("a schedule state without one", SchedulePersistence.read(backing, UTC).unreadable());
     }
 
     @Test
@@ -252,6 +304,49 @@ public final class SchedulePersistenceTest {
     // --- The ownership record ---------------------------------------------------------
 
     @Test
+    public void aFreshDeviceOwnsNothing() {
+        assertEquals(Set.of(), SchedulePersistence.readOwned(new OwnedLikeBacking()));
+    }
+
+    @Test
+    public void ownershipRoundTripsAndAnEmptyRecordKeepsItsMarker() {
+        OwnedLikeBacking backing = new OwnedLikeBacking();
+        assertTrue(SchedulePersistence.saveOwned(backing, Set.of("com.example.a", "com.example.b")));
+        assertEquals(Set.of("com.example.a", "com.example.b"), SchedulePersistence.readOwned(backing));
+        assertTrue(SchedulePersistence.saveOwned(backing, Set.of()));
+        assertEquals("", backing.value);
+        assertEquals(SchedulePersistence.FORMAT, backing.format);
+        assertEquals(Set.of(), SchedulePersistence.readOwned(backing));
+    }
+
+    @Test
+    public void aDamagedOwnershipFileLoadedAsEmptyIsUnknownNotNone() {
+        OwnedLikeBacking backing = new OwnedLikeBacking();
+        assertTrue(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
+        backing.loadDamaged();
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(backing));
+    }
+
+    @Test
+    public void anUnreadableOwnershipRecordThrows() {
+        OwnedLikeBacking wrongType = new OwnedLikeBacking();
+        wrongType.wrongType = true;
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(wrongType));
+        OwnedLikeBacking unknownMarker = new OwnedLikeBacking();
+        unknownMarker.value = "com.example.a";
+        unknownMarker.format = "2";
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(unknownMarker));
+        OwnedLikeBacking markerOnly = new OwnedLikeBacking();
+        markerOnly.format = SchedulePersistence.FORMAT;
+        markerOnly.fileExists = true;
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(markerOnly));
+        OwnedLikeBacking malformed = new OwnedLikeBacking();
+        malformed.value = "com.example.a,bad name";
+        malformed.format = SchedulePersistence.FORMAT;
+        assertThrows(IllegalStateException.class, () -> SchedulePersistence.readOwned(malformed));
+    }
+
+    @Test
     public void aFailedOwnershipCommitRestoresThePreviousValueInMemory() {
         OwnedLikeBacking backing = new OwnedLikeBacking();
         assertTrue(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
@@ -260,14 +355,16 @@ public final class SchedulePersistenceTest {
         assertEquals("com.example.a", backing.value);
         assertFalse(SchedulePersistence.saveOwned(backing, Set.of()));
         assertEquals("com.example.a", backing.value);
+        assertEquals(Set.of("com.example.a"), SchedulePersistence.readOwned(backing));
     }
 
     @Test
-    public void anEmptyOwnershipRecordIsRemoved() {
+    public void aFailedFirstOwnershipSaveLeavesAFreshDeviceOwningNothing() {
         OwnedLikeBacking backing = new OwnedLikeBacking();
-        backing.value = "com.example.a";
-        assertTrue(SchedulePersistence.saveOwned(backing, Set.of()));
-        assertEquals(null, backing.value);
+        backing.diskFails = true;
+        assertFalse(SchedulePersistence.saveOwned(backing, Set.of("com.example.a")));
+        assertFalse("the file left by the failed write is removed", backing.fileExists);
+        assertEquals(Set.of(), SchedulePersistence.readOwned(backing));
     }
 
     @Test

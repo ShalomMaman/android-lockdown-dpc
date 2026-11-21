@@ -19,7 +19,9 @@ public final class ScheduleChangeTest {
         ScheduleSettings stored;
         boolean unlocked;
         boolean commitFails;
+        boolean clockLocked = true;
         int sessionChecks;
+        int clockChecks;
         final List<ScheduleSettings> commits = new ArrayList<>();
         final List<String> audit = new ArrayList<>();
 
@@ -36,6 +38,12 @@ public final class ScheduleChangeTest {
         public boolean sessionUnlocked() {
             sessionChecks++;
             return unlocked;
+        }
+
+        @Override
+        public boolean clockLocked() {
+            clockChecks++;
+            return clockLocked;
         }
 
         @Override
@@ -126,11 +134,13 @@ public final class ScheduleChangeTest {
     }
 
     @Test
-    public void anUnreadableRecordIsComparedAsTheNightWindowItEnforces() {
+    public void anUnreadableRecordIsComparedAsTheDefaultScheduleItEnforces() {
         FakeBoundary repair = new FakeBoundary(ScheduleSettings.failClosed(JERUSALEM));
         ScheduleChange.Outcome repaired = ScheduleChange.apply(on(Set.of()), repair);
         assertEquals(ScheduleChange.Status.SAVED, repaired.status());
-        assertEquals(SchedulePolicy.Change.TIGHTEN, repaired.change());
+        assertEquals(SchedulePolicy.Change.UNCHANGED, repaired.change());
+        assertEquals(0, repair.sessionChecks);
+        assertTrue(repair.audit.get(0), repair.audit.get(0).startsWith("schedule:repaired "));
         assertTrue(repair.audit.get(0), repair.audit.get(0).endsWith("(was unreadable)"));
 
         FakeBoundary turnOff = new FakeBoundary(ScheduleSettings.failClosed(JERUSALEM));
@@ -147,5 +157,35 @@ public final class ScheduleChangeTest {
         assertEquals(ScheduleChange.Status.UNCHANGED, outcome.status());
         assertTrue(boundary.commits.isEmpty());
         assertTrue(boundary.audit.isEmpty());
+    }
+
+    @Test
+    public void anEnforcingScheduleIsNotSavedWhileTheClockIsUnlocked() {
+        FakeBoundary boundary = new FakeBoundary(ScheduleSettings.OFF);
+        boundary.clockLocked = false;
+        ScheduleChange.Outcome outcome = ScheduleChange.apply(on(Set.of()), boundary);
+        assertEquals(ScheduleChange.Status.CLOCK_UNLOCKED, outcome.status());
+        assertEquals(1, boundary.clockChecks);
+        assertTrue(boundary.commits.isEmpty());
+        assertTrue(boundary.audit.isEmpty());
+        assertEquals(ScheduleSettings.OFF, boundary.stored);
+    }
+
+    @Test
+    public void turningTheScheduleOffNeedsNoClockLock() {
+        FakeBoundary boundary = new FakeBoundary(on(Set.of()));
+        boundary.unlocked = true;
+        boundary.clockLocked = false;
+        ScheduleChange.Outcome outcome = ScheduleChange.apply(off(), boundary);
+        assertEquals(ScheduleChange.Status.SAVED, outcome.status());
+        assertEquals(0, boundary.clockChecks);
+    }
+
+    @Test
+    public void aLooseningWithoutASessionIsRefusedBeforeTheClockIsTouched() {
+        FakeBoundary boundary = new FakeBoundary(on(Set.of()));
+        ScheduleChange.Outcome outcome = ScheduleChange.apply(on(Set.of("com.example.a")), boundary);
+        assertEquals(ScheduleChange.Status.SESSION_REQUIRED, outcome.status());
+        assertEquals(0, boundary.clockChecks);
     }
 }

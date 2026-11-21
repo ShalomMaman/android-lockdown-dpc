@@ -12,6 +12,7 @@ import android.util.Log;
 
 import com.example.lockdowndpc.receivers.PolicyRefreshReceiver;
 
+import java.time.Duration;
 import java.time.Instant;
 
 /**
@@ -28,30 +29,36 @@ import java.time.Instant;
  * administrator in Settings (Alarms and reminders). {@code USE_EXACT_ALARM} is
  * deliberately not declared: it is reserved for alarm clock and calendar apps.
  * So:
+ * Every boundary arms two alarms, and the first to fire runs the pass, which
+ * re-arms both:
  * <ul>
- *   <li>when exact alarms are permitted (always below API 31, otherwise when
- *       {@link AlarmManager#canScheduleExactAlarms()} is true) the boundary uses
- *       {@code setExactAndAllowWhileIdle}, which fires on time even in Doze;</li>
- *   <li>otherwise it arms two alarms for the same boundary, and the first to
- *       fire runs the pass, which re-arms both: {@code setWindow} with a
- *       {@link #INEXACT_WINDOW_MILLIS} window, which needs no permission and
- *       fires within ten minutes of the boundary while the device is awake but
- *       waits in Doze; and {@code setAndAllowWhileIdle}, which also needs no
- *       permission and does fire in Doze, but inexactly: Android may deliver a
- *       one-time inexact alarm up to an hour after its time, and while idle it
- *       allows only a limited number of such alarms per app (one boundary
- *       spends one). Plain {@code set} is not used: it waits in Doze too.</li>
+ *   <li>the primary: {@code setExactAndAllowWhileIdle} when exact alarms are
+ *       permitted (always below API 31, otherwise when
+ *       {@link AlarmManager#canScheduleExactAlarms()} is true), which fires on
+ *       time even in Doze; otherwise {@code setWindow}, which needs no
+ *       permission and fires shortly after the boundary while the device is
+ *       awake but waits in Doze;</li>
+ *   <li>the fallback, always: {@code setAndAllowWhileIdle}, which needs no
+ *       permission and fires in Doze, but inexactly. Android drops exact
+ *       alarms without any broadcast when the permission is revoked, so the
+ *       fallback is never cancelled for an exact primary: after a revocation
+ *       it is what is left. Plain {@code set} is not used: it waits in Doze.</li>
  * </ul>
- * Two cheap checks back the alarm up while a schedule is enforcing, because an
- * OEM may drop alarms: the screen turning on or the device being unlocked
- * (registered by the device admin service while the process runs), and a
- * periodic {@link ScheduleSweepJobService} job every fifteen minutes (JobScheduler's
- * minimum; Doze defers it to maintenance windows). Each asks for a full pass
- * only when {@link ScheduleCatchUp#due} finds a boundary passed since the last
- * pass. A permission revoked between the check and the call falls back to the
- * inexact alarms instead of crashing the pass. {@code RTC_WAKEUP} follows the
- * wall clock, and a clock or timezone change also triggers a full pass that
- * re-arms it.
+ *
+ * <p><b>Accepted limit.</b> Without exact alarm access Android decides when an
+ * inexact alarm fires: it may be minutes, or in deep Doze up to about an hour,
+ * after the boundary, and OEM battery managers may delay it further. The
+ * console states the exact-alarm state and points the administrator to Alarms
+ * and reminders; it promises no bound. Cheap checks narrow the gap while a
+ * schedule is enforcing: the screen turning on or the device being unlocked
+ * (registered by the device admin service while the process runs), a periodic
+ * {@link ScheduleSweepJobService} job every fifteen minutes (JobScheduler's
+ * minimum; Doze defers it to maintenance windows), and a one-off retry job
+ * with backoff after a pass that was not verified. Each asks for a full pass
+ * only when {@link ScheduleCatchUp#due} says so. A permission revoked between
+ * the check and the call falls back to {@code setWindow} instead of crashing
+ * the pass. {@code RTC_WAKEUP} follows the wall clock, and a clock or timezone
+ * change also triggers a full pass that re-arms it.
  */
 public final class ScheduleAlarm {
 
@@ -62,14 +69,15 @@ public final class ScheduleAlarm {
     private static final String TAG = "ScheduleAlarm";
     private static final int REQUEST_CODE = 0x5343;
     private static final int IDLE_REQUEST_CODE = 0x5344;
-    private static final int SWEEP_JOB_ID = 0x53434857;
+    static final int SWEEP_JOB_ID = 0x53434857;
+    static final int RETRY_JOB_ID = 0x53435259;
     private static final long SWEEP_PERIOD_MILLIS = 15L * 60L * 1_000L;
 
     private ScheduleAlarm() {}
 
     /**
      * Arms the boundary and the periodic sweep; throws when Android offers no
-     * alarm service or refuses the sweep job (after arming the alarm).
+     * alarm service or refuses the sweep job (after arming the alarms).
      */
     static void arm(Context context, Instant at) {
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
@@ -77,26 +85,25 @@ public final class ScheduleAlarm {
             throw new IllegalStateException("alarm-manager-unavailable");
         }
         long trigger = at.toEpochMilli();
+        // The fallback first, so it is armed whatever happens to the primary.
+        alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, operation(context, IDLE_REQUEST_CODE));
         boolean exact = false;
         if (exactPermitted(alarms)) {
             try {
                 alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, operation(context, REQUEST_CODE));
                 exact = true;
             } catch (SecurityException revoked) {
-                // Revoked since the check: fall through to the inexact alarms.
+                // Revoked since the check: the inexact primary below.
             }
         }
-        if (exact) {
-            cancelAlarm(context, alarms, IDLE_REQUEST_CODE);
-        } else {
+        if (!exact) {
             alarms.setWindow(AlarmManager.RTC_WAKEUP, trigger, INEXACT_WINDOW_MILLIS,
                     operation(context, REQUEST_CODE));
-            alarms.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, trigger, operation(context, IDLE_REQUEST_CODE));
         }
         armSweep(context);
     }
 
-    /** Cancels an armed boundary and the sweep; a device that never armed one is left untouched. */
+    /** Cancels an armed boundary, the sweep and a pending retry; a device that never armed one is left untouched. */
     static void cancel(Context context) {
         AlarmManager alarms = context.getSystemService(AlarmManager.class);
         cancelAlarm(context, alarms, REQUEST_CODE);
@@ -104,13 +111,43 @@ public final class ScheduleAlarm {
         JobScheduler scheduler = context.getSystemService(JobScheduler.class);
         if (scheduler != null) {
             scheduler.cancel(SWEEP_JOB_ID);
+            scheduler.cancel(RETRY_JOB_ID);
+        }
+    }
+
+    /**
+     * Schedules the one-off retry of a pass that was not verified, replacing a
+     * pending one. It runs {@link #catchUp} like the sweep, which respects the
+     * stored backoff. Throws when Android refuses the job.
+     */
+    static void scheduleRetry(Context context, Duration delay) {
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler == null) {
+            throw new IllegalStateException("schedule-retry-unavailable");
+        }
+        JobInfo retry = new JobInfo.Builder(RETRY_JOB_ID,
+                new ComponentName(context, ScheduleSweepJobService.class))
+                .setMinimumLatency(delay.toMillis())
+                .setPersisted(true)
+                .build();
+        if (scheduler.schedule(retry) != JobScheduler.RESULT_SUCCESS) {
+            throw new IllegalStateException("schedule-retry-refused");
+        }
+    }
+
+    /** Cancels a pending retry after a verified pass. */
+    static void cancelRetry(Context context) {
+        JobScheduler scheduler = context.getSystemService(JobScheduler.class);
+        if (scheduler != null) {
+            scheduler.cancel(RETRY_JOB_ID);
         }
     }
 
     /**
      * The catch-up check behind the boundary alarm, for the screen and unlock
-     * broadcasts and the sweep job. Run it on the policy thread: it reads the
-     * stored schedule and queues a full pass only when a boundary was missed.
+     * broadcasts and the sweep and retry jobs. Run it on the policy thread: it
+     * reads the stored schedule and queues a full pass only when a boundary
+     * passed without a verified pass and no retry backoff is pending.
      *
      * @param completion runs when a queued pass ends; never when nothing was queued
      * @return whether a pass was queued
@@ -119,7 +156,7 @@ public final class ScheduleAlarm {
         Context app = context.getApplicationContext();
         try {
             if (AllowedAppsStore.isProtectionEnabled(app)
-                    && ScheduleCatchUp.due(ScheduleStore.read(app), ScheduleStore.lastReconciled(app), Instant.now())) {
+                    && ScheduleCatchUp.due(ScheduleStore.read(app), ScheduleStore.catchUpState(app), Instant.now())) {
                 PolicyReconciliationCoordinator.reconcileAsync(app, "schedule-catch-up:" + trigger, completion);
                 return true;
             }

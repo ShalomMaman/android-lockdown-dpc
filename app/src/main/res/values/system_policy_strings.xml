@@ -200,8 +200,11 @@
     <string name="system_policy_schedule_body">When this is on, every app is suspended from 23:00 to 06:00 every night and from 09:00 to 17:00 Sunday to Thursday, except the phone, messages, clock, home screen and keyboard, essential system apps and the management apps. Suspended apps stay installed and keep their data, but they cannot be opened and their notifications are hidden. The hours follow the time zone this device had when the schedule was turned on. Pausing protection lifts these suspensions.</string>
     <string name="system_policy_schedule_state_off">Off</string>
     <string name="system_policy_schedule_state_on">On</string>
-    <string name="system_policy_schedule_state_unreadable">The stored schedule could not be read, so night hours are enforced and protection is reported as not verified</string>
-    <string name="system_policy_schedule_inexact">Exact alarms are not allowed for Device Guard, so a window may start or end up to ten minutes late. For exact timing, allow Alarms and reminders for Device Guard in Android Settings.</string>
+    <string name="system_policy_schedule_state_unreadable">The stored schedule could not be read, so night and work hours are both enforced and protection is reported as not verified</string>
+    <string name="system_policy_schedule_exact">Exact alarms are allowed for Device Guard, so each window is set to start and end at its time.</string>
+    <string name="system_policy_schedule_inexact">Exact alarms are not allowed for Device Guard. Android then decides when a window starts or ends, and on a device that is idle or saving battery that can be much later than the set time. To keep windows on time, allow Alarms and reminders for Device Guard in Android Settings.</string>
+    <string name="system_policy_schedule_clock_needed">On this Android version, night and work hours need automatic date and time, so the clock cannot be changed to end a window early. Turning this on asks Android to require automatic date and time; until Android confirms it, the schedule cannot be turned on.</string>
+    <string name="system_policy_schedule_clock_unconfirmed">Android did not confirm that automatic date and time is required, so night and work hours stay off.</string>
     <string name="system_policy_schedule_confirm_enable_title">Turn on night and work hours?</string>
     <string name="system_policy_schedule_confirm_enable_body">If a window is in progress, apps outside the always-available set are suspended now, and again at the start of every window.</string>
     <string name="system_policy_schedule_confirm_disable_title">Turn off night and work hours?</string>

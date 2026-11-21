@@ -1,7 +1,9 @@
 package com.example.lockdowndpc.policy;
 
+import android.app.admin.DevicePolicyManager;
 import android.content.Context;
 
+import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.security.AdminSession;
 
 import java.util.function.UnaryOperator;
@@ -46,6 +48,12 @@ public final class ScheduleController {
                 @Override
                 public boolean sessionUnlocked() {
                     return AdminSession.isUnlocked();
+                }
+
+                @Override
+                public boolean clockLocked() {
+                    DevicePolicyManager dpm = app.getSystemService(DevicePolicyManager.class);
+                    return dpm != null && ScheduleClock.lock(app, dpm, LockdownAdminReceiver.componentName(app));
                 }
 
                 @Override

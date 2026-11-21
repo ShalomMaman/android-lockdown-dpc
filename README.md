@@ -145,6 +145,7 @@ Follow the [production roadmap](docs/production-roadmap.md), [hardware validatio
 | Application policy and fail-closed reconciliation | [Package reconciliation](docs/package-reconciliation.md) |
 | Single-app and single-site containment | [Kiosk mode](docs/kiosk-mode.md) |
 | Applications that require the Google Play Store | [Play Store compatibility](docs/play-store-compatibility.md) |
+| Night and work hours suspension and its limits | [Night and work hours](docs/night-and-work-hours.md) |
 | Signed remote update design | [Secure updates](docs/secure-updates.md) |
 | One-approval pilot publication | [Protected pilot release automation](docs/pilot-release-automation.md) |
 | Physical-device acceptance procedure | [Hardware validation](docs/hardware-validation.md) |

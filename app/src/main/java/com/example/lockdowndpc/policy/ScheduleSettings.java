@@ -19,14 +19,15 @@ import java.util.regex.Pattern;
  *
  * <p>Three states matter:
  * <ul>
- *   <li>{@link #OFF}: nothing was ever stored. The schedule is not enforced and
- *       a policy pass makes no suspension call for it. This is the default, so
- *       an upgraded device behaves exactly as before.</li>
+ *   <li>{@link #OFF}: nothing was ever stored, or an explicit "off" record. The
+ *       schedule is not enforced and a policy pass makes no suspension call for
+ *       it. This is the default, so an upgraded device behaves exactly as
+ *       before.</li>
  *   <li>a readable record, whose windows may each be enabled or disabled;</li>
  *   <li>an unreadable record ({@link #failClosed}): something was stored but it
- *       does not parse. That is never read as "no schedule": the default night
- *       window is enforced, the allowlist is empty, and the policy pass reports
- *       {@link #UNREADABLE_ERROR} so it is never recorded as verified.</li>
+ *       does not parse. That is never read as "no schedule": both default
+ *       windows are enforced, the allowlist is empty, and the policy pass
+ *       reports {@link #UNREADABLE_ERROR} so it is never recorded as verified.</li>
  * </ul>
  *
  * @param schedule    the shared schedule, or {@code null} when none is stored
@@ -76,18 +77,18 @@ public record ScheduleSettings(SchedulePolicy.Schedule schedule, Set<String> all
             throw new IllegalArgumentException("An allowlist needs a stored schedule");
         }
         if (unreadable && (schedule == null || !allowlist.isEmpty())) {
-            throw new IllegalArgumentException("The fail-closed record is the default night window");
+            throw new IllegalArgumentException("The fail-closed record is the default schedule");
         }
     }
 
     /**
-     * The schedule enforced while the stored record cannot be read: the default
-     * night window every day, nothing else, no allowlist.
+     * The schedule enforced while the stored record cannot be read: both default
+     * windows, night every day and work hours Sunday to Thursday, with no
+     * allowlist. A damaged record never restricts less than the default, so it
+     * can never release an app the administrator's schedule would hold.
      */
     public static ScheduleSettings failClosed(ZoneId zone) {
-        SchedulePolicy.Window night = new SchedulePolicy.Window(
-                true, EnumSet.allOf(DayOfWeek.class), NIGHT_START, NIGHT_END);
-        return new ScheduleSettings(new SchedulePolicy.Schedule(zone, night, null), Set.of(), true);
+        return new ScheduleSettings(defaultSchedule(zone, true), Set.of(), true);
     }
 
     /** Night 23:00–06:00 every day and work 09:00–17:00 Sunday to Thursday. */

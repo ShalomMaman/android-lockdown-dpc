@@ -189,8 +189,11 @@
     <string name="system_policy_schedule_body">כשהאפשרות פעילה, כל היישומים מושעים מ־23:00 עד 06:00 בכל לילה ומ־09:00 עד 17:00 בימים ראשון עד חמישי, חוץ מהטלפון, ההודעות, השעון, מסך הבית והמקלדת, יישומי מערכת חיוניים ויישומי הניהול. יישומים מושעים נשארים מותקנים ושומרים על הנתונים שלהם, אבל אי אפשר לפתוח אותם וההתראות שלהם מוסתרות. השעות נקבעות לפי אזור הזמן שהיה במכשיר כשהאפשרות הופעלה. השהיית ההגנה משחררת את ההשעיות האלה.</string>
     <string name="system_policy_schedule_state_off">כבוי</string>
     <string name="system_policy_schedule_state_on">פעיל</string>
-    <string name="system_policy_schedule_state_unreadable">לא ניתן היה לקרוא את לוח הזמנים השמור, ולכן שעות הלילה נאכפות וההגנה מדווחת כלא מאומתת</string>
-    <string name="system_policy_schedule_inexact">התראות מדויקות אינן מותרות ל־⁦Device Guard⁩, ולכן חלון עלול להתחיל או להסתיים באיחור של עד עשר דקות. לתזמון מדויק, אפשרו ל־⁦Device Guard⁩ את ההרשאה „שעונים מעוררים ותזכורות” בהגדרות ⁦Android⁩.</string>
+    <string name="system_policy_schedule_state_unreadable">לא ניתן היה לקרוא את לוח הזמנים השמור, ולכן נאכפות גם שעות הלילה וגם שעות העבודה וההגנה מדווחת כלא מאומתת</string>
+    <string name="system_policy_schedule_exact">התראות מדויקות מותרות ל־⁦Device Guard⁩, ולכן כל חלון מתוזמן להתחיל ולהסתיים בשעה שלו.</string>
+    <string name="system_policy_schedule_inexact">התראות מדויקות אינן מותרות ל־⁦Device Guard⁩. במצב כזה ⁦Android⁩ קובע מתי חלון מתחיל או מסתיים, ובמכשיר במנוחה או בחיסכון בסוללה זה יכול לקרות הרבה אחרי השעה שנקבעה. כדי שהחלונות יתחילו בזמן, אפשרו ל־⁦Device Guard⁩ את ההרשאה „שעונים מעוררים ותזכורות” בהגדרות ⁦Android⁩.</string>
+    <string name="system_policy_schedule_clock_needed">בגרסת ⁦Android⁩ הזו, שעות הלילה ושעות העבודה דורשות תאריך ושעה אוטומטיים, כדי שאי אפשר יהיה לשנות את השעון ולסיים חלון מוקדם. ההפעלה מבקשת מ־⁦Android⁩ לחייב תאריך ושעה אוטומטיים, ועד ש־⁦Android⁩ מאשר זאת אי אפשר להפעיל את לוח הזמנים.</string>
+    <string name="system_policy_schedule_clock_unconfirmed">⁦Android⁩ לא אישר שתאריך ושעה אוטומטיים נדרשים, ולכן שעות הלילה ושעות העבודה נשארות כבויות.</string>
     <string name="system_policy_schedule_confirm_enable_title">להפעיל שעות לילה ושעות עבודה?</string>
     <string name="system_policy_schedule_confirm_enable_body">אם חלון כבר בתוקף, יישומים שאינם בקבוצה הזמינה תמיד יושעו עכשיו, ושוב בתחילת כל חלון.</string>
     <string name="system_policy_schedule_confirm_disable_title">לכבות את שעות הלילה ושעות העבודה?</string>

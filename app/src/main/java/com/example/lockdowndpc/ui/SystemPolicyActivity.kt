@@ -58,6 +58,7 @@ import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.ScheduleAlarm
 import com.example.lockdowndpc.policy.ScheduleChange
+import com.example.lockdowndpc.policy.ScheduleClock
 import com.example.lockdowndpc.policy.ScheduleController
 import com.example.lockdowndpc.policy.ScheduleSettings
 import com.example.lockdowndpc.policy.ScheduleStore
@@ -200,6 +201,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     var pendingExemption by remember { mutableStateOf<PendingExemption?>(null) }
     val schedule = remember(revision) { ScheduleStore.read(context) }
     val scheduleExact = remember(revision) { ScheduleAlarm.exactPermitted(context) }
+    val scheduleClockLocked = remember(revision) { ScheduleClock.locked(context) }
     var pendingSchedule by remember { mutableStateOf<Boolean?>(null) }
 
     fun requireSession(): Boolean {
@@ -470,6 +472,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     context.getString(R.string.system_policy_schedule_not_saved),
                     isError = true,
                 )
+                ScheduleChange.Status.CLOCK_UNLOCKED -> UiMessage(
+                    context.getString(R.string.system_policy_schedule_clock_unconfirmed),
+                    isError = true,
+                )
                 ScheduleChange.Status.UNCHANGED -> null
                 else -> when {
                     pass == null -> UiMessage(
@@ -582,6 +588,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 ScheduleRow(
                     settings = schedule,
                     exactAlarms = scheduleExact,
+                    clockLocked = scheduleClockLocked,
                     enabled = !working,
                     onToggle = { requested -> pendingSchedule = requested },
                 )
@@ -731,17 +738,21 @@ private fun PlayCompatibilityRow(
 /**
  * Night and work hours: one switch for both windows, the state on file, and
  * what the windows do. An unreadable record reads as on, because the device
- * enforces the night window for it.
+ * enforces both default windows for it. While a schedule is on, the
+ * exact-alarm state is stated as it is, with no promised delay. On Android
+ * 8.0/8.1 an unlocked clock is stated as the reason the schedule cannot be
+ * turned on yet.
  */
 @Composable
 private fun ScheduleRow(
     settings: ScheduleSettings,
     exactAlarms: Boolean,
+    clockLocked: Boolean,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
     // On while any window restricts: one enabled window is still a schedule
-    // in force, and the fail-closed night window of an unreadable record too.
+    // in force, and the fail-closed windows of an unreadable record too.
     val on = settings.unreadable() || settings.enforcing()
     Row(
         modifier = Modifier
@@ -797,11 +808,29 @@ private fun ScheduleRow(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
     )
-    if (on && !exactAlarms) {
+    if (on) {
         Text(
-            text = stringResource(R.string.system_policy_schedule_inexact),
+            text = stringResource(
+                if (exactAlarms) {
+                    R.string.system_policy_schedule_exact
+                } else {
+                    R.string.system_policy_schedule_inexact
+                }
+            ),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = if (exactAlarms) {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            } else {
+                MaterialTheme.colorScheme.error
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+    }
+    if (!clockLocked) {
+        Text(
+            text = stringResource(R.string.system_policy_schedule_clock_needed),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (on) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
         )
     }
