@@ -6,6 +6,7 @@ import android.os.SystemClock;
 
 import java.util.HashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
@@ -336,22 +337,21 @@ public final class BuiltInBlockExemptionsStore {
     static void containmentOutcome(
             Context context, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow) {
         containmentOutcome(readbackPrefs(context), refusedNow, confirmedNow, approvedNow,
-                line -> AuditLog.appendCommitted(context, AuditEvent.EXEMPTION_CONTAINMENT_CHANGED, line));
+                lines -> AuditLog.appendBatchCommitted(context, AuditEvent.EXEMPTION_CONTAINMENT_CHANGED, lines));
     }
 
     static void containmentOutcome(
             SharedPreferences prefs, Set<String> refusedNow, Set<String> confirmedNow, Set<String> approvedNow,
-            Predicate<String> appendCommitted) {
+            Predicate<List<String>> appendCommitted) {
         Set<String> was = new LinkedHashSet<>(prefs.getStringSet(KEY_CONTAINMENT_REFUSED, Set.of()));
         if (was.equals(refusedNow)) {
             return;
         }
-        // If an append fails, leave the previous set so the next pass can retry.
-        for (String line : BuiltInBlockExemptions.containmentAuditTransition(
-                was, refusedNow, confirmedNow, approvedNow)) {
-            if (!appendCommitted.test(line)) {
-                return;
-            }
+        // Leave the previous set on audit failure so the next pass can retry the whole transition.
+        List<String> lines = BuiltInBlockExemptions.containmentAuditTransition(
+                was, refusedNow, confirmedNow, approvedNow);
+        if (!lines.isEmpty() && !appendCommitted.test(lines)) {
+            return;
         }
         prefs.edit().putStringSet(KEY_CONTAINMENT_REFUSED, new LinkedHashSet<>(refusedNow)).commit();
     }

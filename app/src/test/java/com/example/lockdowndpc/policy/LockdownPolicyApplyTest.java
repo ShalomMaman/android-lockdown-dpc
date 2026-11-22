@@ -29,7 +29,9 @@ import org.robolectric.shadows.ShadowPackageManager;
 import org.robolectric.shadows.ShadowSigningInfo;
 
 import java.security.MessageDigest;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -45,6 +47,7 @@ public class LockdownPolicyApplyTest {
     private static final String BLOCKED = "com.example.blocked";
     private static final String SOCIAL = "com.whatsapp";
     private static final byte[] SIGNER = {1, 2, 3};
+    private static final String WRONG_PIN = "00".repeat(32);
 
     private Context context;
     private ComponentName admin;
@@ -66,11 +69,7 @@ public class LockdownPolicyApplyTest {
         assertTrue(AllowedAppsStore.setAllowedPackages(
                 context, Set.of(ALLOWED), Set.of(ALLOWED, BLOCKED, VPN), Set.of()));
         assertTrue(dpm.setApplicationHidden(admin, ALLOWED, true));
-        HomeFilterPolicy.Routing routing = new HomeFilterPolicy.Routing(
-                "T123", "https://vpn.example", "node", "Test");
-        HomeFilterPolicy.Config config = new HomeFilterPolicy.Config(
-                VPN, "https://filter.example/proxy.pac", signerDigest(), routing, null);
-        HomeFilterStore.write(context, new HomeFilterPolicy.Settings(config, true, null, false));
+        HomeFilterStore.write(context, filterSettings(VPN, signerDigest(), true));
     }
 
     @Test
@@ -88,6 +87,38 @@ public class LockdownPolicyApplyTest {
 
         assertVpnRecoveredInOnePass();
         assertTrue(ScheduleStore.readOwned(context).isEmpty());
+    }
+
+    @Test
+    public void reconcileKeepsHiddenVpnHiddenWhenSignerDoesNotMatch() {
+        assertHiddenVpnStaysHidden(filterSettings(VPN, WRONG_PIN, true));
+    }
+
+    @Test
+    public void reconcileKeepsSuspendedVpnSuspendedWhenSignerDoesNotMatch() throws Exception {
+        assertSuspendedVpnStaysSuspended(filterSettings(VPN, WRONG_PIN, true));
+    }
+
+    @Test
+    public void reconcileKeepsHiddenVpnHiddenWhenFilterIsOff() throws Exception {
+        assertHiddenVpnStaysHidden(filterSettings(VPN, signerDigest(), false));
+    }
+
+    @Test
+    public void reconcileKeepsSuspendedVpnSuspendedWhenFilterIsOff() throws Exception {
+        assertSuspendedVpnStaysSuspended(filterSettings(VPN, signerDigest(), false));
+    }
+
+    @Test
+    public void reconcileKeepsHiddenVpnHiddenWhenAnotherPackageIsConfigured() throws Exception {
+        assertHiddenVpnStaysHidden(filterSettings(BLOCKED, signerDigest(), true));
+        assertEquals(BLOCKED, dpm.getAlwaysOnVpnPackage(admin));
+    }
+
+    @Test
+    public void reconcileKeepsSuspendedVpnSuspendedWhenAnotherPackageIsConfigured() throws Exception {
+        assertSuspendedVpnStaysSuspended(filterSettings(BLOCKED, signerDigest(), true));
+        assertEquals(BLOCKED, dpm.getAlwaysOnVpnPackage(admin));
     }
 
     @Test
@@ -114,6 +145,36 @@ public class LockdownPolicyApplyTest {
         assertTrue(dpm.isApplicationHidden(admin, ALLOWED));
         assertFalse(dpm.isApplicationHidden(admin, SOCIAL));
         assertTrue(dpm.isPackageSuspended(admin, SOCIAL));
+    }
+
+    private static HomeFilterPolicy.Settings filterSettings(String packageName, String signerPin, boolean enabled) {
+        HomeFilterPolicy.Routing routing = new HomeFilterPolicy.Routing(
+                "T123", "https://vpn.example", "node", "Test");
+        HomeFilterPolicy.Config config = new HomeFilterPolicy.Config(
+                packageName, "https://filter.example/proxy.pac", signerPin, routing, null);
+        return new HomeFilterPolicy.Settings(config, enabled, null, false);
+    }
+
+    private void assertHiddenVpnStaysHidden(HomeFilterPolicy.Settings settings) {
+        assertTrue(dpm.setApplicationHidden(admin, VPN, true));
+        assertTrue(dpm.isApplicationHidden(admin, VPN));
+        reconcileFilter(settings);
+        assertTrue(dpm.isApplicationHidden(admin, VPN));
+    }
+
+    private void assertSuspendedVpnStaysSuspended(HomeFilterPolicy.Settings settings) throws Exception {
+        assertEquals(0, dpm.setPackagesSuspended(admin, new String[]{VPN}, true).length);
+        assertTrue(dpm.isPackageSuspended(admin, VPN));
+        reconcileFilter(settings);
+        assertTrue(dpm.isPackageSuspended(admin, VPN));
+    }
+
+    private void reconcileFilter(HomeFilterPolicy.Settings settings) {
+        // Exercise availability recovery without the package sweep re-hiding a released app.
+        List<String> errors = new ArrayList<>();
+        HomeFilterController.reconcile(context, dpm, admin, errors,
+                new BuiltInBlockExemptions.PassFilter(settings, settings, null));
+        assertFalse(errors.toString(), errors.stream().anyMatch(error -> error.startsWith("home-filter:vpn-availability:")));
     }
 
     private void assertVpnRecoveredInOnePass() throws Exception {

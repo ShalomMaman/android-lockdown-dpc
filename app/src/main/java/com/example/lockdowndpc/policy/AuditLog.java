@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.example.lockdowndpc.R;
+import com.example.lockdowndpc.security.DurablePreferences;
 
 import java.text.DateFormat;
 import java.util.ArrayList;
@@ -40,7 +41,20 @@ public final class AuditLog {
         return edit(preferences(context), event, text).commit();
     }
 
+    /** Writes all rows of one transition together, so the caller can retry the whole transition. */
+    static boolean appendBatchCommitted(Context context, AuditEvent event, List<String> lines) {
+        return appendBatchCommitted(preferences(context), event, lines);
+    }
+
+    static synchronized boolean appendBatchCommitted(SharedPreferences prefs, AuditEvent event, List<String> lines) {
+        return DurablePreferences.commit(prefs, edit(prefs, event, lines), KEY_ENTRIES, KEY_HAS_CODES);
+    }
+
     static SharedPreferences.Editor edit(SharedPreferences prefs, AuditEvent event, String text) {
+        return edit(prefs, event, List.of(text));
+    }
+
+    private static SharedPreferences.Editor edit(SharedPreferences prefs, AuditEvent event, List<String> lines) {
         ArrayList<String> entries = new ArrayList<>(rawEntries(prefs));
         // Old text could begin with a code and a pipe. Migrate using the
         // preference marker, and write the marker and all rows in one edit.
@@ -50,7 +64,9 @@ public final class AuditLog {
                 return entry == null ? line : entry.encode();
             });
         }
-        entries.add(new Entry(System.currentTimeMillis(), event.code(), text).encode());
+        for (String line : lines) {
+            entries.add(new Entry(System.currentTimeMillis(), event.code(), line).encode());
+        }
         int first = Math.max(0, entries.size() - MAX_ENTRIES);
         return prefs.edit()
                 .putString(KEY_ENTRIES, String.join("\n", entries.subList(first, entries.size())))
