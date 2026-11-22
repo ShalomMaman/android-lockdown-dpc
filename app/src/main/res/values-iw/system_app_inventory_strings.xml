@@ -103,4 +103,6 @@
         <item quantity="other">נבחרו %1$d רכיבי מערכת</item>
     </plurals>
 
+    <string name="sysinv_load_failed">לא ניתן לקרוא את רשימת האפליקציות. יש למשוך למטה כדי לנסות שוב.</string>
+
 </resources>

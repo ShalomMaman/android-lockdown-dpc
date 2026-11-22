@@ -36,7 +36,9 @@ internal fun ConsoleScreen.backDestination(
     ConsoleScreen.ENROLLMENT, ConsoleScreen.REMOTE_STATUS, ConsoleScreen.LOCKED -> null
     ConsoleScreen.PIN_SETUP -> when {
         !replacingPin -> null
-        replacingAfterRecovery -> ConsoleScreen.LOCKED
+        // The recovery code is consumed on use, so leaving before a new PIN is
+        // saved would lock the administrator out: Back is swallowed here.
+        replacingAfterRecovery -> ConsoleScreen.PIN_SETUP
         else -> ConsoleScreen.ADMIN
     }
     ConsoleScreen.ADMIN -> ConsoleScreen.LOCKED

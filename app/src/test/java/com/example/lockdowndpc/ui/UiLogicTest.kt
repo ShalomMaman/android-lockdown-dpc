@@ -14,7 +14,7 @@ class UiLogicTest {
         assertNull(ConsoleScreen.LOCKED.backDestination(false, false))
         assertNull(ConsoleScreen.PIN_SETUP.backDestination(false, false))
         assertEquals(ConsoleScreen.ADMIN, ConsoleScreen.PIN_SETUP.backDestination(true, false))
-        assertEquals(ConsoleScreen.LOCKED, ConsoleScreen.PIN_SETUP.backDestination(true, true))
+        assertEquals(ConsoleScreen.PIN_SETUP, ConsoleScreen.PIN_SETUP.backDestination(true, true))
         assertNull(ConsoleScreen.ENROLLMENT.backDestination(false, false))
         assertNull(ConsoleScreen.REMOTE_STATUS.backDestination(false, false))
     }

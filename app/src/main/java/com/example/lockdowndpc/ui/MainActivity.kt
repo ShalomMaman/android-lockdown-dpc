@@ -368,11 +368,10 @@ private fun AdminConsole(
     }
 
     fun backFromPinReplacement() {
-        if (replacingAfterRecovery) {
-            showLocked()
-        } else if (requireSession()) {
-            showAdmin()
-        }
+        // After a recovery unlock the old PIN is unknown and the recovery code is
+        // already consumed: leaving before a new PIN is saved would strand the admin.
+        if (replacingAfterRecovery) return
+        if (requireSession()) showAdmin()
     }
 
     fun backToKiosk() {
@@ -741,6 +740,7 @@ private fun AdminConsole(
 
         ConsoleScreen.PIN_SETUP -> PinSetupScreen(
             replacing = replacingPin,
+            canCancel = replacingPin && !replacingAfterRecovery,
             message = message,
             onSave = ::savePin,
             onCancel = ::backFromPinReplacement,
@@ -1037,6 +1037,7 @@ private fun EnrollmentScreen() {
 @Composable
 private fun PinSetupScreen(
     replacing: Boolean,
+    canCancel: Boolean,
     message: UiMessage?,
     onSave: (String, String) -> Unit,
     onCancel: () -> Unit,
@@ -1072,7 +1073,7 @@ private fun PinSetupScreen(
             icon = Icons.Rounded.Key,
             onClick = { onSave(first, second) },
         )
-        if (replacing) {
+        if (replacing && canCancel) {
             Spacer(Modifier.height(12.dp))
             SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onCancel)
         }

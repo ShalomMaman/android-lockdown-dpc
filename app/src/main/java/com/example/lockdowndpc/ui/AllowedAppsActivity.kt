@@ -224,6 +224,7 @@ private fun InventoryScreen(
     val context = LocalContext.current
 
     val haptics = rememberHaptics()
+    val loadFailedText = stringResource(R.string.sysinv_load_failed)
     var loading by remember { mutableStateOf(true) }
     var refreshVersion by remember { mutableIntStateOf(0) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -261,7 +262,7 @@ private fun InventoryScreen(
             throw cancelled
         } catch (_: RuntimeException) {
             loadFailed = true
-            message = UiMessage(context.getString(R.string.sysinv_load_failed), isError = true)
+            message = UiMessage(loadFailedText, isError = true)
             haptics.reject()
         } finally {
             loading = false

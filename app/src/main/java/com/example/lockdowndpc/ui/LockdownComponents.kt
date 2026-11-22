@@ -339,14 +339,10 @@ internal fun PinField(
     imeAction: ImeAction = ImeAction.Next,
     onImeAction: () -> Unit = {},
 ) {
-    val haptics = rememberHaptics()
+    // No per-digit haptic: a tick per digit would tell a bystander the PIN length.
     OutlinedTextField(
         value = value,
-        onValueChange = {
-            val pin = sanitizePin(it)
-            if (pin.length > value.length) haptics.tick()
-            onValueChange(pin)
-        },
+        onValueChange = { onValueChange(sanitizePin(it)) },
         label = { Text(label) },
         singleLine = true,
         shape = MaterialTheme.shapes.small,
