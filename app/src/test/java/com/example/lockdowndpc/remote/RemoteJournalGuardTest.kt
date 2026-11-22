@@ -107,11 +107,18 @@ class RemoteJournalGuardTest {
         assertTrue(harness.journal.save(initial))
         val current = requireNotNull(fileStore().read()).current
         val journal = persistedJournal(harness)
-        for (format in listOf(1L, 2L)) {
-            val payload = WireJson.canonical(mapOf(
-                "format" to format, "bindingFingerprint" to current.bindingFingerprint,
-                "rootFingerprint" to current.rootFingerprint, "floors" to current.floors.mapKeys { it.key.wire }
-            ))
+        val identity = mapOf("bindingFingerprint" to current.bindingFingerprint,
+            "rootFingerprint" to current.rootFingerprint, "floors" to current.floors.mapKeys { it.key.wire })
+        val legacyRecords = listOf(
+            identity + ("format" to 1L),
+            identity + ("format" to 2L),
+            mapOf("format" to 3L, "previous" to null, "pending" to emptyMap<String, Any>(),
+                "current" to identity + mapOf("policySha256" to current.policySha256,
+                    "trustSha256" to RemoteCrypto.hex(RemoteCrypto.sha256(WireJson.canonical(journal.obj("trust"))))))
+        )
+        for (legacy in legacyRecords) {
+            val format = legacy.number("format")
+            val payload = WireJson.canonical(legacy)
             val tag = if (format == 1L) RemoteCrypto.sha256(payload) else f.mac(payload)
             val record = tag + payload
             file.writeBytes(record)
@@ -171,7 +178,7 @@ class RemoteJournalGuardTest {
         }
     }
 
-    @Test fun trustDigestPinsDelegatedKeysSuccessorAndServerUrl() {
+    @Test fun sealedTrustPinsDelegatedKeysSuccessorAndServerUrl() {
         val harness = harness()
         assertTrue(harness.journal.save(initial))
         val journal = persistedJournal(harness)
@@ -185,6 +192,54 @@ class RemoteJournalGuardTest {
             replaceJournal(harness, journal + ("trust" to (trust + change)))
             assertEquals(change.first, RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
         }
+    }
+
+    @Test fun anAddedNetworkOverrideFailsClosedBeforeProjection() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial))
+        val changed = persistedJournal(harness) + ("overrides" to listOf(RemoteOverride.NETWORK_OFF.code))
+        assertTrue(harness.memory.preferences().edit()
+            .putString("state", WireJson.canonical(changed).toString(Charsets.UTF_8)).commit())
+
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.journal.checkStores())
+        harness.restart()
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.ensureProjected().failure)
+    }
+
+    @Test fun removingAnUnverifiedReleaseFailsClosedOnRestart() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial.copy(releases = setOf("example.test.released"))))
+        replaceJournal(harness, persistedJournal(harness) + ("releases" to emptyList<String>()))
+
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
+    }
+
+    @Test fun recoveryStateCannotChangeAtTheSameFloors() {
+        val harness = harness()
+        val recovery = RecoveryVerifier(RemoteCrypto.encode(ByteArray(16)), RemoteCrypto.encode(ByteArray(32)))
+        assertTrue(harness.journal.save(initial.copy(recovery = recovery, recoveryUses = 1)))
+        val journal = persistedJournal(harness)
+        for (change in listOf("recovery" to null, "uses" to 0L,
+            "lockout" to (journal.obj("lockout") + ("failures" to 1L)))) {
+            replaceJournal(harness, journal + change)
+            assertEquals(change.first, RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
+        }
+    }
+
+    @Test fun commandHistoryAndReportGenerationCanChangeWithoutRewritingTheGuard() {
+        val store = fileStore()
+        val harness = harness(store)
+        val command = CommandEntry(initial.commandFloor, "reapply", RemoteTime(1, 100), CommandState.DONE)
+        assertTrue(harness.journal.save(initial.copy(commands = mapOf(command.sequence to command),
+            verified = initial.generation())))
+        val guard = store.read()
+        val journal = persistedJournal(harness)
+        for (change in listOf("commands" to emptyList<Any>(), "verified" to null)) {
+            replaceJournal(harness, journal + change)
+            assertNull(change.first, harness.journal.checkStores())
+            assertEquals(guard, store.read())
+        }
+        assertEquals(initial.commandFloor, harness.journal.floor(DocumentType.COMMAND))
     }
 
     @Test fun rewrittenPolicyBytesAreRefusedEvenWithARecomputedHash() {
@@ -383,6 +438,58 @@ class RemoteJournalGuardTest {
         assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
     }
 
+    @Test fun releaseLedgerWriteRecoversOnEitherSideOfTheJournalCommit() {
+        val store = fileStore()
+        val harness = harness(store)
+        val next = initial.copy(releases = setOf("example.test.released"))
+        assertTrue(harness.journal.save(initial))
+        val previous = persistedJournal(harness)
+
+        harness.memory.beforeCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { harness.journal.save(next) }
+        harness.memory.beforeCommit = Consumer { }
+        assertEquals(JournalSeal.from(initial), store.read()?.previous)
+        assertEquals(JournalSeal.from(next), store.read()?.current)
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertTrue(harness.engine.state.releases.isEmpty())
+
+        harness.memory.afterCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { harness.journal.save(next) }
+        harness.memory.afterCommit = Consumer { }
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertEquals(next.releases, harness.engine.state.releases)
+        assertEquals(JournalGuard.from(next), store.read())
+        replaceJournal(harness, previous)
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
+    }
+
+    @Test fun ambiguousCommitBlocksTheLiveJournalAndIsCoveredOnRestart() {
+        val store = fileStore()
+        val harness = harness(store)
+        val next = initial.copy(overrides = setOf(RemoteOverride.NETWORK_OFF))
+        assertTrue(harness.journal.save(initial))
+
+        harness.memory.afterCommit = Consumer {
+            // The new value reached disk, but the editor reports failure and cannot roll it back.
+            harness.memory.throwBeforeCommit = true
+            throw IllegalStateException("Simulated ambiguous commit")
+        }
+        assertFalse(harness.journal.save(next))
+        harness.memory.afterCommit = Consumer { }
+        harness.memory.throwBeforeCommit = false
+
+        assertTrue(harness.journal.state.overrides.isEmpty())
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.journal.checkStores())
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
+        assertEquals(JournalSeal.from(initial), store.read()?.previous)
+        harness.restart()
+        assertNull(harness.journal.checkStores())
+        assertEquals(next.overrides, harness.journal.state.overrides)
+        assertEquals(JournalGuard.from(next), store.read())
+    }
+
     @Test fun baselineWriteCanRetryWithVersionZeroAndPinsItsBytes() {
         val harness = harness()
         assertNull(bind(harness))
@@ -399,7 +506,8 @@ class RemoteJournalGuardTest {
     }
 
     @Test fun bindingAfterTheBaselineStaysPinnedThroughFailureAndUnrelatedSaves() {
-        val harness = harness()
+        val store = fileStore()
+        val harness = harness(store)
         val baseline = f.hashes.obj("baseline").obj("body")
         assertNull(harness.engine.commitBaseline(baseline))
         harness.memory.failCommit = true
@@ -408,7 +516,10 @@ class RemoteJournalGuardTest {
         harness.restart()
         assertNull(harness.engine.failure)
         assertNull(harness.engine.state.binding)
+        val reservation = requireNotNull(store.read())
         assertTrue(harness.engine.reconcile().verified)
+        assertFalse(harness.journal.save(harness.engine.state.copy(releases = setOf("example.test.released"))))
+        assertEquals(reservation, store.read())
         assertEquals("journal-write-failed", bind(harness, f.binding.copy(fleetId = "another-fleet"))?.code)
         assertEquals("journal-write-failed", bind(harness, key = "successor")?.code)
         assertNull(bind(harness))

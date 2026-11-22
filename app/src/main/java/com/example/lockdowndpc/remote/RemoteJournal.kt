@@ -167,6 +167,7 @@ internal class RemoteJournal(
                 return existing
             }
             if (existing.isBindingTransition && before == existing.previous) {
+                // Preserve both sealed snapshots until the reserved binding commits.
                 require(doc == null && (next == before || next == existing.current))
                 return existing
             }
@@ -290,13 +291,12 @@ internal class RemoteJournal(
     }
 }
 
-/** Shared by the journal encoding and the guard's canonical trust digest. */
-internal fun RemoteTrust.journalFields() = mapOf(
+private fun RemoteTrust.journalFields() = mapOf(
     "root" to root, "successor" to successor, "version" to version,
     "policies" to policyKeys, "server" to server, "serverUrl" to serverUrl
 )
 
-private object JournalCodec {
+internal object JournalCodec {
     private fun overrides(values: Set<RemoteOverride>) = values.map { it.code }.sorted()
     private fun overrides(values: List<*>) = values.map { RemoteOverride.fromCode(it as String) }.toSet()
 
@@ -308,7 +308,16 @@ private object JournalCodec {
         Generation(it.number("version"), it.text("hash"), overrides(it.items("overrides")))
     }
 
-    fun encode(state: JournalState): String = WireJson.canonical(mapOf(
+    fun sealBytes(state: JournalState): ByteArray =
+        // Command history is updated and trimmed independently. Commands can
+        // dispatch only with a live acceptance in this process.
+        // The last verified generation is used only in reapply command reports.
+        // Use the persisted fields so new durable fields are sealed by default.
+        WireJson.canonical(fields(state) - listOf("commands", "verified"))
+
+    fun encode(state: JournalState): String = WireJson.canonical(fields(state)).toString(Charsets.UTF_8)
+
+    private fun fields(state: JournalState): JsonObject = mapOf(
         "trust" to state.trust?.journalFields(),
         "binding" to state.binding?.let { mapOf("fleet" to it.fleetId, "device" to it.deviceId) },
         "policy" to state.policy?.let { mapOf("bytes" to it.encodedPayload, "hash" to it.hash, "version" to it.version) },
@@ -329,7 +338,7 @@ private object JournalCodec {
         },
         "verified" to encodeGeneration(state.verified),
         "releases" to state.releases.sorted()
-    )).toString(Charsets.UTF_8)
+    )
 
     fun decode(value: String): JournalState {
         val json = WireJson.parse(value.toByteArray(Charsets.UTF_8)).asObject()

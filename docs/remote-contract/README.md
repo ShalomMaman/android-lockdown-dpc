@@ -115,13 +115,12 @@ when a vector file or section is added without a Kotlin test that replays it.
   an accepted keyset, it becomes the current root. `sync.json` models decoded
   batches and request events. Transport framing and report serialization
   are left to PR 8.
-- **Durability and codes.** A failed policy journal write leaves the previous
-  durable target in place. A failed projection write aborts the pass. The
-  next trigger reloads the durable journal, which may already contain the
-  newer generation, and rewrites every store. A matching stamp still
-  requires a full projection. If the target changes mid-projection, the
-  model restarts projection before starting a pass. If it changes during a
-  pass, its read-back cannot advance the verified generation. The named
+- **Durability and codes.** A failed policy journal write leaves the live
+  target unchanged. A failed projection write aborts the pass. After restart,
+  reconciliation uses the covered durable target and rewrites every store.
+  A matching stamp still requires a full projection. If the target changes
+  mid-projection, the model restarts projection before starting a pass. If it
+  changes during a pass, its read-back cannot advance the verified generation. The named
   projection checkpoints are based on section 6.3. The production tests
   must inject faults at the actual commits, including any per-package
   risk-acceptance writes. Fixture fields `passReadsMixedGeneration` and
@@ -197,15 +196,23 @@ Other device rules:
   restored at boot, and its HOME screen neither locks the task nor starts the
   target. The journal pass turns it off.
 - **Journal protection.** The creation marker is stored first. The no-backup
-  guard record uses format 3, with a device-specific Android Keystore HMAC-SHA256
+  guard record uses format 4, with a device-specific Android Keystore HMAC-SHA256
   tag over the canonical JSON fields `format`, `current`, `previous` and
   `pending`. Each snapshot pins the fleet/device `bindingFingerprint`, the
   active `rootFingerprint`, and the four durable `floors` (key set, policy,
-  recovery and command). `trustSha256` digests the canonical trust object,
-  including the root, successor, key-set version, policy keys, server key and
-  server URL. `policySha256` pins the committed policy hash, which is checked
-  against the exact stored payload bytes on read. A missing policy has a null
-  hash, including before the version-zero baseline is committed.
+  recovery and command). `policySha256` pins the committed policy hash, which
+  is checked against the exact stored payload bytes on read. The hash is null
+  before any policy, including the version-zero baseline, is committed.
+  `stateSha256` digests the canonical persisted journal state, including full
+  trust, recovery verifier and usage, lockout, overrides and pending app
+  releases. It excludes exactly two top-level fields:
+
+  - `commands` contains command entries and outcomes that are updated and
+    trimmed independently. A platform call requires a live acceptance in the
+    current process, and the durable sequence floor stays sealed.
+  - `verified` supplies the last verified generation for reapply command
+    reports. Every projection still requires its own live read-back, and the
+    release ledger stays sealed.
 - **Pending writes and rotation.** The guard is atomically replaced before a
   protected journal write. The `pending` map is keyed by document type and
   records the version and SHA-256 of the canonical signed payload. For key sets
@@ -223,21 +230,27 @@ Other device rules:
   non-key-set documents wait for the reserved key set to commit. After the
   journal commits, the guard drops the previous snapshot and any fulfilled
   reservation. A restart that reads the new snapshot finishes this cleanup
-  before using it. Remote mode is committed after the first successful bind.
+  before using it. If `commit()` reports failure after the new journal has
+  reached disk and a rollback cannot restore the live preference view, the
+  next check observes a mismatch against the live journal and reports
+  `journal-guard-mismatch` for the rest of that process. On restart, the
+  durable journal matches the guard's `current` snapshot and cleanup resumes.
+  Remote mode is committed after the first successful bind.
 - **Storage refusals.** A missing or damaged committed journal reports
   `journal-lost`, even when all three journal stores are missing. A missing
   guard reports `journal-guard-missing`. A corrupt guard or unusable MAC key
   reports `journal-guard-unreadable`. The loss of the Keystore HMAC key fails
   closed permanently for that enrolment. The key cannot be recreated for an
   existing guard, and the device must be reset and re-enrolled. Guard formats
-  1 and 2 fail closed with `journal-guard-reenrolment-needed`. A journal that
+  1 through 3 fail closed with `journal-guard-reenrolment-needed`. A journal that
   matches neither authenticated snapshot reports `journal-guard-mismatch`.
   These failures leave existing restrictions in force. Before remote mode
   is committed, a creation marker and a valid guard with initial floors can
   resume an interrupted first bind to the same fleet, device and root when
   the journal file is absent. When a version-zero baseline is already in the
   journal, an interrupted first bind preserves both the baseline and the
-  proposed binding. Only that binding can finish enrolment.
+  proposed binding. Only that binding can finish enrolment. Until it does,
+  writes that would change the sealed baseline state are refused.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 

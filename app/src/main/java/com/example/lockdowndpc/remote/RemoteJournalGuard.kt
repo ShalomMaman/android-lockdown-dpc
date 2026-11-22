@@ -15,17 +15,16 @@ internal data class JournalSeal(
     val bindingFingerprint: String?,
     val rootFingerprint: String?,
     val floors: Map<DocumentType, Long>,
-    val trustSha256: String?,
-    val policySha256: String?
+    val policySha256: String?,
+    val stateSha256: String
 ) {
     init {
         require(floors.keys == DocumentType.entries.toSet())
         require(floors.values.all { it in 0..WireJson.MAX_INTEGER })
         require(bindingFingerprint == null || RemoteCrypto.decode(bindingFingerprint).size == 32)
         require(rootFingerprint == null || RemoteCrypto.decode(rootFingerprint).size == 32)
-        require((rootFingerprint == null) == (trustSha256 == null))
-        trustSha256?.let(RemoteCrypto::unhex)
         policySha256?.let(RemoteCrypto::unhex)
+        RemoteCrypto.unhex(stateSha256)
     }
 
     companion object {
@@ -36,11 +35,10 @@ internal data class JournalSeal(
             RemoteCrypto.encode(RemoteCrypto.sha256(WireJson.canonical(listOf(it.fleetId, it.deviceId))))
         }, state.trust?.root?.let(RemoteCrypto::keyId),
             DocumentType.entries.associateWith(state::floor),
-            state.trust?.let { RemoteCrypto.hex(RemoteCrypto.sha256(WireJson.canonical(it.journalFields()))) },
             state.policy?.let {
                 it.verifiedBytes()
                 it.hash
-            })
+            }, RemoteCrypto.hex(RemoteCrypto.sha256(JournalCodec.sealBytes(state))))
     }
 }
 
@@ -95,8 +93,7 @@ internal data class JournalGuard(
     val previousRootFingerprint: String? get() =
         previous?.rootFingerprint?.takeUnless { it == current.rootFingerprint }
 
-    // Require a whole snapshot. Matching the old root alone must never allow
-    // mixing the old journal with unauthenticated keys, policy or floors.
+    // Require one whole protected snapshot, including during a root transition.
     fun covers(journal: JournalSeal): Boolean = journal == current || journal == previous
 
     fun outstanding(journal: JournalSeal): Map<DocumentType, PendingDocument> =
@@ -137,8 +134,8 @@ internal class RemoteJournalGuardFile(
         val json = WireJson.parse(payload).asObject()
         val format = json.number("format")
         require(format in 1L..FORMAT)
-        // Format 1 had a public checksum. Neither old format pins the trust
-        // or policy, so a recognized old record is refused without loading it.
+        // Format 1 had a public checksum. Older records do not seal the whole
+        // protected state, so recognized legacy records require re-enrolment.
         val tag = if (format == 1L) RemoteCrypto.sha256(payload) else mac(payload, false)
         require(MessageDigest.isEqual(record.copyOf(MAC_SIZE), tag))
         if (format != FORMAT) throw LegacyJournalGuardFormat()
@@ -179,19 +176,19 @@ internal class RemoteJournalGuardFile(
 
     private fun encodeSeal(seal: JournalSeal) = mapOf(
         "bindingFingerprint" to seal.bindingFingerprint, "rootFingerprint" to seal.rootFingerprint,
-        "floors" to seal.floors.mapKeys { it.key.wire }, "trustSha256" to seal.trustSha256,
-        "policySha256" to seal.policySha256
+        "floors" to seal.floors.mapKeys { it.key.wire }, "policySha256" to seal.policySha256,
+        "stateSha256" to seal.stateSha256
     )
 
     private fun decodeSeal(seal: JsonObject): JournalSeal {
         val floors = seal.obj("floors")
         return JournalSeal(seal.getValue("bindingFingerprint") as String?, seal.getValue("rootFingerprint") as String?,
             DocumentType.entries.associateWith { floors.number(it.wire) },
-            seal.getValue("trustSha256") as String?, seal.getValue("policySha256") as String?)
+            seal.getValue("policySha256") as String?, seal.text("stateSha256"))
     }
 
     companion object {
-        private const val FORMAT = 3L
+        private const val FORMAT = 4L
         private const val MAC_SIZE = 32
         private const val MAX_RECORD_SIZE = 4096L
     }
