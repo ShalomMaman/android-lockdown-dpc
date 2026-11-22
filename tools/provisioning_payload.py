@@ -7,15 +7,16 @@ import argparse
 import base64
 import json
 import os
-from pathlib import Path
 import re
 import stat
 import sys
 import tempfile
+from pathlib import Path
+from shlex import quote
 from urllib.parse import urlsplit
 
 import publish_update
-
+from remote_contract import SCHEMA, schema_error, ticket_bytes, write_private_bundle
 
 EXTRA_COMPONENT = "android.app.extra.PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME"
 EXTRA_DOWNLOAD_LOCATION = (
@@ -56,6 +57,7 @@ FORBIDDEN_ADMIN_EXTRA_FRAGMENTS = (
     "pin",
     "recovery",
     "secret",
+    "ticket",
     "token",
 )
 
@@ -120,6 +122,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="KEY=VALUE",
         default=[],
         help="Repeatable non-secret entry for the admin extras bundle",
+    )
+    parser.add_argument("--remote-server", help="Remote enrolment HTTPS server base URL")
+    parser.add_argument("--remote-root", help="Unpadded base64url SHA-256 of the fleet root SPKI")
+    parser.add_argument("--remote-tls-pin", action="append", help="Optional SPKI pin (up to two)")
+    parser.add_argument("--remote-fleet", help="Remote fleet display label")
+    tickets = parser.add_mutually_exclusive_group()
+    tickets.add_argument("--enrolment-ticket-env", metavar="NAME", help="Variable holding one ticket")
+    tickets.add_argument(
+        "--enrolment-tickets-file-env", metavar="NAME",
+        help="Variable holding a mode-0600 ticket file path (use a new output directory)",
     )
     parser.add_argument(
         "--leave-system-apps-enabled",
@@ -269,13 +281,15 @@ def parse_admin_extras(values: list[str]) -> dict[str, str]:
     extras: dict[str, str] = {}
     for entry in values:
         if "=" not in entry:
-            raise ProvisioningError(f"--admin-extra must be KEY=VALUE: {entry}")
+            raise ProvisioningError("--admin-extra must be KEY=VALUE")
         key, value = entry.split("=", 1)
         if not ADMIN_EXTRA_KEY.fullmatch(key):
-            raise ProvisioningError(f"--admin-extra key is not a valid bundle key: {key}")
+            raise ProvisioningError("--admin-extra requires a valid bundle key")
+        lowered = key.lower()
+        if lowered.startswith("dg.remote."):
+            raise ProvisioningError("--admin-extra reserves dg.remote.* for dedicated remote options")
         if key in extras:
             raise ProvisioningError(f"--admin-extra key is repeated: {key}")
-        lowered = key.lower()
         if any(fragment in lowered for fragment in FORBIDDEN_ADMIN_EXTRA_FRAGMENTS):
             raise ProvisioningError(
                 f"--admin-extra key looks like a credential and is refused: {key}. "
@@ -289,6 +303,73 @@ def parse_admin_extras(values: list[str]) -> dict[str, str]:
             )
         extras[key] = value
     return extras
+
+
+def read_ticket_file(environment_name: str) -> list[str]:
+    path = read_secret_from_environment(environment_name, "--enrolment-tickets-file-env")
+    try:
+        fd = os.open(Path(path).expanduser(), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as source:
+            info = os.fstat(source.fileno())
+            if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600
+                    or info.st_uid != os.getuid()):
+                raise ProvisioningError("ticket file must be a regular mode-0600 file owned by you")
+            tickets = []
+            seen = set()
+            while line := source.readline(35):
+                number = len(tickets) + 1
+                try:
+                    ticket = line.removesuffix(b"\n").removesuffix(b"\r").decode("ascii")
+                    ticket_bytes(ticket)
+                except ValueError:
+                    raise ProvisioningError(f"invalid enrolment ticket on line {number}") from None
+                if ticket in seen:
+                    raise ProvisioningError(f"repeated enrolment ticket on line {number}")
+                seen.add(ticket)
+                tickets.append(ticket)
+    except (OSError, ValueError):
+        raise ProvisioningError("could not read the ticket file from the named variable") from None
+    if not tickets:
+        raise ProvisioningError("ticket file is empty")
+    return tickets
+
+
+def remote_enrolment(args: argparse.Namespace) -> tuple[dict[str, str], list[str], bool]:
+    server = getattr(args, "remote_server", None)
+    root = getattr(args, "remote_root", None)
+    pins = getattr(args, "remote_tls_pin", None) or []
+    fleet = getattr(args, "remote_fleet", None)
+    single = getattr(args, "enrolment_ticket_env", None)
+    batch = getattr(args, "enrolment_tickets_file_env", None)
+    if all(value is None for value in (server, root, fleet, single, batch)) and not pins:
+        return {}, [], False
+    if not server or not root or not fleet or (single is None) == (batch is None):
+        raise ProvisioningError(
+            "remote enrolment requires --remote-server, --remote-root, --remote-fleet "
+            "and one enrolment ticket source"
+        )
+    if schema_error({"$ref": "#/$defs/serverUrl"}, server):
+        raise ProvisioningError("--remote-server must be a clean HTTPS base URL")
+    digest = SCHEMA["$defs"]["base64url32"]
+    if schema_error(digest, root):
+        raise ProvisioningError("--remote-root must be a base64url SHA-256 digest without padding")
+    if len(pins) > 2 or len(set(pins)) != len(pins) or any(schema_error(digest, pin) for pin in pins):
+        raise ProvisioningError("--remote-tls-pin accepts up to two distinct base64url SHA-256 digests")
+    if not fleet.strip() or len(fleet) > MAX_ADMIN_EXTRA_VALUE_CHARACTERS:
+        raise ProvisioningError("--remote-fleet requires a nonempty display label of at most 512 characters")
+
+    extras = {"dg.remote.v": "1", "dg.remote.server": server,
+              "dg.remote.root": root, "dg.remote.fleet": fleet}
+    if pins:
+        extras["dg.remote.tls"] = ",".join(pins)
+    if batch is not None:
+        return extras, read_ticket_file(batch), True
+    ticket = read_secret_from_environment(single, "--enrolment-ticket-env")
+    try:
+        ticket_bytes(ticket)
+    except ValueError:
+        raise ProvisioningError("enrolment ticket must encode 24 bytes in unpadded base64url") from None
+    return extras, [ticket], False
 
 
 def build_payload(
@@ -406,7 +487,7 @@ def create(args: argparse.Namespace) -> dict[str, object]:
     if root is not None and output.is_relative_to(root):
         raise ProvisioningError(
             "output must not be written inside the Device Guard repository; a provisioning "
-            "payload can carry a Wi-Fi credential and is never committed"
+            "payload can carry credentials and is never committed"
         )
 
     admin_component = validate_admin_component(args.admin_component)
@@ -414,6 +495,9 @@ def create(args: argparse.Namespace) -> dict[str, object]:
     download_location = validate_download_location(args.download_location)
     signer_sha256, signature_checksum = normalize_signature_digest(args.signer_sha256)
     admin_extras = parse_admin_extras(args.admin_extra or [])
+    remote_extras, tickets, batch = remote_enrolment(args)
+    if batch and args.force:
+        raise ProvisioningError("batch enrolment requires a new --output directory")
     wifi_settings = build_wifi_settings(
         args.wifi_ssid,
         args.wifi_security_type,
@@ -456,16 +540,28 @@ def create(args: argparse.Namespace) -> dict[str, object]:
         wifi_settings,
         args.locale,
         args.time_zone,
-        admin_extras,
+        admin_extras | remote_extras,
     )
-    rendered = render_payload(payload)
     embeds_wifi_password = EXTRA_WIFI_PASSWORD in payload
-    write_atomic(
-        output,
-        rendered,
-        args.force,
-        stat.S_IRUSR | stat.S_IWUSR if embeds_wifi_password else 0o644,
-    )
+    if tickets:
+        bundle = payload[EXTRA_ADMIN_EXTRAS_BUNDLE]
+        files = {}
+        for number, ticket in enumerate(tickets, 1):
+            bundle["dg.remote.ticket"] = ticket
+            files[f"payload-{number}.json"] = render_payload(payload)
+    else:
+        files = {"payload-1.json": render_payload(payload)}
+    rendered = files["payload-1.json"]
+    if batch:
+        try:
+            write_private_bundle(output, files)
+        except FileExistsError:
+            raise ProvisioningError("batch output directory already exists") from None
+    else:
+        write_atomic(
+            output, rendered, args.force,
+            0o600 if embeds_wifi_password or tickets else 0o644,
+        )
 
     summary: dict[str, object] = {
         "adminComponent": admin_component,
@@ -485,6 +581,22 @@ def create(args: argparse.Namespace) -> dict[str, object]:
     if version_code is not None:
         summary["versionCode"] = version_code
         summary["versionName"] = version_name
+    if tickets:
+        summary["enrolmentTicketEmbedded"] = True
+        # Keep secret-bearing files private and verify QR images without printing their content.
+        first = output / "payload-1.json" if batch else output
+        image = quote(str(first) + ".png")
+        source = quote(str(first))
+        summary["qrEncodeCommand"] = (
+            f"(umask 077; set -C; qrencode -8 -l M -s 8 -m 4 -o - -r {source} > {image})"
+        )
+        summary["qrVerifyCommand"] = (
+            f"zbarimg --raw --quiet {image} 2>/dev/null | tr -d '\\n' | cmp -s - {source}"
+        )
+        if batch:
+            summary.pop("payloadBytes")
+            summary["payloads"] = [{"ticketLine": number, "file": name, "bytes": len(content)}
+                                   for number, (name, content) in enumerate(files.items(), 1)]
     return summary
 
 
