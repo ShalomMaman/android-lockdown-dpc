@@ -167,15 +167,15 @@ public final class BuiltInBlockExemptionsStoreTest {
         List<String> lines = new ArrayList<>();
         Set<String> none = Set.of();
         Set<String> refused = Set.of(TELEGRAM);
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none, lines::add);
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::add);
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::add);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none, lines::addAll);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::addAll);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::addAll);
         // Approved again: the refused set clears without a "restored" claim.
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, refused, lines::add);
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none, lines::add);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, refused, lines::addAll);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, none, none, lines::addAll);
         // Refused again, then Android confirms a suspension: restored.
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::add);
-        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, refused, none, lines::add);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, refused, none, none, lines::addAll);
+        BuiltInBlockExemptionsStore.containmentOutcome(prefs, none, refused, none, lines::addAll);
         assertEquals(List.of(
                 "builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
                 "builtin-exemption: approved again; containment no longer needed: " + TELEGRAM,
@@ -190,9 +190,9 @@ public final class BuiltInBlockExemptionsStoreTest {
         Set<String> refused = Set.of(TELEGRAM);
         Set<String> none = Set.of();
         List<String> attempts = new ArrayList<>();
-        Predicate<String> append = line -> {
+        Predicate<List<String>> append = lines -> {
             assertTrue("dedup state has not been saved yet", memory.isEmpty());
-            attempts.add(line);
+            attempts.addAll(lines);
             return attempts.size() == 2;
         };
 
@@ -204,6 +204,38 @@ public final class BuiltInBlockExemptionsStoreTest {
 
         String line = "builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM;
         assertEquals(List.of(line, line), attempts);
+    }
+
+    @Test
+    public void failedContainmentAuditRetriesAllRowsOnceAndPreservesPriorEntries() {
+        SharedPreferences readback = androidLikePreferences(new HashMap<>(), new boolean[]{false});
+        String priorRefusal = "com.whatsapp";
+        Set<String> previous = Set.of(priorRefusal);
+        Set<String> refused = Set.of(TELEGRAM);
+        Set<String> none = Set.of();
+        Map<String, Object> priorAudit = Map.of("entries", "1|previous audit entry");
+        Map<String, Object> auditMemory = new HashMap<>(priorAudit);
+        boolean[] diskFails = {true};
+        SharedPreferences audit = androidLikePreferences(auditMemory, diskFails);
+        AuditEvent event = AuditEvent.EXEMPTION_CONTAINMENT_CHANGED;
+        Predicate<List<String>> append = lines -> AuditLog.appendBatchCommitted(audit, event, lines);
+
+        BuiltInBlockExemptionsStore.containmentOutcome(readback, previous, none, none, lines -> true);
+        BuiltInBlockExemptionsStore.containmentOutcome(readback, refused, previous, none, append);
+        assertEquals(priorAudit, auditMemory);
+
+        diskFails[0] = false;
+        BuiltInBlockExemptionsStore.containmentOutcome(readback, refused, previous, none, append);
+        BuiltInBlockExemptionsStore.containmentOutcome(readback, refused, previous, none, append);
+
+        List<String> rows = List.of(audit.getString("entries", "").split("\\n"));
+        assertEquals(3, rows.size());
+        assertEquals(new AuditLog.Entry(1, AuditEvent.LEGACY_CODE, "previous audit entry"),
+                AuditLog.parse(rows.get(0), true));
+        assertEquals("builtin-exemption: CONTAINMENT_REFUSED: " + TELEGRAM,
+                AuditLog.parse(rows.get(1), true).text());
+        assertEquals("builtin-exemption: social containment restored: " + priorRefusal,
+                AuditLog.parse(rows.get(2), true).text());
     }
 
     // --- Routing warning audit -----------------------------------------------------------
