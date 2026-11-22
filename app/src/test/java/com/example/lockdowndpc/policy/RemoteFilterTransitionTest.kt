@@ -1,9 +1,12 @@
 package com.example.lockdowndpc.policy
 
+import android.os.Bundle
 import com.example.lockdowndpc.remote.Generation
+import com.example.lockdowndpc.remote.JsonObject
 import com.example.lockdowndpc.remote.Refused
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
+import java.util.function.BiPredicate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,9 +16,8 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The filter that is in force stays in force, whole: its VPN lockdown, its
- * proxy, its certificate and its application, until a pass has verified what
- * replaces it or has finished cleaning up after it.
+ * The existing VPN lockdown, proxy, certificate and VPN app configuration
+ * stay in force until the pass verifies a replacement or completes teardown.
  */
 class RemoteFilterTransitionTest : RemotePassFixture() {
     private lateinit var first: Generation
@@ -93,6 +95,72 @@ class RemoteFilterTransitionTest : RemotePassFixture() {
 
         device.refuseCaInstall = false
         assertSecondFilterTakesOver()
+    }
+
+    @Test fun failedSamePackageSwitchRestoresManagedConfig() {
+        val previous = dpm.getApplicationRestrictions(admin, VPN).deepCopy().apply {
+            putBundle("OtherOptions", Bundle().apply { putStringArray("Domains", arrayOf("example.org")) })
+        }
+        dpm.setApplicationRestrictions(admin, VPN, previous)
+        replace(policy(filter = replacementRouting()))
+        device.refuseProxyChange = true
+
+        assertFalse(pass().verified)
+        assertTrue(errors().toString(), errors().any { it.startsWith("home-filter:vpn=CONFIRMED,proxy=REFUSED,") })
+        assertFirstFilterProtects()
+        val restored = dpm.getApplicationRestrictions(admin, VPN)
+        assertEquals(previous.keySet(), restored.keySet())
+        assertEquals(previous.getString("Tailnet"), restored.getString("Tailnet"))
+        assertEquals(previous.getString("LoginURL"), restored.getString("LoginURL"))
+        assertEquals(previous.getString("ExitNodeID"), restored.getString("ExitNodeID"))
+        assertEquals(listOf("example.org"), restored.getBundle("OtherOptions")?.getStringArray("Domains")?.toList())
+    }
+
+    @Test fun failedManagedConfigReadbackIsReportedAndLockdownStaysOn() {
+        replace(policy(filter = replacementRouting()))
+        device.refuseProxyChange = true
+        device.ignoreManagedConfigWrite = BiPredicate { name, restrictions ->
+            name == VPN && restrictions.getString("Tailnet") == "required:Ttest1"
+        }
+
+        assertFalse(pass().verified)
+        assertTrue(errors().toString(), "home-filter:previous-protection-restore-unverified" in errors())
+        assertEquals("required:Treplacement", dpm.getApplicationRestrictions(admin, VPN).getString("Tailnet"))
+        assertEquals(VPN, dpm.getAlwaysOnVpnPackage(admin))
+        assertTrue(dpm.isAlwaysOnVpnLockdownEnabled(admin))
+        assertEquals(first, verified())
+    }
+
+    @Test fun failedSamePackageSwitchRestoresEmptyManagedConfig() {
+        dpm.setApplicationRestrictions(admin, VPN, Bundle())
+        replace(policy(filter = replacementRouting()))
+        device.refuseProxyChange = true
+
+        assertFalse(pass().verified)
+        assertTrue(errors().toString(), errors().any { it.startsWith("home-filter:vpn=CONFIRMED,proxy=REFUSED,") })
+        assertFirstFilterProtects()
+        assertTrue(dpm.getApplicationRestrictions(admin, VPN).isEmpty)
+    }
+
+    @Test fun failedPackageSwapRestoresManagedConfigForBothPackages() {
+        install(OTHER_VPN)
+        val standby = Bundle().apply { putString("Tailnet", "required:Tstandby") }
+        dpm.setApplicationRestrictions(admin, OTHER_VPN, standby)
+        replace(policy(filter = filter(OTHER_VPN, OTHER_PAC, CA_B)))
+        // Simulate the switch changing the old package as well as the replacement.
+        device.beforeVpnWrite = Runnable {
+            device.beforeVpnWrite = Runnable { }
+            dpm.setApplicationRestrictions(admin, VPN, Bundle())
+        }
+        device.refuseProxyChange = true
+
+        assertFalse(pass().verified)
+        assertTrue(errors().toString(), errors().any { it.startsWith("home-filter:vpn=CONFIRMED,proxy=REFUSED,") })
+        assertFirstFilterProtects()
+        assertEquals("required:Ttest1", dpm.getApplicationRestrictions(admin, VPN).getString("Tailnet"))
+        val restoredStandby = dpm.getApplicationRestrictions(admin, OTHER_VPN)
+        assertEquals(standby.keySet(), restoredStandby.keySet())
+        assertEquals("required:Tstandby", restoredStandby.getString("Tailnet"))
     }
 
     /** A replacement the old policy hid is shown through the release record, and hidden again when the switch fails. */
@@ -188,6 +256,13 @@ class RemoteFilterTransitionTest : RemotePassFixture() {
         assertFalse(HomeFilterStore.read(context).configured())
         assertEquals(target(), verified())
     }
+
+    private fun replacementRouting(): JsonObject = filter(VPN, OTHER_PAC, CA_B) + ("routing" to mapOf(
+        "tailnetId" to "Treplacement",
+        "loginUrl" to "https://replacement.example.org",
+        "exitNodeId" to "replacement-exit",
+        "organizationName" to "TEST ONLY"
+    ))
 
     private fun assertFirstFilterProtects() {
         assertEquals(VPN, dpm.getAlwaysOnVpnPackage(admin))

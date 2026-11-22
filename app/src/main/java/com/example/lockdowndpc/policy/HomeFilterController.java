@@ -13,10 +13,12 @@ import android.os.Bundle;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -227,11 +229,10 @@ public final class HomeFilterController {
      * The remote pass never leaves the device with less than it had.
      *
      * <p>An enabled filter is brought up and read back before anything older is
-     * removed. If any part of it fails after the VPN lockdown or the proxy
-     * already moved, the lockdown and proxy that were in force are put back and
-     * read back. A teardown removes the PAC proxy and the certificates, then the
-     * uninstall block, the routing settings and the profile restrictions, each
-     * read back, and releases the VPN lockdown as its last Android call.
+     * removed. If verification fails, the previous VPN lockdown, proxy and VPN
+     * app configuration are restored and read back. A teardown removes the PAC
+     * proxy and certificates, then the uninstall block, routing settings and
+     * profile restrictions, each read back, before releasing the VPN lockdown.
      */
     static boolean reconcileRemote(HomeFilterPolicy.Settings settings, int sdk, HomeFilterPolicy.Gateway gateway,
                                    Set<String> retiredCas, Set<HomeFilterPolicy.Config> retiredFilters,
@@ -243,7 +244,7 @@ public final class HomeFilterController {
         }
         boolean verified = true;
         if (active != null) {
-            LiveFilter before = LiveFilter.read(gateway, settings.ca());
+            LiveFilter before = LiveFilter.read(gateway, active.vpnPackage(), settings.ca());
             if (before == null) {
                 // Nothing is changed that could not be put back afterwards.
                 errors.add("home-filter:live-state-unreadable");
@@ -307,12 +308,22 @@ public final class HomeFilterController {
         return verified;
     }
 
-    /** The VPN lockdown and proxy in force before a pass, and whether its new certificate was already installed. */
-    private record LiveFilter(HomeFilterPolicy.VpnState vpn, String pacUrl, boolean newCaInstalled) {
-        static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newCa) {
+    /** Live protection and VPN app configuration captured before trying a replacement. */
+    private record LiveFilter(HomeFilterPolicy.VpnState vpn, String pacUrl, boolean newCaInstalled,
+                              List<BooleanSupplier> managedConfigRollbacks) {
+        static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newVpnPackage, String newCa) {
             try {
-                return new LiveFilter(gateway.vpnState(), pac(gateway),
-                        newCa != null && gateway.hasCa(newCa));
+                HomeFilterPolicy.VpnState vpn = gateway.vpnState();
+                String previousPackage = vpn.packageName();
+                List<BooleanSupplier> managedConfigRollbacks = new ArrayList<>(2);
+                if (previousPackage != null) {
+                    managedConfigRollbacks.add(gateway.captureManagedConfig(previousPackage));
+                    if (!previousPackage.equals(newVpnPackage)) {
+                        managedConfigRollbacks.add(gateway.captureManagedConfig(newVpnPackage));
+                    }
+                }
+                return new LiveFilter(vpn, pac(gateway), newCa != null && gateway.hasCa(newCa),
+                        managedConfigRollbacks);
             } catch (RuntimeException unreadable) {
                 return null;
             }
@@ -320,12 +331,13 @@ public final class HomeFilterController {
 
         /**
          * Puts back what a failed attempt moved, withdraws a certificate it added, and reads all of it back.
-         * A device that had no filter VPN keeps whatever the attempt reached: that is not less than before.
+         * A device that had no filter VPN keeps any protection the attempt added.
          */
         boolean restore(HomeFilterPolicy.Gateway gateway, String newCa) {
             if (vpn.packageName() == null) {
                 return true;
             }
+            boolean restored;
             try {
                 if (!vpnMatches(gateway)) {
                     gateway.restoreVpn(vpn);
@@ -336,11 +348,19 @@ public final class HomeFilterController {
                 if (newCa != null && !newCaInstalled && gateway.hasCa(newCa)) {
                     gateway.setCa(newCa, false);
                 }
-                return vpnMatches(gateway) && pacUrl.equals(pac(gateway))
+                restored = vpnMatches(gateway) && pacUrl.equals(pac(gateway))
                         && (newCa == null || newCaInstalled || !gateway.hasCa(newCa));
             } catch (RuntimeException refused) {
-                return false;
+                restored = false;
             }
+            for (BooleanSupplier rollback : managedConfigRollbacks) {
+                try {
+                    if (!rollback.getAsBoolean()) restored = false;
+                } catch (RuntimeException refused) {
+                    restored = false;
+                }
+            }
+            return restored;
         }
 
         private boolean vpnMatches(HomeFilterPolicy.Gateway gateway) {
@@ -632,6 +652,41 @@ public final class HomeFilterController {
             });
             dpm.setApplicationRestrictions(admin, packageName, updated);
             return true;
+        }
+
+        @Override
+        public BooleanSupplier captureManagedConfig(String packageName) {
+            Bundle previous = dpm.getApplicationRestrictions(admin, packageName).deepCopy();
+            return () -> {
+                if (managedConfigMatches(packageName, previous)) return true;
+                dpm.setApplicationRestrictions(admin, packageName, previous);
+                return managedConfigMatches(packageName, previous);
+            };
+        }
+
+        private boolean managedConfigMatches(String packageName, Bundle expected) {
+            try {
+                return restrictionValuesMatch(expected, dpm.getApplicationRestrictions(admin, packageName));
+            } catch (RuntimeException unreadable) {
+                // Still attempt a restore if the current configuration cannot be inspected.
+                return false;
+            }
+        }
+
+        @SuppressWarnings("deprecation")
+        private static boolean restrictionValuesMatch(Object expected, Object actual) {
+            if (expected instanceof Bundle before && actual instanceof Bundle after) {
+                return before.keySet().equals(after.keySet()) && before.keySet().stream()
+                        .allMatch(key -> restrictionValuesMatch(before.get(key), after.get(key)));
+            }
+            if (expected instanceof Object[] before && actual instanceof Object[] after) {
+                if (before.length != after.length) return false;
+                for (int i = 0; i < before.length; i++) {
+                    if (!restrictionValuesMatch(before[i], after[i])) return false;
+                }
+                return true;
+            }
+            return Objects.deepEquals(expected, actual);
         }
 
         @Override

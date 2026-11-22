@@ -232,6 +232,8 @@ public final class HomeFilterPolicy {
         boolean retainVpnUninstallBlock(String packageName);
         Map<String, Object> managedConfig(String packageName);
         boolean setManagedConfig(String packageName, Map<String, Object> changes, boolean enabled);
+        /** Captures the complete configuration and returns a rollback that verifies it after restoration. */
+        BooleanSupplier captureManagedConfig(String packageName);
         boolean privateDnsOpportunistic();
         boolean setPrivateDnsOpportunistic();
         String proxyPacUrl();

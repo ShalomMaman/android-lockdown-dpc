@@ -651,6 +651,14 @@ stay visible until a replacement policy arrives. The build gate remains off.
 Signing recovery documents for the console and delivering the replacement keyset
 and policy are responsibilities of the fleet server or offline operator.
 
+**Accepted residual risks.**
+
+- An attacker with write access to app storage, an old bind-record file, the
+  retired root signing key, and the on-screen nonce could re-anchor with that
+  root. Only a Keystore-backed monotonic counter would prevent that rollback.
+- A device stuck mid-rotation with its bind record still `pending` fails closed.
+  Factory reset is the only recovery path.
+
 ### 5.6 Failure codes
 
 `doc-signature-invalid`, `doc-key-unknown`, `doc-device-not-listed`,

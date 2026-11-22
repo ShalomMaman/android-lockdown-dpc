@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.BooleanSupplier;
 
 import static com.example.lockdowndpc.policy.HomeFilterPolicy.State.CONFIRMED;
 import static com.example.lockdowndpc.policy.HomeFilterPolicy.State.HIDDEN_VPN;
@@ -505,6 +506,19 @@ public class HomeFilterPolicyTest {
                 else changes.forEach(managed::remove);
             }
             return true;
+        }
+
+        @Override
+        public BooleanSupplier captureManagedConfig(String packageName) {
+            Map<String, Object> previous = managedConfig(packageName);
+            return () -> {
+                if (!previous.equals(managed) && !ignoreManagedConfig) {
+                    writes++;
+                    managed.clear();
+                    managed.putAll(previous);
+                }
+                return previous.equals(managed);
+            };
         }
 
         @Override
