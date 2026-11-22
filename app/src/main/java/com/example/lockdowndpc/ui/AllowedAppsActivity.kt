@@ -79,6 +79,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.AuthorizedPolicyWriter
+import com.example.lockdowndpc.policy.AdminAuthority
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
@@ -172,7 +174,10 @@ class AllowedAppsActivity : AppCompatActivity() {
         val hadSystemSelection = AllowedAppsStore
             .getAdminSelectedSystemPackages(this).isNotEmpty() || adminSelectedSystem.isNotEmpty()
 
-        if (!AllowedAppsStore.setAllowedPackages(this, selection, managed, adminSelectedSystem)) {
+        if (!AuthorizedPolicyWriter.setAllowedPackages(
+                this, AdminAuthority.localSession(this), selection, managed, adminSelectedSystem,
+            )
+        ) {
             Toast.makeText(this, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
             return
         }
@@ -365,10 +370,14 @@ private fun InventoryScreen(
             firmwareBuild = state.firmwareBuild,
             onDismiss = { riskRow = null },
             onAccept = {
-                AllowedAppsStore.recordSystemRiskAcceptance(
-                    context,
-                    riskAcceptanceFor(row, state.firmwareBuild, System.currentTimeMillis()),
-                )
+                if (!AuthorizedPolicyWriter.recordSystemRiskAcceptance(
+                        context, AdminAuthority.localSession(context),
+                        riskAcceptanceFor(row, state.firmwareBuild, System.currentTimeMillis()),
+                    )
+                ) {
+                    Toast.makeText(context, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
+                    return@RiskAcceptanceDialog
+                }
                 val accepted = row.withAcceptedRisk(
                     protectedContext = state.protectedContext,
                     // A freshly reviewed component starts unticked, which under

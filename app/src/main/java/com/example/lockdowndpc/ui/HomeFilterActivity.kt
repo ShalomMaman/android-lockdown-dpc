@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.AdminAuthority
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
 import com.example.lockdowndpc.policy.HomeFilterCertificate
 import com.example.lockdowndpc.policy.HomeFilterController
@@ -115,14 +116,15 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         return true
     }
 
-    fun applyPolicy(operation: () -> HomeFilterController.Snapshot) {
+    fun applyPolicy(operation: (AdminAuthority) -> HomeFilterController.Snapshot) {
         if (busy || !authorize()) return
+        val authority = AdminAuthority.localSession(context) ?: return
         busy = true
         probe = HomeFilterPolicy.ProbeState.NOT_RUN
         error = null
         scope.launch {
             try {
-                snapshot = withContext(Dispatchers.IO) { operation() }
+                snapshot = withContext(Dispatchers.IO) { operation(authority) }
                 selectedCa = null
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -273,7 +275,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             }
             PrimaryAction(
                 text = stringResource(R.string.home_filter_retry),
-                onClick = { applyPolicy { HomeFilterController.retry(context) } },
+                onClick = { applyPolicy { HomeFilterController.retry(context, it) } },
                 enabled = !busy,
             )
             if (settings.enabled()) {
@@ -307,17 +309,17 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                     when (action) {
                         HomeFilterAction.ENABLE -> {
                             pendingConfig?.let { config ->
-                                applyPolicy { HomeFilterController.enable(context, config, ca) }
+                                applyPolicy { HomeFilterController.enable(context, it, config, ca) }
                             }
                             pendingConfig = null
                         }
                         HomeFilterAction.DISABLE ->
-                            applyPolicy { HomeFilterController.disable(context) }
+                            applyPolicy { HomeFilterController.disable(context, it) }
                         HomeFilterAction.INSTALL_CA -> if (ca != null) {
-                            applyPolicy { HomeFilterController.installCa(context, ca) }
+                            applyPolicy { HomeFilterController.installCa(context, it, ca) }
                         }
                         HomeFilterAction.REMOVE_CA ->
-                            applyPolicy { HomeFilterController.removeCa(context) }
+                            applyPolicy { HomeFilterController.removeCa(context, it) }
                     }
                 }) { Text(stringResource(action.title)) }
             },

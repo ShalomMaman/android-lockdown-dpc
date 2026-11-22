@@ -5,6 +5,9 @@ import android.content.SharedPreferences;
 import android.os.SystemClock;
 
 import com.example.lockdowndpc.maintenance.MaintenanceCoordinator.MaintenanceOutcome;
+import com.example.lockdowndpc.policy.ManagementMode;
+import com.example.lockdowndpc.policy.ManagementModeStore;
+import com.example.lockdowndpc.security.DurablePreferences;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -131,6 +134,9 @@ public final class MaintenanceStore {
      * window is one the guard would still honour.
      */
     public static MaintenanceWindow liveWindow(Context context) {
+        if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
+            return null;
+        }
         MaintenanceWindow window = readWindow(context);
         if (window == null) {
             return null;
@@ -158,7 +164,7 @@ public final class MaintenanceStore {
      * that the record reaches disk before the first {@code DevicePolicyManager}
      * call, and an asynchronous write is exactly the race being closed.
      */
-    public static synchronized boolean markRestorePending(Context context) {
+    static synchronized boolean markRestorePending(Context context) {
         // The return value is the whole point. SharedPreferences.commit()
         // reports false when the values did not reach storage, and a caller that
         // ignores that would relax a device on the strength of a record that
@@ -191,7 +197,7 @@ public final class MaintenanceStore {
      *         later pass can reconstruct, and must close the window rather than
      *         report it as open.
      */
-    public static synchronized boolean apply(Context context, MaintenanceOutcome outcome) {
+    static synchronized boolean apply(Context context, MaintenanceOutcome outcome) {
         boolean durable;
         MaintenanceWindow authorizedWindow = outcome.windowForPersistence();
         if (authorizedWindow != null) {
@@ -210,7 +216,7 @@ public final class MaintenanceStore {
      *
      * @return whether the record actually reached storage
      */
-    public static synchronized boolean saveWindow(Context context, MaintenanceWindow window) {
+    static synchronized boolean saveWindow(Context context, MaintenanceWindow window) {
         return prefs(context).edit()
                 .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
                 .putString(KEY_CAPABILITIES, window.capabilitySummary())
@@ -255,6 +261,22 @@ public final class MaintenanceStore {
         prefs(context).edit().putBoolean(KEY_RESTORE_PENDING, true).commit();
         clearWindow(context);
         return null;
+    }
+
+    /** Removes legacy maintenance state after the remote marker is durable. */
+    public static boolean clearForRemoteIntent(Context context) {
+        return ManagementModeStore.hasCommittedRemoteIntent(context)
+                && !restorePending(context) && clearAll(context);
+    }
+
+    private static synchronized boolean clearAll(Context context) {
+        SharedPreferences preferences = prefs(context);
+        String[] keys = preferences.getAll().keySet().toArray(new String[0]);
+        SharedPreferences.Editor editor = preferences.edit();
+        for (String key : keys) {
+            editor.remove(key);
+        }
+        return DurablePreferences.commit(preferences, editor, keys);
     }
 
     private static SharedPreferences prefs(Context context) {

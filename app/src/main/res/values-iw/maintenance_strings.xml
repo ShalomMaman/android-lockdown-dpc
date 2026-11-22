@@ -143,6 +143,7 @@
     <string name="maint_audit_close_administrator_cancelled">מנהל מערכת סגר את חלון התחזוקה.</string>
     <string name="maint_audit_close_clock_anomaly">חלון התחזוקה נסגר מפני שלא ניתן היה לסמוך על קריאות השעון.</string>
     <string name="maint_audit_close_unreadable_record">לא ניתן היה לקרוא רשומת תחזוקה שמורה, ולכן המדיניות הקודמת שוחזרה.</string>
+    <string name="maint_audit_close_management_mode">חלון התחזוקה נסגר כי מצב הניהול הנוכחי מחייב הגנה.</string>
     <string name="maint_audit_close_open_failed">חלון התחזוקה בוטל מפני שלא ניתן היה לאמת את פתיחתו.</string>
 
     <!-- יומן: פעולות מנהל המערכת -->

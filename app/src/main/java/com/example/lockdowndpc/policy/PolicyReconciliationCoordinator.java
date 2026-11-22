@@ -104,7 +104,11 @@ public final class PolicyReconciliationCoordinator {
     ) {
         Context appContext = context.getApplicationContext();
         submit(() -> runGuardedVerified(
+                () -> true,
                 () -> {
+                    if (!ManagementModeStore.read(appContext).usesLocalPolicy()) {
+                        return RemotePolicyApplier.reconcile(appContext, reason);
+                    }
                     if (!AllowedAppsStore.isProtectionEnabled(appContext)) {
                         if (HomeFilterController.needsReconciliation(appContext)) {
                             LockdownPolicyController.pause(appContext);
@@ -112,9 +116,8 @@ public final class PolicyReconciliationCoordinator {
                         Log.i(TAG, "Skipping reconciliation while protection is paused: " + reason);
                         return false;
                     }
-                    return true;
+                    return applyAndRecord(appContext, reason);
                 },
-                () -> applyAndRecord(appContext, reason),
                 exception -> recordCrash(appContext, reason, exception),
                 completion
         ));
@@ -151,7 +154,15 @@ public final class PolicyReconciliationCoordinator {
 
     /** Applies the complete policy and records the outcome of the pass. */
     private static boolean applyAndRecord(Context appContext, String reason) {
-        LockdownPolicyController.PolicyResult result = LockdownPolicyController.apply(appContext);
+        if (!ManagementModeStore.read(appContext).usesLocalPolicy()) {
+            return RemotePolicyApplier.reconcile(appContext, reason);
+        }
+        return recordResult(appContext, reason, LockdownPolicyController.apply(appContext));
+    }
+
+    static boolean recordResult(
+            Context appContext, String reason, LockdownPolicyController.PolicyResult result
+    ) {
         // Recorded, not just logged: an unattended pass is the only
         // evidence a device has that it is still enforcing what it
         // was told to, and the health report reads it back.
@@ -179,9 +190,20 @@ public final class PolicyReconciliationCoordinator {
                 ReconciliationRecord.Outcome.CRASHED,
                 reason,
                 exception.getClass().getSimpleName());
-        AllowedAppsStore.markApplyFailed(appContext, message);
+        if (ManagementModeStore.read(appContext).usesLocalPolicy()) {
+            AllowedAppsStore.markApplyFailed(appContext, message);
+        }
         AuditLog.append(appContext, AuditEvent.RECONCILIATION_CRASHED, message);
         Log.e(TAG, message, exception);
+    }
+
+    /** Records an asynchronous Android failure only for active local protection. */
+    public static void recordPlatformFailure(Context context, String error) {
+        if (ManagementModeStore.read(context).usesLocalPolicy()
+                && AllowedAppsStore.isProtectionEnabled(context)) {
+            AllowedAppsStore.markApplyFailed(context, error);
+            AuditLog.append(context, AuditEvent.POLICY_RESULT_FAILED, error);
+        }
     }
 
     /** The failure summary, as machine tokens rather than prose. */
@@ -205,6 +227,10 @@ public final class PolicyReconciliationCoordinator {
         Context appContext = context.getApplicationContext();
         submit(() -> runGuarded(
                 () -> {
+                    if (!ManagementModeStore.read(appContext).usesLocalPolicy()) {
+                        RemotePolicyApplier.reconcile(appContext, reason);
+                        return false;
+                    }
                     if (AllowedAppsStore.isProtectionEnabled(appContext)) {
                         Log.i(TAG, "Skipping pause reconciliation while protection is active: "
                                 + reason);
@@ -224,7 +250,9 @@ public final class PolicyReconciliationCoordinator {
                 exception -> {
                     String message = "Pause reconciliation crashed (" + reason + "): "
                             + exception.getClass().getSimpleName();
-                    AllowedAppsStore.markPauseFailed(appContext, message);
+                    if (ManagementModeStore.read(appContext).usesLocalPolicy()) {
+                        AllowedAppsStore.markPauseFailed(appContext, message);
+                    }
                     AuditLog.append(appContext, AuditEvent.PAUSE_RECONCILIATION_CRASHED, message);
                     Log.e(TAG, message, exception);
                 },

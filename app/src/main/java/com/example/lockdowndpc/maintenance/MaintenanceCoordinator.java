@@ -15,6 +15,7 @@ import com.example.lockdowndpc.policy.SystemPolicyReport;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.Map;
 
 /**
@@ -208,6 +209,7 @@ public final class MaintenanceCoordinator {
     private final SystemPolicyGateway gateway;
     private final MaintenanceCapabilityGateway capabilityGateway;
     private final MaintenanceClock clock;
+    private final BooleanSupplier canOpen;
 
     /**
      * @param sdkInt      the running {@code Build.VERSION.SDK_INT}
@@ -225,6 +227,18 @@ public final class MaintenanceCoordinator {
             SystemPolicyGateway gateway,
             MaintenanceCapabilityGateway capabilityGateway,
             MaintenanceClock clock
+    ) {
+        this(sdkInt, profile, baseChoices, gateway, capabilityGateway, clock, () -> true);
+    }
+
+    MaintenanceCoordinator(
+            int sdkInt,
+            SystemPolicyProfile profile,
+            Map<SystemPolicyControl, Boolean> baseChoices,
+            SystemPolicyGateway gateway,
+            MaintenanceCapabilityGateway capabilityGateway,
+            MaintenanceClock clock,
+            BooleanSupplier canOpen
     ) {
         if (profile == null) {
             throw new IllegalArgumentException("A maintenance coordinator needs a profile");
@@ -244,6 +258,7 @@ public final class MaintenanceCoordinator {
         this.gateway = gateway;
         this.capabilityGateway = capabilityGateway;
         this.clock = clock;
+        this.canOpen = canOpen;
     }
 
     /**
@@ -253,6 +268,9 @@ public final class MaintenanceCoordinator {
      * @param request what the administrator asked for
      */
     public MaintenanceOutcome open(MaintenanceWindow current, OpenRequest request) {
+        if (!canOpen.getAsBoolean()) {
+            return refusedForMode();
+        }
         OpenDecision decision = MaintenanceStateMachine.open(current, request, clock);
         if (!decision.allowed()) {
             // Nothing was sent to the device, so `current` is returned untouched:
@@ -432,6 +450,12 @@ public final class MaintenanceCoordinator {
      * maintenance it means the capability the technician was promised is simply
      * not available, so it counts.
      */
+    static MaintenanceOutcome refusedForMode() {
+        return new MaintenanceOutcome(Phase.OPEN, MaintenanceStatus.REFUSED,
+                null, null, false, null, SystemPolicyReport.empty(), List.of(),
+                "maintenance-mode-refused");
+    }
+
     private List<String> openFailures(SystemPolicyReport report, MaintenancePlan plan) {
         List<String> failures = new ArrayList<>(summaries(report.failures()));
         for (SystemPolicyControl control : plan.relaxed()) {

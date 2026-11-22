@@ -49,12 +49,38 @@ public final class LockdownPolicyController {
     private LockdownPolicyController() {}
 
     public static synchronized PolicyResult apply(Context context) {
+        if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+            return RemotePolicyApplier.refusedLegacyPass();
+        }
+        return applyProtectionOn(context, true, new ArrayList<>());
+    }
+
+    /** Temporary enforcement while remote policy projection is unavailable. */
+    static synchronized PolicyResult applyRemoteContainment(Context context) {
+        if (ManagementModeStore.read(context).usesLocalPolicy()) {
+            return RemotePolicyApplier.refusedLegacyPass();
+        }
+        ArrayList<String> errors = new ArrayList<>();
+        try {
+            var close = MaintenanceGuard.refresh(context);
+            if (close != null && (!close.restoreVerified()
+                    || MaintenanceStore.restorePending(context))) {
+                errors.add("maintenance-restore-unverified");
+            }
+        } catch (RuntimeException exception) {
+            errors.add("maintenance-restore:" + exception.getClass().getSimpleName());
+        }
+        return applyProtectionOn(context, false, errors);
+    }
+
+    private static PolicyResult applyProtectionOn(Context context, boolean local, ArrayList<String> errors) {
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         boolean deviceOwner = dpm != null && dpm.isDeviceOwnerApp(context.getPackageName());
         HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
-        boolean filterEnabled = homeFilter != null && homeFilter.enabled();
-        String pacUrl = homeFilter != null && homeFilter.configured() ? homeFilter.config().pacUrl() : null;
+        boolean filterReadable = homeFilter != null;
+        boolean filterEnabled = filterReadable && homeFilter.enabled();
+        String pacUrl = filterReadable && homeFilter.configured() ? homeFilter.config().pacUrl() : null;
         BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
         SocialPass social = new SocialPass(context, exemptions, activeAdminPackages(dpm));
         boolean chromeInScope = ChromeFilterExemption.inScope(
@@ -63,7 +89,6 @@ public final class LockdownPolicyController {
                 Build.VERSION.SDK_INT, currentWebViewProvider());
         ChromeFilterExemption.Gateway chromeGateway = deviceOwner && chromeInScope
                 ? new AndroidChromeGateway(context, dpm, admin) : null;
-        ArrayList<String> errors = new ArrayList<>();
         // The single containment step runs before any early return. Later
         // package releases wait for network verification, except for the VPN
         // itself, which must be available for verification to succeed.
@@ -75,7 +100,7 @@ public final class LockdownPolicyController {
 
             @Override
             public boolean homeFilterReadable() {
-                return homeFilter != null;
+                return filterReadable;
             }
 
             @Override
@@ -107,7 +132,7 @@ public final class LockdownPolicyController {
 
             @Override
             public boolean continuesVerifiedPass() {
-                return BuiltInBlockExemptionsStore.continuesVerifiedPass(context, homeFilter);
+                return filterReadable && BuiltInBlockExemptionsStore.continuesVerifiedPass(context, homeFilter);
             }
 
             @Override
@@ -119,12 +144,14 @@ public final class LockdownPolicyController {
 
             @Override
             public void markApplyStarted() {
-                AllowedAppsStore.markApplyStarted(context);
+                if (local) {
+                    AllowedAppsStore.markApplyStarted(context);
+                }
             }
 
             @Override
             public boolean protectionActive() {
-                return AllowedAppsStore.isProtectionEnabled(context);
+                return !local || AllowedAppsStore.isProtectionEnabled(context);
             }
 
             @Override
@@ -139,15 +166,17 @@ public final class LockdownPolicyController {
         if (start.stop() == ExemptionPassStart.Stop.CORRUPT_HOME_FILTER) {
             errors.add(0, HomeFilterController.CORRUPT_CONFIGURATION);
             if (deviceOwner) {
-                // Active windows still suspend their targets. Ended windows
-                // keep their suspensions until the network is verified.
+                // Preserve the live VPN, proxy and CA. Active windows still
+                // suspend their targets and ended windows keep their suspensions.
                 reconcileScheduleWithoutFilter(context, dpm, admin, social, chromeInScope, errors);
             }
             return new PolicyResult(deviceOwner, false, 0, 0, errors);
         }
         if (start.stop() == ExemptionPassStart.Stop.NOT_DEVICE_OWNER) {
             String error = "device-owner-required";
-            AllowedAppsStore.markApplyFailed(context, error);
+            if (local) {
+                AllowedAppsStore.markApplyFailed(context, error);
+            }
             return new PolicyResult(false, false, 0, 0, List.of(error));
         }
         ChromeFilterExemption.Decision chrome = start.chrome();
@@ -155,7 +184,8 @@ public final class LockdownPolicyController {
         // teardown is "enabled" to system policy, packages and reconciliation.
         BuiltInBlockExemptions.PassFilter passFilter = start.filter();
         HomeFilterPolicy.Settings enforcedFilter = passFilter.effective();
-        SystemPolicyPass systemPolicy = applySystemPolicy(context, dpm, admin, enforcedFilter.enabled(), errors);
+        SystemPolicyPass systemPolicy = applySystemPolicy(
+                context, dpm, admin, enforcedFilter.enabled(), errors);
         // Resolved from this pass's read-back evidence, never from the stored
         // switch: a compatibility mode whose install lock the device did not
         // confirm leaves the Store hidden and the pass unverified.
@@ -198,7 +228,7 @@ public final class LockdownPolicyController {
         // The package sweep only releases apps after network verification.
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
                 playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold,
-                networkVerified, errors);
+                networkVerified, !local, errors);
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
         if (chromeInScope) {
             // Chrome is released only now, on evidence taken after the lock:
@@ -252,7 +282,9 @@ public final class LockdownPolicyController {
             if (enforcedFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
                 clearMaintenanceWindow(context, "home-filter");
             }
-            AllowedAppsStore.markApplySucceeded(context);
+            if (local) {
+                AllowedAppsStore.markApplySucceeded(context);
+            }
             // The next pass may keep an allowed Chrome as it is only while it
             // continues this one: same boot, same home filter settings.
             BuiltInBlockExemptionsStore.recordVerifiedPass(context, homeFilter);
@@ -260,7 +292,9 @@ public final class LockdownPolicyController {
                     + ", allowed=" + packageCounts[1]);
         } else {
             String summary = summarizeErrors(errors);
-            AllowedAppsStore.markApplyFailed(context, summary);
+            if (local) {
+                AllowedAppsStore.markApplyFailed(context, summary);
+            }
             AuditLog.append(context, AuditEvent.POLICY_APPLY_FAILED, "Policy apply failed: " + summary);
             Log.e(TAG, "Policy apply failed verification: " + summary);
         }
@@ -268,6 +302,9 @@ public final class LockdownPolicyController {
     }
 
     public static synchronized PolicyResult pause(Context context) {
+        if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+            return RemotePolicyApplier.refusedLegacyPass();
+        }
         HomeFilterPolicy.Settings homeFilter = HomeFilterController.readStored(context);
         if (homeFilter == null) return corruptHomeFilter();
         // Before anything changes: remove the continuation evidence, durably,
@@ -922,6 +959,7 @@ public final class LockdownPolicyController {
             boolean chromeInScope,
             ScheduleSuspension.Hold scheduleHold,
             boolean networkVerified,
+            boolean containWithoutSelection,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -944,6 +982,7 @@ public final class LockdownPolicyController {
         String kioskTarget = kioskTarget(kiosk, social);
         int blockedCount = 0;
         int allowedCount = 0;
+        AdminAuthority.PolicyPass authority = AdminAuthority.PolicyPass.forDeviceOwner(context);
 
         Set<String> packageNames = new LinkedHashSet<>();
         for (ApplicationInfo info : getInstalledApplications(pm)) {
@@ -954,11 +993,10 @@ public final class LockdownPolicyController {
                     && !info.packageName.equals(context.getPackageName())
                     && !LockdownPackages.isManagementPackage(info.packageName)) {
                 managed.add(info.packageName);
-                AllowedAppsStore.rememberManagedPackage(
-                        context,
-                        info.packageName,
-                        info.loadLabel(pm).toString()
-                );
+                if (!AuthorizedPolicyWriter.rememberManagedPackage(
+                        context, authority, info.packageName, info.loadLabel(pm).toString())) {
+                    errors.add("managed-package-save-failed:" + info.packageName);
+                }
             }
         }
         // PackageManager omits packages hidden by this DPC from bulk queries.
@@ -1008,7 +1046,9 @@ public final class LockdownPolicyController {
             boolean shouldBlock = LockdownPackages.ALWAYS_BLOCKED.contains(packageName)
                     || LockdownPackages.KNOWN_BROWSER_AND_SOCIAL.contains(packageName);
 
-            if (!shouldBlock && allowlistConfigured
+            if (!allowlistConfigured && containWithoutSelection && managed.contains(packageName)) {
+                shouldBlock = true;
+            } else if (!shouldBlock && allowlistConfigured
                     && (managed.contains(packageName)
                         || packageClass == LockdownPackages.PackageClass.ADMIN_SELECTED_SYSTEM)) {
                 shouldBlock = mode == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
@@ -1133,8 +1173,9 @@ public final class LockdownPolicyController {
             }
         }
         // Only drop the restore obligation after a pass that actually completed.
-        if (reconcileEscapeSurfaces && (kioskActive || errors.isEmpty())) {
-            KioskConfigStore.setEscapeSurfaceHidingApplied(context, kioskActive);
+        if (reconcileEscapeSurfaces && (kioskActive || errors.isEmpty())
+                && !KioskController.recordEscapeSurfaceState(context, kioskActive)) {
+            errors.add("kiosk-escape-surface-state-save-failed");
         }
         return new int[]{blockedCount, allowedCount};
     }

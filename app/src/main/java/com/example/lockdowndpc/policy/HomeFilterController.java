@@ -12,7 +12,6 @@ import android.os.Build;
 import android.os.Bundle;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
-import com.example.lockdowndpc.security.AdminSession;
 
 import java.util.Base64;
 import java.util.Collections;
@@ -61,8 +60,9 @@ public final class HomeFilterController {
         });
     }
 
-    public static Snapshot enable(Context context, HomeFilterPolicy.Config config, String ca) {
-        return change(context, settings -> {
+    public static Snapshot enable(Context context, AdminAuthority authority,
+                                  HomeFilterPolicy.Config config, String ca) {
+        return change(context, authority, settings -> {
             if (!HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
                 throw new UnsupportedOperationException("Home filter requires Android 10 (API 29) or later");
             }
@@ -81,8 +81,8 @@ public final class HomeFilterController {
         });
     }
 
-    public static Snapshot installCa(Context context, String ca) {
-        return change(context, settings -> {
+    public static Snapshot installCa(Context context, AdminAuthority authority, String ca) {
+        return change(context, authority, settings -> {
             if (!settings.enabled() || settings.ca() != null) {
                 throw new IllegalStateException("Remove the old certificate before installing another");
             }
@@ -90,22 +90,23 @@ public final class HomeFilterController {
         });
     }
 
-    public static Snapshot removeCa(Context context) {
-        return change(context, HomeFilterPolicy.Settings::requestRemoveCa);
+    public static Snapshot removeCa(Context context, AdminAuthority authority) {
+        return change(context, authority, HomeFilterPolicy.Settings::requestRemoveCa);
     }
 
-    public static Snapshot disable(Context context) {
-        return change(context, HomeFilterPolicy.Settings::requestDisable);
+    public static Snapshot disable(Context context, AdminAuthority authority) {
+        return change(context, authority, HomeFilterPolicy.Settings::requestDisable);
     }
 
-    public static Snapshot retry(Context context) {
-        return change(context, UnaryOperator.identity());
+    public static Snapshot retry(Context context, AdminAuthority authority) {
+        return change(context, authority, UnaryOperator.identity());
     }
 
-    private static Snapshot change(Context context, UnaryOperator<HomeFilterPolicy.Settings> operation) {
+    private static Snapshot change(Context context, AdminAuthority authority,
+                                   UnaryOperator<HomeFilterPolicy.Settings> operation) {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> {
             DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
-            if (!AdminSession.isUnlocked() || dpm == null
+            if (!AdminAuthority.permitsLocal(context, authority) || dpm == null
                     || !dpm.isDeviceOwnerApp(context.getPackageName())) {
                 throw new SecurityException("An unlocked device owner is required");
             }
@@ -122,7 +123,9 @@ public final class HomeFilterController {
             }
             if (!before.equals(after)) {
                 try {
-                    HomeFilterStore.write(context, after);
+                    if (!AuthorizedPolicyWriter.setHomeFilter(context, authority, after)) {
+                        throw new SecurityException("An unlocked device owner is required");
+                    }
                 } catch (IllegalStateException failedWrite) {
                     // The previous settings were restored in memory; a pass
                     // still runs so every package is contained against them.
@@ -192,10 +195,8 @@ public final class HomeFilterController {
             HomeFilterStore.saveReadback(context, report);
             return verified;
         }
-        HomeFilterPolicy.Settings remaining = settings.afterReadback(report);
-        if (!remaining.equals(settings)) {
-            HomeFilterStore.write(context, remaining);
-        }
+        HomeFilterPolicy.Settings remaining =
+                AuthorizedPolicyWriter.finishHomeFilterReadback(context, settings, report);
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
         }
@@ -241,7 +242,8 @@ public final class HomeFilterController {
         return BuiltInBlockExemptions.teardownVerdict(
                 BuiltInBlockExemptionsStore.chromeFlag(context),
                 ExemptionObserver.observe(context, BuiltInBlockExemptions.CHROME),
-                AllowedAppsStore.isProtectionEnabled(context));
+                !ManagementModeStore.read(context).usesLocalPolicy()
+                        || AllowedAppsStore.isProtectionEnabled(context));
     }
 
     public static boolean isEnabled(Context context) {
@@ -269,8 +271,9 @@ public final class HomeFilterController {
 
     static HomeFilterPolicy.Settings readStored(Context context) {
         return HomeFilterStore.readOrReport(() -> HomeFilterStore.read(context), () -> {
-            if (AllowedAppsStore.getPolicyState(context) != AllowedAppsStore.PolicyState.FAILED
-                    || !CORRUPT_CONFIGURATION.equals(AllowedAppsStore.getPolicyError(context))) {
+            if (ManagementModeStore.read(context).usesLocalPolicy()
+                    && (AllowedAppsStore.getPolicyState(context) != AllowedAppsStore.PolicyState.FAILED
+                        || !CORRUPT_CONFIGURATION.equals(AllowedAppsStore.getPolicyError(context)))) {
                 AllowedAppsStore.markApplyFailed(context, CORRUPT_CONFIGURATION,
                         AllowedAppsStore.isProtectionEnabled(context));
             }

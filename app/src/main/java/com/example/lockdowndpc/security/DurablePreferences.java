@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /** Synchronous preference writes that undo Android's in-memory change on disk failure. */
 public final class DurablePreferences {
@@ -14,15 +15,28 @@ public final class DurablePreferences {
             SharedPreferences prefs, SharedPreferences.Editor update, String... keys
     ) {
         Map<String, ?> before = prefs.getAll();
-        if (update.commit()) {
-            return true;
-        }
-        SharedPreferences.Editor rollback = prefs.edit();
-        for (String key : keys) {
-            restore(rollback, key, before.get(key));
+        return commit(update, () -> {
+            SharedPreferences.Editor rollback = prefs.edit();
+            for (String key : keys) {
+                restore(rollback, key, before.get(key));
+            }
+            return rollback;
+        });
+    }
+
+    /** For a store that already has a typed snapshot of its previous state. */
+    public static boolean commit(
+            SharedPreferences.Editor update, Supplier<SharedPreferences.Editor> rollback
+    ) {
+        try {
+            if (update.commit()) {
+                return true;
+            }
+        } catch (RuntimeException failedWrite) {
+            // A throwing editor may already have changed the in-memory map.
         }
         // Even if disk is still unwritable, this puts the old values back in memory.
-        rollback.commit();
+        rollback.get().commit();
         return false;
     }
 

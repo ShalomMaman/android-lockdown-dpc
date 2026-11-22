@@ -21,6 +21,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
+import com.example.lockdowndpc.policy.ManagementModeStore;
+import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 import java.util.function.IntConsumer;
@@ -58,9 +60,17 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         setResult(RESULT_CANCELED);
         DevicePolicyManager dpm = getSystemService(DevicePolicyManager.class);
         if (!ACTION_ADMIN_POLICY_COMPLIANCE.equals(getIntent().getAction())
+                || !RemoteEnrolmentGate.permitsLocalProvisioning(getIntent())
                 || dpm == null || !dpm.isDeviceOwnerApp(getPackageName())) {
             finish();
             return;
+        }
+        if (!ManagementModeStore.selectLocal(this)) {
+            if (!ManagementModeStore.read(this).usesLocalPolicy()) {
+                finish();
+                return;
+            }
+            Log.w(TAG, "Local mode could not be saved; continuing with baseline verification");
         }
 
         Context appContext = getApplicationContext();

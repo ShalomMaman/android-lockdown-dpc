@@ -103,6 +103,8 @@ public final class MaintenanceStateMachine {
         CLOCK_ANOMALY,
         /** The stored record was unusable, so no window was assumed to exist. */
         UNREADABLE_RECORD,
+        /** The management mode no longer permits maintenance. */
+        MANAGEMENT_MODE,
         /**
          * Opening could not be verified, so the window was undone rather than
          * left half-applied. Recorded as its own reason because "the window was

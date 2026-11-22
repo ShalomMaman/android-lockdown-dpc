@@ -11,6 +11,7 @@ import android.content.pm.SigningInfo;
 import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.ProxyInfo;
+import android.net.Uri;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 
@@ -30,6 +31,7 @@ import org.robolectric.shadows.ShadowSigningInfo;
 
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -87,6 +89,59 @@ public class LockdownPolicyApplyTest {
 
         assertVpnRecoveredInOnePass();
         assertTrue(ScheduleStore.readOwned(context).isEmpty());
+    }
+
+    @Test
+    public void corruptFilterKeepsNetworkEnforcedInLocalMode() throws Exception {
+        assertTrue(ManagementModeStore.selectLocal(context));
+        assertCorruptFilterKeepsNetworkEnforced(ManagementMode.LOCAL_PIN);
+    }
+
+    @Test
+    public void corruptFilterKeepsNetworkEnforcedDuringEnrollment() throws Exception {
+        setRemoteMarker();
+        assertCorruptFilterKeepsNetworkEnforced(ManagementMode.ENROLLING);
+    }
+
+    @Test
+    public void corruptFilterKeepsNetworkEnforcedInRemoteMode() throws Exception {
+        setRemoteMarker();
+        assertTrue(context.getSharedPreferences(ManagementModeStore.MODE_PREFS, Context.MODE_PRIVATE)
+                .edit().putString(ManagementModeStore.MODE_KEY, ManagementMode.REMOTE.name()).commit());
+        assertCorruptFilterKeepsNetworkEnforced(ManagementMode.REMOTE);
+    }
+
+    private void setRemoteMarker() {
+        assertTrue(context.createDeviceProtectedStorageContext()
+                .getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit());
+    }
+
+    private void assertCorruptFilterKeepsNetworkEnforced(ManagementMode mode) throws Exception {
+        assertEquals(mode, ManagementModeStore.read(context));
+        Set<String> exemptions = Set.of(context.getPackageName());
+        ProxyInfo proxy = ProxyInfo.buildPacProxy(Uri.parse("https://filter.example/proxy.pac"));
+        byte[] certificate = {4, 5, 6};
+        dpm.setAlwaysOnVpnPackage(admin, VPN, true, exemptions);
+        dpm.setRecommendedGlobalProxy(admin, proxy);
+        assertTrue(dpm.installCaCert(admin, certificate));
+        ConnectivityManager connectivity = context.getSystemService(ConnectivityManager.class);
+        assertEquals(proxy, connectivity.getDefaultProxy());
+        assertTrue(context.getSharedPreferences("home_filter", Context.MODE_PRIVATE)
+                .edit().remove("pac_url").commit());
+
+        var result = mode.usesLocalPolicy() ? LockdownPolicyController.apply(context)
+                : LockdownPolicyController.applyRemoteContainment(context);
+
+        assertFalse(result.applied());
+        assertTrue(result.errors().contains(HomeFilterController.CORRUPT_CONFIGURATION));
+        assertEquals(VPN, dpm.getAlwaysOnVpnPackage(admin));
+        assertTrue(dpm.isAlwaysOnVpnLockdownEnabled(admin));
+        assertEquals(exemptions, dpm.getAlwaysOnVpnLockdownWhitelist(admin));
+        assertFalse(dpm.isApplicationHidden(admin, VPN));
+        assertFalse(dpm.isPackageSuspended(admin, VPN));
+        assertEquals(proxy, connectivity.getDefaultProxy());
+        assertTrue(dpm.hasCaCertInstalled(admin, certificate));
     }
 
     @Test
@@ -212,6 +267,7 @@ public class LockdownPolicyApplyTest {
         private String alwaysOnVpn;
         private boolean lockdown;
         private Set<String> exemptions;
+        private final Set<String> caCertificates = new HashSet<>();
         boolean refuseVpn;
         Runnable beforeVpnWrite = () -> {};
 
@@ -268,6 +324,21 @@ public class LockdownPolicyApplyTest {
             cm.bindProcessToNetwork(network);
             ShadowConnectivityManager connectivity = Shadow.extract(cm);
             connectivity.setProxyForNetwork(network, proxy);
+        }
+
+        @Implementation
+        protected boolean installCaCert(ComponentName admin, byte[] certificate) {
+            return caCertificates.add(HexFormat.of().formatHex(certificate));
+        }
+
+        @Implementation
+        protected boolean hasCaCertInstalled(ComponentName admin, byte[] certificate) {
+            return caCertificates.contains(HexFormat.of().formatHex(certificate));
+        }
+
+        @Implementation
+        protected void uninstallCaCert(ComponentName admin, byte[] certificate) {
+            caCertificates.remove(HexFormat.of().formatHex(certificate));
         }
 
         @Implementation

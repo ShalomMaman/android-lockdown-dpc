@@ -9,6 +9,7 @@ import android.os.Build;
 import android.util.Log;
 
 import com.example.lockdowndpc.policy.HomeFilterController;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.ScheduleAlarm;
 import com.example.lockdowndpc.updates.UpdateScheduler;
@@ -33,7 +34,8 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
             if (!Intent.ACTION_PACKAGE_ADDED.equals(intent.getAction())
                     && (!Intent.ACTION_PACKAGE_REMOVED.equals(intent.getAction())
                         || intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
-                        || !HomeFilterController.isConfiguredVpn(context, packageName))) {
+                        || (ManagementModeStore.read(context).usesLocalPolicy()
+                            && !HomeFilterController.isConfiguredVpn(context, packageName)))) {
                 return;
             }
             PolicyReconciliationCoordinator.reconcileAsync(
@@ -103,7 +105,9 @@ public final class LockdownDeviceAdminService extends DeviceAdminService {
                 "device-admin-service-started",
                 null
         );
-        UpdateScheduler.schedule(getApplicationContext());
+        if (ManagementModeStore.read(this).usesLocalPolicy()) {
+            UpdateScheduler.schedule(getApplicationContext());
+        }
         Log.i(TAG, "Runtime package reconciliation receiver registered");
     }
 

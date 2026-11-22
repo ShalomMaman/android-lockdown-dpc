@@ -2,7 +2,6 @@ package com.example.lockdowndpc.policy;
 
 import android.content.Context;
 
-import com.example.lockdowndpc.security.AdminSession;
 
 import java.util.LinkedHashSet;
 import java.util.Set;
@@ -107,7 +106,7 @@ public final class BuiltInExemptionsController {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> change(
                 BuiltInBlockExemptionsStore.readForEdit(context),
                 operation,
-                AdminSession::isUnlocked,
+                () -> AdminAuthority.localSession(context) != null,
                 trigger,
                 androidSink(context)));
     }
@@ -119,14 +118,15 @@ public final class BuiltInExemptionsController {
      */
     public static Outcome clearApprovals(Context context) {
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> clear(
-                AdminSession::isUnlocked, androidSink(context)));
+                () -> AdminAuthority.localSession(context) != null, androidSink(context)));
     }
 
     private static Sink androidSink(Context context) {
         return new Sink() {
             @Override
             public boolean write(BuiltInBlockExemptions.Settings settings) {
-                return BuiltInBlockExemptionsStore.write(context, settings);
+                return AuthorizedPolicyWriter.setBuiltInExemptions(
+                        context, AdminAuthority.localSession(context), settings);
             }
 
             @Override
@@ -167,7 +167,8 @@ public final class BuiltInExemptionsController {
 
             @Override
             public boolean protectionActive() {
-                return AllowedAppsStore.isProtectionEnabled(context);
+                return ManagementModeStore.read(context) == ManagementMode.LOCAL_PIN
+                        && AllowedAppsStore.isProtectionEnabled(context);
             }
 
             @Override

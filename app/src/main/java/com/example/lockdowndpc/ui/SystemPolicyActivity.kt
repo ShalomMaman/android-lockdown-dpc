@@ -45,6 +45,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.maintenance.MaintenancePlan
 import com.example.lockdowndpc.maintenance.MaintenanceStore
+import com.example.lockdowndpc.policy.AuthorizedPolicyWriter
+import com.example.lockdowndpc.policy.AdminAuthority
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
@@ -219,13 +221,13 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         if (!requireSession()) {
             return
         }
-        if (!SystemPolicyStore.setRequested(context, change.control, change.requested)) {
+        if (!AuthorizedPolicyWriter.setSystemControl(
+                context, AdminAuthority.localSession(context), change.control, change.requested,
+            )
+        ) {
             message = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
             return
         }
-        // The previous verdict describes a policy that is no longer the one being
-        // asked for, so it stops being evidence the instant the choice changes.
-        SystemPolicyStore.invalidateVerification(context, change.control)
         AuditLog.append(
             context,
             AuditEvent.SYSTEM_POLICY_CHANGED,
@@ -258,7 +260,13 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         if (!requireSession()) {
             return
         }
-        PlayStoreCompatibilityStore.setEnabled(context, requested)
+        if (!AuthorizedPolicyWriter.setPlayCompatibility(
+                context, AdminAuthority.localSession(context), requested,
+            )
+        ) {
+            message = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
+            return
+        }
         AuditLog.append(
             context,
             AuditEvent.PLAY_COMPATIBILITY_CHANGED,

@@ -110,7 +110,7 @@ public final class AllowedAppsStore {
      * package as manageable; this store only persists what was accepted, it does
      * not judge whether it is still valid.
      */
-    public static SystemAppRiskAcceptance getSystemRiskAcceptance(Context context, String packageName) {
+    public static synchronized SystemAppRiskAcceptance getSystemRiskAcceptance(Context context, String packageName) {
         SharedPreferences preferences = prefs(context);
         String signerKey = KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName;
         if (!preferences.contains(signerKey)) {
@@ -133,16 +133,20 @@ public final class AllowedAppsStore {
      * package in separately, which keeps this a pure audit record rather than a
      * privilege grant on its own.
      */
-    public static synchronized void recordSystemRiskAcceptance(
+    static synchronized boolean recordSystemRiskAcceptance(
             Context context, SystemAppRiskAcceptance acceptance) {
         String packageName = acceptance.packageName();
-        prefs(context).edit()
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.Editor editor = preferences.edit()
                 .putString(KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName, acceptance.signerDigest())
                 .putString(KEY_SYSTEM_RISK_VERSION_PREFIX + packageName, acceptance.version())
                 .putString(KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX + packageName, acceptance.priorState())
                 .putString(KEY_SYSTEM_RISK_FIRMWARE_PREFIX + packageName, acceptance.firmwareBuild())
-                .putLong(KEY_SYSTEM_RISK_AT_PREFIX + packageName, acceptance.acceptedAtMillis())
-                .commit();
+                .putLong(KEY_SYSTEM_RISK_AT_PREFIX + packageName, acceptance.acceptedAtMillis());
+        return DurablePreferences.commit(preferences, editor,
+                KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName, KEY_SYSTEM_RISK_VERSION_PREFIX + packageName,
+                KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX + packageName, KEY_SYSTEM_RISK_FIRMWARE_PREFIX + packageName,
+                KEY_SYSTEM_RISK_AT_PREFIX + packageName);
     }
 
     /**
@@ -151,7 +155,7 @@ public final class AllowedAppsStore {
      * {@link LockdownPackages#verifySigner} reports as an explicit gap rather
      * than as a pass.
      */
-    public static Map<String, Set<String>> getManagementCertificatePins(Context context) {
+    public static synchronized Map<String, Set<String>> getManagementCertificatePins(Context context) {
         HashMap<String, Set<String>> pins = new HashMap<>();
         for (String packageName : LockdownPackages.managementPackageNames()) {
             Set<String> stored = prefs(context).getStringSet(
@@ -165,7 +169,7 @@ public final class AllowedAppsStore {
         return pins;
     }
 
-    public static synchronized void setManagementCertificatePins(
+    static synchronized boolean setManagementCertificatePins(
             Context context,
             String packageName,
             Set<String> digests
@@ -180,13 +184,13 @@ public final class AllowedAppsStore {
                 normalized.add(value);
             }
         }
-        prefs(context).edit()
-                .putStringSet(KEY_MANAGEMENT_PIN_PREFIX + packageName, normalized)
-                .commit();
+        SharedPreferences preferences = prefs(context);
+        String key = KEY_MANAGEMENT_PIN_PREFIX + packageName;
+        return DurablePreferences.commit(preferences, preferences.edit().putStringSet(key, normalized), key);
     }
 
     /** Saves both parts of the selection together. Returns false on disk failure. */
-    public static boolean setAllowedPackages(
+    static boolean setAllowedPackages(
             Context context,
             Set<String> packages,
             Set<String> managedPackages,
@@ -215,24 +219,25 @@ public final class AllowedAppsStore {
         return new HashSet<>(prefs(context).getStringSet(KEY_MANAGED_PACKAGES, Collections.emptySet()));
     }
 
-    public static void addManagedPackage(Context context, String packageName) {
-        rememberManagedPackage(context, packageName, null);
-    }
-
-    public static synchronized void rememberManagedPackage(
+    static synchronized boolean rememberManagedPackage(
             Context context,
             String packageName,
             String label
     ) {
-        HashSet<String> managed = new HashSet<>(getManagedPackages(context));
-        managed.add(packageName);
-        SharedPreferences.Editor editor = prefs(context).edit()
-                .putStringSet(KEY_MANAGED_PACKAGES, managed);
+        SharedPreferences prefs = prefs(context);
+        Set<String> managed = getManagedPackages(context);
         String sanitizedLabel = AppLabelSanitizer.sanitize(label);
-        if (sanitizedLabel != null && !sanitizedLabel.isBlank()) {
-            editor.putString(KEY_LABEL_PREFIX + packageName, sanitizedLabel);
+        String labelKey = KEY_LABEL_PREFIX + packageName;
+        boolean labelChanged = sanitizedLabel != null && !sanitizedLabel.isBlank()
+                && !sanitizedLabel.equals(prefs.getAll().get(labelKey));
+        if (!managed.add(packageName) && !labelChanged) {
+            return true;
         }
-        editor.apply();
+        SharedPreferences.Editor editor = prefs.edit().putStringSet(KEY_MANAGED_PACKAGES, managed);
+        if (labelChanged) {
+            editor.putString(labelKey, sanitizedLabel);
+        }
+        return DurablePreferences.commit(prefs, editor, KEY_MANAGED_PACKAGES, labelKey);
     }
 
     /**
@@ -277,7 +282,7 @@ public final class AllowedAppsStore {
      * method being left stays exactly where it is, and the one saved under the
      * method being entered comes back untouched. Returns false on disk failure.
      */
-    public static boolean setProtectionMode(Context context, ProtectionMode mode) {
+    static boolean setProtectionMode(Context context, ProtectionMode mode) {
         return setProtectionMode(prefs(context), mode);
     }
 
@@ -330,7 +335,7 @@ public final class AllowedAppsStore {
         return prefs(context).getString(KEY_POLICY_ERROR, "");
     }
 
-    public static synchronized void markApplyStarted(Context context) {
+    static synchronized void markApplyStarted(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, true)
                 .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
@@ -338,7 +343,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static synchronized void markApplySucceeded(Context context) {
+    static synchronized void markApplySucceeded(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, true)
                 .putString(KEY_POLICY_STATE, PolicyState.ACTIVE.name())
@@ -359,7 +364,7 @@ public final class AllowedAppsStore {
         return prefs(context).getLong(KEY_POLICY_VERIFIED_AT, 0L);
     }
 
-    public static void markApplyFailed(Context context, String error) {
+    static void markApplyFailed(Context context, String error) {
         markApplyFailed(context, error, true);
     }
 
@@ -371,7 +376,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static synchronized void markPauseStarted(Context context) {
+    static synchronized void markPauseStarted(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
@@ -379,7 +384,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static synchronized void markPauseSucceeded(Context context) {
+    static synchronized void markPauseSucceeded(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.INACTIVE.name())
@@ -387,7 +392,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static synchronized void markPauseFailed(Context context, String error) {
+    static synchronized void markPauseFailed(Context context, String error) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())

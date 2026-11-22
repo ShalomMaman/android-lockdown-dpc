@@ -3,6 +3,8 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.example.lockdowndpc.security.DurablePreferences;
+
 import java.util.Base64;
 import java.util.function.Supplier;
 
@@ -29,7 +31,7 @@ final class HomeFilterStore {
         return read(prefs(context));
     }
 
-    static HomeFilterPolicy.Settings read(SharedPreferences prefs) {
+    static synchronized HomeFilterPolicy.Settings read(SharedPreferences prefs) {
         if (!prefs.contains(PAC)) {
             if (prefs.contains(PACKAGE) || prefs.contains(ENABLED) || prefs.contains(CA)
                     || prefs.contains(REMOVE_CA) || prefs.contains(SIGNER_PIN)
@@ -84,20 +86,13 @@ final class HomeFilterStore {
      * back before the failure is reported, which restores memory whatever the
      * disk does.
      */
-    static void write(SharedPreferences prefs, HomeFilterPolicy.Settings settings) {
-        HomeFilterPolicy.Settings previous;
-        try {
-            previous = read(prefs);
-        } catch (RuntimeException exception) {
-            previous = null;
+    static synchronized void write(SharedPreferences prefs, HomeFilterPolicy.Settings settings) {
+        HomeFilterPolicy.Settings previous = read(prefs);
+        String previousReadback = prefs.getString(READBACK, null);
+        if (!DurablePreferences.commit(edit(prefs, settings),
+                () -> edit(prefs, previous).putString(READBACK, previousReadback))) {
+            throw new IllegalStateException("Could not persist home filter settings");
         }
-        if (edit(prefs, settings).commit()) {
-            return;
-        }
-        if (previous != null) {
-            edit(prefs, previous).commit();
-        }
-        throw new IllegalStateException("Could not persist home filter settings");
     }
 
     private static SharedPreferences.Editor edit(SharedPreferences prefs, HomeFilterPolicy.Settings settings) {

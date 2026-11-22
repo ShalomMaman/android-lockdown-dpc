@@ -28,6 +28,7 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
     private final Context context;
     private final DevicePolicyManager dpm;
     private final ComponentName admin;
+    private final AdminAuthority.PolicyPass authority;
 
     /** Set when another part of this pass's inventory failed; see {@link #inventoryFailed}. */
     private RuntimeException inventoryFailure;
@@ -36,6 +37,7 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
         this.context = context;
         this.dpm = dpm;
         this.admin = admin;
+        this.authority = AdminAuthority.PolicyPass.forDeviceOwner(context);
     }
 
     /**
@@ -91,7 +93,7 @@ final class ScheduleDeviceGateway implements ScheduleSuspension.Gateway {
 
     @Override
     public boolean saveOwned(Set<String> owned) {
-        return ScheduleStore.saveOwned(context, owned);
+        return AuthorizedPolicyWriter.recordScheduleOwnership(context, authority, owned);
     }
 
     @Override

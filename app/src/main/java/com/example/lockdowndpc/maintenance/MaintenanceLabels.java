@@ -58,6 +58,7 @@ public final class MaintenanceLabels {
             case ADMINISTRATOR_CANCELLED -> R.string.maint_audit_close_administrator_cancelled;
             case CLOCK_ANOMALY -> R.string.maint_audit_close_clock_anomaly;
             case UNREADABLE_RECORD -> R.string.maint_audit_close_unreadable_record;
+            case MANAGEMENT_MODE -> R.string.maint_audit_close_management_mode;
             case OPEN_FAILED -> R.string.maint_audit_close_open_failed;
         };
     }

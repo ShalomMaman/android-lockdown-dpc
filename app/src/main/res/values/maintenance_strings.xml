@@ -143,6 +143,7 @@
     <string name="maint_audit_close_administrator_cancelled">An administrator closed the maintenance window.</string>
     <string name="maint_audit_close_clock_anomaly">The maintenance window was closed because the clock readings could not be trusted.</string>
     <string name="maint_audit_close_unreadable_record">A stored maintenance record could not be read, so the previous policy was restored.</string>
+    <string name="maint_audit_close_management_mode">Maintenance ended because the current management mode requires protection.</string>
     <string name="maint_audit_close_open_failed">The maintenance window was undone because opening it could not be verified.</string>
 
     <!-- Audit: administrator actions -->
