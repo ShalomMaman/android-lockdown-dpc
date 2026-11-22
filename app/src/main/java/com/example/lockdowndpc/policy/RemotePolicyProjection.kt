@@ -1,10 +1,11 @@
 package com.example.lockdowndpc.policy
 
 import android.content.Context
-import com.example.lockdowndpc.kiosk.KioskConfig
+import android.os.Build
 import com.example.lockdowndpc.kiosk.KioskController
 import com.example.lockdowndpc.remote.Generation
 import com.example.lockdowndpc.remote.JsonObject
+import com.example.lockdowndpc.remote.ReleaseLedger
 import com.example.lockdowndpc.remote.RemoteProjection
 import com.example.lockdowndpc.remote.asObject
 import com.example.lockdowndpc.remote.items
@@ -16,6 +17,7 @@ import com.example.lockdowndpc.security.DurablePreferences
 import com.example.lockdowndpc.ui.AppLocales
 import com.example.lockdowndpc.ui.LanguageChoice
 import java.util.function.BooleanSupplier
+import java.util.function.Predicate
 
 internal class RemotePolicyProjection(private val context: Context) : RemoteProjection {
     var lastResult: LockdownPolicyController.PolicyResult? = null
@@ -29,7 +31,6 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
         val controls: Map<String, Boolean>,
         val pins: Map<String, Set<String>>,
         val filter: HomeFilterPolicy.Settings,
-        val kiosk: KioskConfig,
         val locale: LanguageChoice
     ) {
         val systemPackages: Set<String> get() = acceptances.map { it.packageName() }.toSet()
@@ -39,7 +40,11 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
         plan(policy)
     }
 
-    /** Builds and validates every compound value before any store is written. */
+    /**
+     * Builds and validates every compound value before any store is written.
+     * A policy this device could store but never verify is refused here, while
+     * the previous generation is still the journal's target.
+     */
     private fun plan(policy: JsonObject): Plan {
         val apps = policy.obj("apps")
         val acceptances = (apps["systemSelection"] as List<*>?).orEmpty().map {
@@ -56,8 +61,21 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
             // The same rule as the local console: a blocked package never becomes the VPN.
             refuse("doc-field-invalid", "/policy/homeFilter/vpnPackage")
         }
+        if (filter.enabled() && filter.config().routing() == null) {
+            // The VPN read-back needs the routing settings. Without them no pass could verify.
+            refuse("doc-field-invalid", "/policy/homeFilter/routing")
+        }
+        // A kiosk needs a local way out, and the remote console has none yet.
+        // Until it does, a fleet policy cannot contain a device in one.
+        if ((policy["kiosk"]?.asObject()?.get("mode") ?: "OFF") != "OFF") {
+            refuse("doc-field-invalid", "/policy/kiosk/mode")
+        }
         return Plan(
-            mode = AllowedAppsStore.ProtectionMode.valueOf(apps.text("mode")),
+            mode = when (apps.text("mode")) {
+                "ALLOW_SELECTED" -> AllowedAppsStore.ProtectionMode.ALLOW_SELECTED
+                "BLOCK_SELECTED" -> AllowedAppsStore.ProtectionMode.BLOCK_SELECTED
+                else -> refuse("doc-field-invalid", "/policy/apps/mode")
+            },
             selection = apps.items("allowed").map { it as String }.toSet(),
             acceptances = acceptances,
             playCompatibility = apps["playCompatibility"] == true,
@@ -66,17 +84,11 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
                 (values as List<*>).map { it as String }.toSet()
             },
             filter = filter,
-            kiosk = policy["kiosk"]?.asObject()?.let {
-                when (it.text("mode")) {
-                    "SINGLE_APP" -> KioskConfig.singleApp(it.text("targetPackage"))
-                    "SINGLE_SITE" -> KioskConfig.singleSite(it.text("siteUrl"))
-                    else -> KioskConfig.OFF
-                }
-            } ?: KioskConfig.OFF,
             locale = when (policy["locale"]) {
+                null -> LanguageChoice.SYSTEM
                 "en" -> LanguageChoice.ENGLISH
                 "he", "iw" -> LanguageChoice.HEBREW
-                else -> LanguageChoice.SYSTEM
+                else -> refuse("doc-field-invalid", "/policy/locale")
             }
         )
     }
@@ -84,7 +96,9 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
     override fun project(policy: JsonObject, target: Generation): Boolean {
         lastResult = null
         val plan = plan(policy)
-        AdminAuthority.CommittedPolicy.forProjection(context, target.sha256).use { authority ->
+        AdminAuthority.CommittedPolicy.forProjection(context).use { authority ->
+            // The authority names the journal's own generation. Anything else is not projected.
+            if (authority.generation() != target.sha256) return false
             return AuthorizedPolicyWriter.projectSelection(context, authority, plan.mode, plan.selection) &&
                 AuthorizedPolicyWriter.projectSystemSelection(context, authority, plan.systemPackages) &&
                 plan.acceptances.all { AuthorizedPolicyWriter.projectSystemAcceptance(context, authority, it) } &&
@@ -92,7 +106,7 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
                 AuthorizedPolicyWriter.projectControls(context, authority, plan.controls) &&
                 AuthorizedPolicyWriter.projectFilter(context, authority, plan.filter) &&
                 AuthorizedPolicyWriter.projectManagementPins(context, authority, plan.pins) &&
-                KioskController.projectRemote(context, authority, plan.kiosk) &&
+                KioskController.projectRemote(context, authority) &&
                 projectLocale(authority, plan.locale)
         }
     }
@@ -103,21 +117,46 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
         return DurablePreferences.commit(prefs, prefs.edit().putString(LOCALE, locale.name), LOCALE)
     }
 
-    override fun apply(target: Generation, stillCurrent: () -> Boolean): Boolean {
+    override fun apply(target: Generation, stillCurrent: () -> Boolean, releases: ReleaseLedger): Boolean {
         if (!stillCurrent()) return false
-        val prefs = context.getSharedPreferences(LOCALE_PREFS, Context.MODE_PRIVATE)
-        val locale = LanguageChoice.valueOf(requireNotNull(prefs.getString(LOCALE, null)))
         val localeVerified = try {
-            AppLocales.applyPolicyChoice(context, locale)
+            applyLocale()
         } catch (_: RuntimeException) {
             false
         }
-        AdminAuthority.CommittedPolicy.forProjection(context, target.sha256).use { authority ->
+        AdminAuthority.CommittedPolicy.forProjection(context).use { authority ->
+            if (authority.generation() != target.sha256) return false
             val result = LockdownPolicyController.applyRemoteProjection(
-                context, authority, BooleanSupplier(stillCurrent), localeVerified)
+                context, authority, BooleanSupplier(stillCurrent), localeVerified,
+                Predicate { packages -> releases.record(packages) })
             lastResult = result
             return result.applied()
         }
+    }
+
+    override fun revoke(packages: Set<String>): Set<String> =
+        LockdownPolicyController.revokeRemoteReleases(context, packages)
+
+    /**
+     * Android 13 and later keep the application locale in the platform, where it
+     * can be read back. Earlier releases keep it only inside AppCompat, which
+     * reports what was asked of it and not what is on screen. There, only a
+     * device that was never given a language counts as verified.
+     */
+    private fun applyLocale(): Boolean {
+        val prefs = context.getSharedPreferences(LOCALE_PREFS, Context.MODE_PRIVATE)
+        val locale = LanguageChoice.valueOf(requireNotNull(prefs.getString(LOCALE, null)))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return AppLocales.applyPolicyChoice(context, locale)
+        }
+        val everRequested = prefs.getBoolean(LEGACY_LOCALE_REQUESTED, false)
+        if (locale == LanguageChoice.SYSTEM && !everRequested) return true
+        if (!everRequested && !DurablePreferences.commit(
+                prefs, prefs.edit().putBoolean(LEGACY_LOCALE_REQUESTED, true), LEGACY_LOCALE_REQUESTED)) {
+            return false
+        }
+        AppLocales.applyPolicyChoice(context, locale)
+        return false
     }
 
     private fun filterSettings(filter: JsonObject?): HomeFilterPolicy.Settings {
@@ -136,5 +175,6 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
     private companion object {
         const val LOCALE_PREFS = "remote_policy_locale"
         const val LOCALE = "choice"
+        const val LEGACY_LOCALE_REQUESTED = "legacy_locale_requested"
     }
 }

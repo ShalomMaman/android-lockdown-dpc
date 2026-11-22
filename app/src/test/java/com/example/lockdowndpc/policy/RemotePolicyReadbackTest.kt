@@ -2,6 +2,7 @@ package com.example.lockdowndpc.policy
 
 import com.example.lockdowndpc.remote.Generation
 import com.example.lockdowndpc.remote.JournalState
+import com.example.lockdowndpc.remote.ReleaseLedger
 import com.example.lockdowndpc.remote.RemoteFixtures
 import com.example.lockdowndpc.remote.RemoteProjection
 import com.example.lockdowndpc.remote.asObject
@@ -44,7 +45,7 @@ class RemotePolicyReadbackTest {
             vpn.hasCa = caDebt
             vpn.refuseCa = faults["caRemoval"] == "refused"
             val projection = object : RemoteProjection by f.noProjection {
-                override fun apply(target: Generation, stillCurrent: () -> Boolean): Boolean {
+                override fun apply(target: Generation, stillCurrent: () -> Boolean, releases: ReleaseLedger): Boolean {
                     val errors = mutableListOf<String>()
                     if (faults["vpnLockdown"] == "interrupted") throw TestProcessDeath()
                     val device = SystemPolicyEnforcerTest.FakeGateway()

@@ -40,6 +40,18 @@ class RemoteProjectionStoreTest {
         assertTrue(device.getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit())
         assertFalse(RemoteEnrolmentGate.permits())
+        RemoteEnrolmentGate.openForTests(true)
+        try {
+            everySite(app, sites)
+        } finally {
+            RemoteEnrolmentGate.openForTests(false)
+            AdminAuthority.CommittedPolicy.bindJournal(null)
+        }
+    }
+
+    private fun everySite(app: Context, sites: List<Pair<String, String>>) {
+        fun <T> onPolicyThread(work: () -> T): T =
+            PolicyReconciliationCoordinator.callOnPolicyThread(java.util.function.Supplier { work() })
         for ((file, key) in sites) {
             val stores = sites.map { it.first }.distinct().associateWith {
                 MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }
@@ -60,6 +72,7 @@ class RemoteProjectionStoreTest {
             val old = f.generation("policy-1")
             val target = f.generation("policy-5")
             val harness = f.harness(JournalState(policy = f.policy("policy-5"), verified = old), projection)
+            AdminAuthority.CommittedPolicy.bindJournal { harness.engine.state.generation()?.sha256 }
             assertTrue(harness.journal.stamp(target))
             var refused = false
             stores.getValue(file).apply {
@@ -68,14 +81,14 @@ class RemoteProjectionStoreTest {
                     refused = refused || failCommit
                 }
             }
-            assertEquals("$file/$key", "journal-write-failed", harness.engine.ensureProjected().failure?.code)
+            assertEquals("$file/$key", "journal-write-failed", onPolicyThread { harness.engine.ensureProjected() }.failure?.code)
             assertTrue("$file/$key", refused)
             assertEquals(0, passes)
             assertEquals(old, harness.engine.state.verified)
             assertEquals(target, harness.engine.state.generation())
 
             stores.getValue(file).beforeCommit = java.util.function.Consumer { stores.getValue(file).failCommit = false }
-            assertTrue("$file/$key", harness.engine.ensureProjected().verified)
+            assertTrue("$file/$key", onPolicyThread { harness.engine.ensureProjected() }.verified)
             assertEquals(1, passes)
             assertEquals(target, harness.engine.state.verified)
         }

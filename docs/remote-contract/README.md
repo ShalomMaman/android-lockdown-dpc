@@ -149,6 +149,48 @@ when a vector file or section is added without a Kotlin test that replays it.
   unknown outcome. Only a successful commit of a newer fleet policy clears
   the active overrides. The command sequence floor survives recovery.
 
+## What the device adds to the contract
+
+The schema says which documents are well formed. The device also refuses, with
+`doc-field-invalid` and before the journal commit, a policy it could store but
+never verify or safely leave:
+
+- an enabled `homeFilter` without `routing`, because the VPN read-back needs
+  the routing settings;
+- a `homeFilter.vpnPackage` or `apps.systemSelection` entry that names a
+  built-in blocked or protected package;
+- any `kiosk.mode` other than `OFF`. A kiosk needs a local way out, and the
+  remote console has no recovery entry yet. Remote kiosk comes back with that
+  console;
+- a `locale` or kiosk mode this build does not know. Nothing unknown is read as
+  the default.
+
+Other device rules:
+
+- **Android 10 or later.** `bindFleet` answers `enrolment-sdk-unsupported`
+  below API 29, where the default controls cannot all be enforced.
+- **Language.** Android 13 and later read the application language back from
+  the platform. On Android 10–12 only a policy without `locale`, on a device
+  that was never given one, verifies. The admin tool should not set `locale`
+  for those devices.
+- **No local extras.** The strict remote pass applies only what the fleet
+  policy carries. It does not apply night or work schedules, built-in block
+  exemptions, the Chrome exemption or the credentials lock
+  (`DISALLOW_CONFIG_CREDENTIALS`) that belongs to it. A fleet that needs the
+  credentials lock has no field for it in v1.
+- **Filter changes.** The VPN lockdown in force, and the application behind it,
+  stay until a pass has verified the replacement. A teardown removes the PAC
+  proxy and the certificates first and releases the VPN last.
+- **Releases.** A pass records in the journal which hidden packages it is about
+  to show. If that pass does not end verified, they are hidden again, at once
+  or by the next pass after a crash.
+- **Lost journal.** A second file records that a journal was ever stored. An
+  enrolled device whose journal reads back empty or damaged answers
+  `journal-lost` everywhere, runs no pass and accepts nothing. It keeps the
+  restrictions of its last pass until it is provisioned again.
+- **Command history.** The journal keeps the sequence floor and the last 16
+  finished commands for the next report. Replay protection needs only the floor.
+
 ## Fixture layout
 
 | File | Coverage |

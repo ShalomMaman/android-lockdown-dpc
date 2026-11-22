@@ -23,10 +23,8 @@ import com.example.lockdowndpc.policy.AdminAuthority;
 import com.example.lockdowndpc.policy.AuthorizedPolicyWriter;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -445,45 +443,36 @@ public final class KioskController {
     }
 
     /**
-     * Fleet verification requires the exact lock-task allowlist and the resolved HOME.
+     * The remote pass keeps kiosk off and proves it.
+     *
+     * <p>A kiosk needs a local way out, and the remote console has none yet, so a
+     * fleet policy cannot turn one on: the projection refuses it before the journal
+     * commit. A stored kiosk in a remote mode is therefore not fleet intent, and
+     * this pass reports it instead of entering lock task on it.
      *
      * @return {@code true} when persistent preferred activities were cleared, so
      *         the caller can re-register the managed-filtering link handlers
      */
     public static boolean reconcileRemote(Context context, DevicePolicyManager dpm, ComponentName admin,
                                           List<String> errors) {
-        var settings = KioskConfigStore.read(context);
-        if (!validate(context).valid()) {
-            errors.add("kiosk-configuration-unverified");
+        KioskConfigStore.Settings settings = KioskConfigStore.read(context);
+        if (settings.config().mode() != KioskMode.OFF
+                || KioskConfigStore.isContainmentState(settings.state())) {
+            errors.add("remote-kiosk-unsupported");
             return false;
         }
         boolean cleared = reconcile(context, dpm, admin, errors);
-        Set<String> expected = new LinkedHashSet<>();
-        boolean active = KioskConfigStore.isContainmentState(settings.state());
-        if (active) {
-            expected.add(context.getPackageName());
-            if (settings.config().requiresAppTarget()) expected.add(settings.config().targetPackage());
-        }
-        if (!expected.equals(new LinkedHashSet<>(Arrays.asList(dpm.getLockTaskPackages(admin))))) {
+        String[] lockTask = dpm.getLockTaskPackages(admin);
+        if (lockTask != null && lockTask.length != 0) {
             errors.add("kiosk-lock-task-packages-unverified");
-        }
-        if (active) {
-            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
-            ResolveInfo resolved = context.getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
-            if (resolved == null || resolved.activityInfo == null
-                    || !context.getPackageName().equals(resolved.activityInfo.packageName)
-                    || !HOST_ACTIVITY.equals(resolved.activityInfo.name)) {
-                errors.add("kiosk-home-unverified");
-            }
         }
         return cleared;
     }
 
-    /** Stores fleet intent. The reconciliation pass validates it against this device. */
-    public static boolean projectRemote(Context context, AdminAuthority authority, KioskConfig config) {
+    /** Stores the only kiosk state a fleet policy can carry: off. */
+    public static boolean projectRemote(Context context, AdminAuthority authority) {
         return AuthorizedPolicyWriter.commitRemoteKioskChange(context, authority,
-                () -> KioskConfigStore.writeConfig(context, config, config.siteUrl(),
-                        config.mode() == KioskMode.OFF ? KioskState.OFF : KioskState.ACTIVE));
+                () -> KioskConfigStore.writeConfig(context, KioskConfig.OFF, "", KioskState.OFF));
     }
 
     /** Records the last visibility pass for later kiosk cleanup. */

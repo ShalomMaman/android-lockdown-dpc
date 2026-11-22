@@ -154,7 +154,7 @@ class RemoteJournalTest {
             val sequence = f.doc(name).number("sequence")
             var calls = 0L
             val projection = object : RemoteProjection by f.noProjection {
-                override fun apply(target: Generation, stillCurrent: () -> Boolean): Boolean {
+                override fun apply(target: Generation, stillCurrent: () -> Boolean, releases: ReleaseLedger): Boolean {
                     calls++
                     return case["readBackVerified"] != false
                 }
@@ -401,18 +401,219 @@ class RemoteJournalTest {
         assertEquals(setOf(RemoteOverride.COMMANDS_OFF), harness.engine.state.overrides)
     }
 
-    @Test fun wrongCodeWhoseLockoutWriteFailsIsRefusedWithoutConsumingTheVerifier() {
+    /** The attempt is counted before the code is read, so a store that cannot count gives no answer. */
+    @Test fun aStoreThatCannotCountAttemptsRefusesWithoutSayingWhetherTheCodeWasRight() {
         val harness = f.harness(JournalState(recovery = storedRecovery()))
+        val choice = setOf(RemoteOverride.NETWORK_OFF)
         harness.memory.failCommit = true
-        val result = harness.engine.recover(setOf(RemoteOverride.NETWORK_OFF), "2222 2222 2222 2222 2222", RemoteTime(1, 100))
-        assertEquals(RemoteEngine.RecoveryOutcome.REFUSED, result.outcome)
-        assertEquals("recovery-commit-failed", result.failure?.code)
+        val wrong = harness.engine.recover(choice, "2222 2222 2222 2222 2222", RemoteTime(1, 100))
+        val right = harness.engine.recover(choice, code(), RemoteTime(1, 100))
+        assertEquals(wrong, right)
+        assertEquals(RemoteEngine.RecoveryOutcome.REFUSED, right.outcome)
+        assertEquals("recovery-commit-failed", right.failure?.code)
+        assertNull(right.codeChecked)
         for (restarted in listOf(false, true)) {
             if (restarted) harness.restart()
             assertEquals(0, harness.engine.state.lockout.failures())
             assertEquals(storedRecovery(), harness.engine.state.recovery)
             assertTrue(harness.engine.state.overrides.isEmpty())
         }
+        // A right code whose final commit fails has still used one counted attempt.
+        var commits = 0
+        harness.memory.beforeCommit = java.util.function.Consumer { harness.memory.failCommit = commits++ == 1 }
+        val unsaved = harness.engine.recover(choice, code(), RemoteTime(1, 100))
+        assertEquals("recovery-commit-failed", unsaved.failure?.code)
+        assertEquals(1, harness.engine.state.lockout.failures())
+        assertEquals(storedRecovery(), harness.engine.state.recovery)
+    }
+
+    /** A journal that existed and reads back empty or damaged is lost. It is never taken for a new one. */
+    @Test fun damagedJournalOfAnEnrolledDeviceRefusesEverythingAndKeepsNoNewFloors() {
+        val root = f.keys.obj("root")
+        val platform = object : RemoteEngine.CommandPlatform {
+            override fun isDeviceSecure() = true
+            override fun lockNow() = throw AssertionError("A lost journal dispatches nothing")
+        }
+        for (content in listOf(null, "{", "{\"trust\":null}")) {
+            var passes = 0
+            val projection = object : RemoteProjection by f.noProjection {
+                override fun project(policy: JsonObject, target: Generation): Boolean {
+                    passes++
+                    return true
+                }
+            }
+            val harness = f.harness(JournalState(trust = f.trust("keyset-2", "successor"), binding = f.binding,
+                policy = f.policy("policy-5"), verified = f.generation("policy-1"), recovery = storedRecovery(),
+                commandFloor = 7), projection)
+            assertFalse(harness.engine.lost)
+            harness.damageJournal(content)
+            for (restarted in listOf(false, true)) {
+                if (restarted) harness.restart()
+                val engine = harness.engine
+                assertTrue(engine.lost)
+                assertEquals("journal-lost", engine.bindFleet(
+                    f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)?.code)
+                assertEquals("journal-lost", engine.commitBaseline(f.hashes.obj("baseline").obj("body"))?.code)
+                assertEquals("journal-lost", harness.receive("policy-1", "lock-2").failure?.code)
+                assertEquals(RemoteFailure("journal-lost"), engine.ensureProjected().failure)
+                assertEquals("journal-lost", engine.settleInterruptedCommands()?.code)
+                assertEquals("journal-lost", engine.dispatch(8, { RemoteTime(1, 1) }, platform)?.code)
+                val recovery = engine.recover(setOf(RemoteOverride.NETWORK_OFF), code(), RemoteTime(1, 100))
+                assertEquals(RemoteEngine.RecoveryOutcome.REFUSED, recovery.outcome)
+                assertEquals("journal-lost", recovery.failure?.code)
+                assertFalse(harness.journal.save(JournalState()))
+                assertFalse(harness.journal.stamp(f.generation("policy-1")))
+            }
+            assertEquals(0, passes)
+        }
+    }
+
+    @Test fun deviceThatNeverStoredAJournalIsNewEvenAfterAFailedFirstWrite() {
+        val root = f.keys.obj("root")
+        val harness = RemoteFixtures.Harness(MemoryPreferences(emptyMap<String, Any>()), f.noProjection)
+        assertFalse(harness.engine.lost)
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", harness.engine.bindFleet(
+            f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)?.code)
+        harness.restart()
+        assertFalse(harness.engine.lost)
+        assertEquals(JournalState(), harness.engine.state)
+        assertNull(harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35))
+        harness.restart()
+        assertEquals(f.binding, harness.engine.state.binding)
+        harness.damageJournal(null)
+        assertTrue(harness.engine.lost)
+    }
+
+    @Test fun enrolmentIsRefusedBelowAndroid10() {
+        val root = f.keys.obj("root")
+        val harness = RemoteFixtures.Harness(
+            MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }, f.noProjection)
+        for (sdk in listOf(26, 27, 28)) {
+            assertEquals("enrolment-sdk-unsupported", harness.engine.bindFleet(
+                f.verifier, f.binding, root.text("keyId"), root.text("spki"), sdk)?.code)
+        }
+        assertEquals(JournalState(), harness.engine.state)
+        assertNull(harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 29))
+        harness.restart()
+        assertEquals(f.binding, harness.engine.state.binding)
+    }
+
+    @Test fun finishedCommandsArePrunedAndTheFloorAloneRefusesReplay() {
+        val sent = RemoteTime(1, 100)
+        val live = (1L..3L).associateWith { CommandEntry(it, "lock_now", sent) }
+        val finished = (4L..43L).associateWith { CommandEntry(it, "lock_now", sent, CommandState.DONE) }
+        val harness = f.harness(JournalState(trust = f.trust("keyset-2", "successor"),
+            commandFloor = 43, commands = live + finished))
+        for (restarted in listOf(false, true)) {
+            if (restarted) harness.restart()
+            val kept = harness.engine.state.commands
+            assertEquals((1L..3L).toSet() + (28L..43L).toSet(), kept.keys)
+            assertEquals(MAX_FINISHED_COMMANDS, kept.values.count { it.state.finished })
+            assertEquals(43L, harness.engine.state.commandFloor)
+        }
+        // The pruned entries are gone and their sequences still cannot be replayed.
+        assertEquals("doc-version-rollback", harness.receive("lock-2").decisions.single().failure?.code)
+    }
+
+    /** A known outcome is never downgraded to unknown just because its write failed once. */
+    @Test fun outcomeThatCouldNotBeStoredIsRecordedOnceTheJournalTakesWritesAgain() {
+        val harness = f.harness(JournalState(trust = f.trust("keyset-2", "successor"), policy = f.policy("policy-5")))
+        val sent = RemoteTime(4, 1_000)
+        val sync = RemoteSync(f.verifier, f.binding)
+        val exchange = requireNotNull(sync.begin(f.nonce, sent))
+        assertNull(harness.engine.receive(sync, exchange, f.nonce, sent, listOf(f.document("lock-2")))
+            .decisions.single().failure)
+        val sequence = f.doc("lock-2").number("sequence")
+        var locks = 0
+        val platform = object : RemoteEngine.CommandPlatform {
+            override fun isDeviceSecure() = true
+            override fun lockNow() {
+                locks++
+                harness.memory.failCommit = true
+            }
+        }
+        assertEquals("journal-write-failed", harness.engine.dispatch(sequence, { sent }, platform)?.code)
+        assertEquals(CommandState.DISPATCHING, harness.engine.state.commands[sequence]?.state)
+        assertEquals("journal-write-failed", harness.engine.settleInterruptedCommands()?.code)
+        assertEquals("journal-write-failed", harness.engine.dispatch(sequence, { sent }, platform)?.code)
+        assertEquals(CommandState.DISPATCHING, harness.engine.state.commands[sequence]?.state)
+
+        harness.memory.failCommit = false
+        assertNull(harness.engine.settleInterruptedCommands())
+        for (restarted in listOf(false, true)) {
+            if (restarted) harness.restart()
+            val entry = requireNotNull(harness.engine.state.commands[sequence])
+            assertEquals(CommandState.DONE, entry.state)
+            assertEquals(true, entry.secureLock)
+            assertNull(entry.code)
+            assertNull(harness.engine.settleInterruptedCommands())
+            assertNull(harness.engine.dispatch(sequence, { sent }, platform))
+        }
+        assertEquals(1, locks)
+    }
+
+    /** What a pass made visible is in the journal first, and goes away again unless that pass verifies. */
+    @Test fun releasesOfAnUnverifiedPassAreRevokedInProcessAndAfterACrash() {
+        val visible = mutableSetOf<String>()
+        var fault = "second-release-refused"
+        var visibleAtPassStart: Set<String>? = null
+        val projection = object : RemoteProjection by f.noProjection {
+            override fun apply(target: Generation, stillCurrent: () -> Boolean, releases: ReleaseLedger): Boolean {
+                visibleAtPassStart = visible.toSet()
+                assertTrue(releases.record(setOf("org.example.one", "org.example.two")))
+                visible.add("org.example.one")
+                if (fault == "second-release-refused") return false
+                if (fault == "process-death") throw ProcessDeath()
+                visible.add("org.example.two")
+                return true
+            }
+
+            override fun revoke(packages: Set<String>): Set<String> {
+                visible.removeAll(packages)
+                return emptySet()
+            }
+        }
+        val old = f.generation("policy-1")
+        val target = f.generation("policy-5")
+        val harness = f.harness(JournalState(policy = f.policy("policy-5"), verified = old), projection)
+
+        assertFalse(harness.engine.ensureProjected().verified)
+        assertTrue(visible.isEmpty())
+        assertTrue(harness.engine.state.releases.isEmpty())
+        assertEquals(old, harness.engine.state.verified)
+
+        fault = "process-death"
+        try {
+            harness.engine.ensureProjected()
+            throw AssertionError("The pass must die after the first release")
+        } catch (_: ProcessDeath) {
+            // Nothing in this process can undo the release any more.
+        }
+        assertEquals(setOf("org.example.one"), visible)
+        harness.restart()
+        assertEquals(setOf("org.example.one", "org.example.two"), harness.engine.state.releases)
+        assertEquals(old, harness.engine.state.verified)
+
+        // The final verified write fails: the next pass starts by hiding the leftovers, and its own releases go too.
+        fault = "none"
+        var stateCommits = 0
+        harness.memory.beforeCommit = java.util.function.Consumer { keys ->
+            if ("state" in keys) harness.memory.failCommit = ++stateCommits == 3 else harness.memory.failCommit = false
+        }
+        val unsaved = harness.engine.ensureProjected()
+        assertEquals(emptySet<String>(), visibleAtPassStart)
+        assertEquals("journal-write-failed", unsaved.failure?.code)
+        assertTrue(visible.isEmpty())
+        assertEquals(old, harness.engine.state.verified)
+
+        harness.memory.beforeCommit = java.util.function.Consumer { harness.memory.failCommit = false }
+        assertTrue(harness.engine.ensureProjected().verified)
+        assertEquals(setOf("org.example.one", "org.example.two"), visible)
+        assertTrue(harness.engine.state.releases.isEmpty())
+        harness.restart()
+        assertEquals(target, harness.engine.state.verified)
+        assertTrue(harness.engine.state.releases.isEmpty())
     }
 
     private fun dispatchResult(entry: CommandEntry?, code: String?, calls: Long, floor: Long, case: JsonObject): JsonObject {

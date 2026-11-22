@@ -303,6 +303,18 @@ public final class HomeFilterPolicy {
 
     /** Removes only settings issued for a superseded filter, preserving an active replacement. */
     static boolean reconcileRetiredConfig(Config previous, Config active, Gateway gateway) {
+        return retireProxy(previous, active, gateway) && retireVpn(previous, active, gateway);
+    }
+
+    /** The first half of a teardown: the superseded PAC proxy. The VPN lockdown is untouched. */
+    static boolean retireProxy(Config previous, Config active, Gateway gateway) {
+        return (active != null && previous.pacUrl().equals(active.pacUrl()))
+                || removeIfMatching(previous.pacUrl(), gateway::proxyPacUrl,
+                        () -> gateway.setProxy(null), true) == State.CONFIRMED;
+    }
+
+    /** The last half: the superseded VPN lockdown, its uninstall block and its managed settings. */
+    static boolean retireVpn(Config previous, Config active, Gateway gateway) {
         String packageName = previous.vpnPackage();
         if (active == null || !packageName.equals(active.vpnPackage())) {
             if (removeIfMatching(packageName, gateway::alwaysOnPackage,
@@ -310,9 +322,6 @@ public final class HomeFilterPolicy {
             if (verify(() -> gateway.retainVpnUninstallBlock(packageName) || !gateway.uninstallBlocked(packageName),
                     () -> gateway.setVpnUninstallBlocked(packageName, false), true) != State.CONFIRMED) return false;
         }
-        if ((active == null || !previous.pacUrl().equals(active.pacUrl()))
-                && removeIfMatching(previous.pacUrl(), gateway::proxyPacUrl,
-                        () -> gateway.setProxy(null), true) != State.CONFIRMED) return false;
         if (previous.routing() == null) return true;
         Map<String, Object> retired = new LinkedHashMap<>(previous.routing().restrictions());
         if (active != null && packageName.equals(active.vpnPackage()) && active.routing() != null) {

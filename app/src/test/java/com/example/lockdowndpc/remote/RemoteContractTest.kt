@@ -85,15 +85,31 @@ internal object RemoteFixtures {
     }
 
     class Harness(val memory: MemoryPreferences, private val projection: RemoteProjection) {
-        var journal = RemoteJournal(memory.preferences())
+        /** The separate file that records that a journal was ever stored. */
+        val marker = MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }
+        private var journalFile = memory
+        var journal = RemoteJournal(journalFile.preferences(), marker.preferences())
             private set
         var engine = engineFor(journal)
             private set
 
         fun restart() {
             memory.failCommit = false
-            memory.restart()
-            journal = RemoteJournal(memory.preferences())
+            journalFile.failCommit = false
+            journalFile.restart()
+            marker.restart()
+            reopen()
+        }
+
+        /** The journal file comes back empty or unreadable, as Android does with a damaged preferences file. */
+        fun damageJournal(content: String?) {
+            journalFile = MemoryPreferences(if (content == null) emptyMap() else mapOf("state" to content))
+                .apply { failCommit = false }
+            reopen()
+        }
+
+        private fun reopen() {
+            journal = RemoteJournal(journalFile.preferences(), marker.preferences())
             engine = engineFor(journal)
         }
 
@@ -171,6 +187,16 @@ class RemoteContractTest {
     /** The APK carries its own copy of the schema; it must be the reviewed contract, byte for byte. */
     @Test fun packagedSchemaIsTheReviewedContract() {
         assertTrue(f.contractSchema.readBytes().contentEquals(f.packagedSchema.readBytes()))
+    }
+
+    /** The build gate can be opened only from the test tree, and only under Robolectric. */
+    @Test fun productionCodeNeverOpensTheEnrolmentGate() {
+        val callers = f.mainSources.walkTopDown().filter { it.isFile && it.readText().contains("openForTests") }
+            .map { it.name }.toList()
+        assertEquals(listOf("RemoteEnrolmentGate.java"), callers)
+        val gate = File(f.mainSources, "com/example/lockdowndpc/policy/RemoteEnrolmentGate.java").readText()
+        assertEquals(1, Regex("openForTests").findAll(gate).count())
+        assertTrue(gate.contains("\"robolectric\".equals(Build.FINGERPRINT)"))
     }
 
     /** Only tests may trust the published fixture keys: no production caller can switch the refusal off. */

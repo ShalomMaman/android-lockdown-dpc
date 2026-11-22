@@ -91,6 +91,7 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
+import com.example.lockdowndpc.policy.RemotePolicyRuntime
 import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
@@ -283,9 +284,14 @@ private fun AdminConsole(
     var screen by remember { mutableStateOf(initialScreen(context)) }
     if (screen == ConsoleScreen.REMOTE_STATUS) {
         SideEffect { onSecureScreen(false) }
+        // A damaged policy record is named, with what restores the device, instead
+        // of leaving whoever holds it with a message that explains nothing.
+        val journalLost = remember { RemotePolicyRuntime.journalLost(context) }
         LockdownScreen(
             title = stringResource(R.string.app_name),
-            subtitle = stringResource(R.string.remote_policy_unavailable),
+            subtitle = stringResource(
+                if (journalLost) R.string.remote_policy_journal_lost else R.string.remote_policy_unavailable
+            ),
         ) {}
         return
     }

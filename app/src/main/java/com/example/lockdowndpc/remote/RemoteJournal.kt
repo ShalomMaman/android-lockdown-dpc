@@ -34,7 +34,11 @@ internal data class CommittedPolicy(val encodedPayload: String, val hash: String
 }
 
 internal data class RecoveryVerifier(val salt: String, val mac: String)
-internal enum class CommandState { ACCEPTED, DISPATCHING, DONE, EXPIRED, CANCELLED, OUTCOME_UNKNOWN }
+internal enum class CommandState {
+    ACCEPTED, DISPATCHING, DONE, EXPIRED, CANCELLED, OUTCOME_UNKNOWN;
+
+    val finished: Boolean get() = this != ACCEPTED && this != DISPATCHING
+}
 internal data class CommandEntry(
     val sequence: Long, val kind: String, val sent: RemoteTime,
     val state: CommandState = CommandState.ACCEPTED, val code: String? = null,
@@ -56,8 +60,17 @@ internal data class JournalState(
     val lockout: PinLockoutPolicy.LockoutState = PinLockoutPolicy.LockoutState.CLEARED,
     val commandFloor: Long = 0,
     val commands: Map<Long, CommandEntry> = emptyMap(),
-    val verified: Generation? = null
+    val verified: Generation? = null,
+    /** Packages a pass made visible before its generation was verified. */
+    val releases: Set<String> = emptySet()
 ) {
+    /** Replay protection needs only the floor. A short tail of outcomes is kept for the next report. */
+    fun bounded(): JournalState {
+        val finished = commands.values.filter { it.state.finished }.map { it.sequence }.sorted()
+        val dropped = finished.dropLast(MAX_FINISHED_COMMANDS).toSet()
+        return if (dropped.isEmpty()) this else copy(commands = commands - dropped)
+    }
+
     fun generation() = policy?.let { Generation(it.version, it.hash, overrides) }
     fun floor(type: DocumentType): Long = when (type) {
         DocumentType.KEY_SET -> trust?.version ?: 0
@@ -67,20 +80,52 @@ internal data class JournalState(
     }
 }
 
-/** One credential-protected file and one live instance on the policy thread. */
-internal class RemoteJournal(private val preferences: SharedPreferences) {
-    var state: JournalState = preferences.getString(STATE, null)?.let(JournalCodec::decode) ?: JournalState()
+internal const val MAX_FINISHED_COMMANDS = 16
+
+/**
+ * One credential-protected file and one live instance on the policy thread.
+ *
+ * [marker] is a second file that only ever records that a journal was stored.
+ * It is written after the first successful journal commit and never taken back,
+ * so an empty or unreadable journal on an enrolled device is told apart from a
+ * device that has never had one.
+ */
+internal class RemoteJournal(private val preferences: SharedPreferences, private val marker: SharedPreferences) {
+    /** A journal that existed and cannot be read. Its floors and trust are unknown, so nothing is accepted. */
+    val lost: Boolean
+    var state: JournalState
         private set
+    private var marked: Boolean
+
+    init {
+        val read = read(preferences, marker)
+        marked = read.marked
+        lost = read.lost
+        state = read.state ?: JournalState()
+        if (read.state != null) mark()
+    }
 
     internal fun save(next: JournalState): Boolean {
-        val encoded = JournalCodec.encode(next)
-        if (!write(STATE, encoded)) return false
-        state = next
+        if (lost) return false
+        val bounded = next.bounded()
+        if (!write(STATE, JournalCodec.encode(bounded))) return false
+        state = bounded
+        mark()
         return true
     }
 
-    fun stamp(target: Generation): Boolean = write(STAMP, target.sha256)
-    fun stamped(target: Generation): Boolean = preferences.getString(STAMP, null) == target.sha256
+    fun stamp(target: Generation): Boolean = !lost && write(STAMP, target.sha256)
+    fun stamped(target: Generation): Boolean = !lost && preferences.getString(STAMP, null) == target.sha256
+
+    /** Set once, after the journal itself is stored. A failed attempt is repeated on the next save. */
+    private fun mark() {
+        if (marked) return
+        marked = try {
+            marker.edit().putBoolean(CREATED, true).commit()
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
 
     private fun write(key: String, value: String): Boolean = try {
         DurablePreferences.commit(preferences, preferences.edit().putString(key, value), key)
@@ -88,9 +133,37 @@ internal class RemoteJournal(private val preferences: SharedPreferences) {
         false
     }
 
-    private companion object {
-        const val STATE = "state"
-        const val STAMP = "projection_generation"
+    private class Read(val marked: Boolean, val lost: Boolean, val state: JournalState?)
+
+    companion object {
+        private const val STATE = "state"
+        private const val STAMP = "projection_generation"
+        private const val CREATED = "journal_created"
+
+        /** Read-only: whether the files describe a journal that existed and cannot be read. */
+        fun isLost(preferences: SharedPreferences, marker: SharedPreferences): Boolean = read(preferences, marker).lost
+
+        private fun read(preferences: SharedPreferences, marker: SharedPreferences): Read {
+            val marked = try {
+                marker.getBoolean(CREATED, false)
+            } catch (_: RuntimeException) {
+                true
+            }
+            val stored = try {
+                preferences.getString(STATE, null)
+            } catch (_: RuntimeException) {
+                return Read(marked, true, null)
+            }
+            val decoded = stored?.let {
+                try {
+                    JournalCodec.decode(it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+            // An absent journal is new only if none was ever stored. A present one must decode.
+            return Read(marked, if (stored == null) marked else decoded == null, decoded)
+        }
     }
 }
 
@@ -128,7 +201,8 @@ private object JournalCodec {
                 "state" to it.state.name, "code" to it.code, "secure" to it.secureLock, "reapply" to it.reapplyVerified,
                 "verified" to encodeGeneration(it.verified))
         },
-        "verified" to encodeGeneration(state.verified)
+        "verified" to encodeGeneration(state.verified),
+        "releases" to state.releases.sorted()
     )).toString(Charsets.UTF_8)
 
     fun decode(value: String): JournalState {
@@ -160,7 +234,8 @@ private object JournalCodec {
                     CommandState.valueOf(it.text("state")), it.getValue("code") as String?,
                     it.getValue("secure") as Boolean?, it.getValue("reapply") as Boolean?, decodeGeneration(it.getValue("verified")))
             },
-            verified = decodeGeneration(json.getValue("verified"))
+            verified = decodeGeneration(json.getValue("verified")),
+            releases = (json["releases"] as List<*>?).orEmpty().map { it as String }.toSet()
         )
     }
 }

@@ -1,25 +1,13 @@
 package com.example.lockdowndpc.policy
 
-import android.app.admin.DevicePolicyManager
-import android.content.ComponentName
 import android.content.Context
-import android.content.pm.ApplicationInfo
-import android.content.pm.PackageInfo
-import android.content.pm.Signature
-import android.content.pm.SigningInfo
-import com.example.lockdowndpc.admin.LockdownAdminReceiver
-import com.example.lockdowndpc.remote.CommittedPolicy
-import com.example.lockdowndpc.remote.Generation
 import com.example.lockdowndpc.remote.JournalState
-import com.example.lockdowndpc.remote.JsonObject
 import com.example.lockdowndpc.remote.RemoteFailure
-import com.example.lockdowndpc.remote.RemoteFixtures
 import com.example.lockdowndpc.remote.RemoteOverride
 import com.example.lockdowndpc.remote.RemoteSync
 import com.example.lockdowndpc.remote.RemoteTime
-import com.example.lockdowndpc.remote.WireJson
 import com.example.lockdowndpc.remote.obj
-import java.security.MessageDigest
+import java.util.function.Consumer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -27,96 +15,143 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.RuntimeEnvironment
-import org.robolectric.annotation.Config
-import org.robolectric.shadow.api.Shadow
-import org.robolectric.shadows.ShadowPackageManager
-import org.robolectric.shadows.ShadowSigningInfo
 
 /**
  * Acceptance criterion A1 through the real journal, projection, stores and policy pass:
- * a package the previous generation hid is released only by a pass that verified.
+ * a package the previous generation hid is visible only while a pass that verified stands behind it.
  */
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [32], shadows = [LockdownPolicyApplyTest.FilterDevicePolicy::class])
-class RemotePolicyGatewayFaultTest {
-    private val f = RemoteFixtures
-    private lateinit var context: Context
-    private lateinit var admin: ComponentName
-    private lateinit var dpm: DevicePolicyManager
-    private lateinit var device: LockdownPolicyApplyTest.FilterDevicePolicy
-    private lateinit var projection: RemotePolicyProjection
-    private lateinit var harness: RemoteFixtures.Harness
-    private lateinit var target: Generation
-    private val previous = f.generation("policy-1")
+class RemotePolicyGatewayFaultTest : RemotePassFixture() {
 
-    @Before fun setUp() {
-        context = RuntimeEnvironment.getApplication()
-        admin = LockdownAdminReceiver.componentName(context)
-        dpm = context.getSystemService(DevicePolicyManager::class.java)
-        device = Shadow.extract(dpm)
-        assertTrue(device.setDeviceOwner(admin))
-        assertTrue(context.createDeviceProtectedStorageContext()
-            .getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
-            .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit())
-        install(VPN)
+    @Before fun hideWhatThePreviousGenerationHid() {
         install(READER)
-        // The previous verified generation hid the reader. The committed one allows it.
+        install(SECOND_READER)
         assertTrue(dpm.setApplicationHidden(admin, READER, true))
-        val committed = CommittedPolicy.fromBytes(WireJson.canonical(policy()), 0)
-        target = Generation(committed.version, committed.hash, emptySet())
-        projection = RemotePolicyProjection(context)
-        harness = f.harness(JournalState(policy = committed, verified = previous), projection)
+        assertTrue(dpm.setApplicationHidden(admin, SECOND_READER, true))
+        commit(policy(allowed = listOf(READER, SECOND_READER)))
     }
 
     @Test fun vpnLockdownRefusalKeepsThePackageHiddenAndTheVerifiedHashUnchanged() {
+        val target = target()
         device.refuseVpn = true
-        device.beforeVpnWrite = Runnable { assertTrue(dpm.isApplicationHidden(admin, READER)) }
+        device.beforeVpnWrite = Runnable { assertTrue(hidden(READER)) }
 
-        val pass = harness.engine.ensureProjected()
+        assertFalse(pass().verified)
 
-        assertFalse(pass.verified)
-        val errors = requireNotNull(projection.lastResult).errors()
-        assertTrue(errors.toString(), errors.any { it.startsWith("home-filter:vpn=REFUSED,") })
+        assertTrue(errors().toString(), errors().any { it.startsWith("home-filter:vpn=REFUSED,") })
         // The projection did store the new selection; only the release waited.
         assertTrue(READER in AllowedAppsStore.getAllowedPackages(context))
-        assertTrue(dpm.isApplicationHidden(admin, READER))
-        assertEquals(previous, harness.engine.state.verified)
-        assertEquals(target, harness.engine.state.generation())
+        assertTrue(hidden(READER))
+        assertEquals(previous, verified())
+        assertEquals(target, target())
         assertNextPassVerifiesAndReleases()
     }
 
     @Test fun processDeathBetweenAndroidCallsKeepsThePackageHiddenAndTheVerifiedHashUnchanged() {
         device.beforeVpnWrite = Runnable {
-            assertTrue(dpm.isApplicationHidden(admin, READER))
+            assertTrue(hidden(READER))
             throw ProcessDeath()
         }
         try {
-            harness.engine.ensureProjected()
+            pass()
             fail("The pass must reach the VPN lockdown")
         } catch (_: ProcessDeath) {
             // The process is gone between two Android calls.
         }
         harness.restart()
 
-        assertTrue(dpm.isApplicationHidden(admin, READER))
-        assertEquals(previous, harness.engine.state.verified)
-        assertEquals(target, harness.engine.state.generation())
+        assertTrue(hidden(READER))
+        assertEquals(previous, verified())
+        assertNextPassVerifiesAndReleases()
+    }
+
+    /** One release succeeds and Android refuses the next: the first is hidden again. */
+    @Test fun refusedSecondReleaseHidesTheFirstAgain() {
+        val released = mutableListOf<String>()
+        device.afterUnhide = Consumer { name ->
+            released.add(name)
+            device.refuseUnhide.addAll(listOf(READER, SECOND_READER) - name)
+        }
+
+        assertFalse(pass().verified)
+
+        assertEquals(1, released.size)
+        assertTrue(errors().toString(), errors().any { it.startsWith("package-policy-update-rejected:") })
+        assertTrue(hidden(READER))
+        assertTrue(hidden(SECOND_READER))
+        assertEquals(previous, verified())
+        assertTrue(harness.engine.state.releases.isEmpty())
+
+        device.afterUnhide = Consumer { }
+        device.refuseUnhide.clear()
+        assertNextPassVerifiesAndReleases()
+    }
+
+    /** The process dies after the first release: the journal already holds the intent, and the next pass undoes it. */
+    @Test fun processDeathAfterTheFirstReleaseIsUndoneByTheNextPass() {
+        device.afterUnhide = Consumer { throw ProcessDeath() }
+        try {
+            pass()
+            fail("The pass must reach the first release")
+        } catch (_: ProcessDeath) {
+            // One package is visible and nothing in this process can hide it any more.
+        }
+        assertEquals(1, listOf(READER, SECOND_READER).count { !hidden(it) })
+        harness.restart()
+        assertEquals(setOf(READER, SECOND_READER), harness.engine.state.releases)
+        assertEquals(previous, verified())
+
+        // The next pass cannot verify either. It still starts by hiding what was exposed.
+        device.afterUnhide = Consumer { }
+        device.refuseProxyChange = true
+        assertFalse(pass().verified)
+        assertTrue(hidden(READER))
+        assertTrue(hidden(SECOND_READER))
+        assertEquals(previous, verified())
+        assertTrue(harness.engine.state.releases.isEmpty())
+
+        device.refuseProxyChange = false
+        assertNextPassVerifiesAndReleases()
+    }
+
+    /** Every release succeeded and the verified hash could not be stored: nothing stays visible on the old hash. */
+    @Test fun failedVerifiedWriteHidesWhatThePassReleased() {
+        var journalCommits = 0
+        harness.memory.beforeCommit = Consumer { keys ->
+            // The release record is the first journal commit of the pass, the verified hash the second.
+            harness.memory.failCommit = "state" in keys && ++journalCommits == 2
+        }
+
+        val pass = pass()
+
+        assertEquals("journal-write-failed", pass.failure?.code)
+        assertTrue(errors().isEmpty())
+        assertTrue(hidden(READER))
+        assertTrue(hidden(SECOND_READER))
+        assertEquals(previous, verified())
+
+        harness.memory.beforeCommit = Consumer { harness.memory.failCommit = false }
         assertNextPassVerifiesAndReleases()
     }
 
     @Test fun policyTheStoresCannotHoldIsRefusedBeforeTheJournalChanges() {
         val fresh = f.harness(JournalState(), projection)
-        val protectedSystemApp = policy() + ("apps" to mapOf("mode" to "ALLOW_SELECTED", "allowed" to emptyList<String>(),
-            "systemSelection" to listOf(mapOf("package" to "com.android.vending",
-                "signerSha256" to "00".repeat(32), "versionCode" to 1L))))
-        assertEquals(RemoteFailure("doc-field-invalid", "/policy/apps/systemSelection"),
-            fresh.engine.commitBaseline(protectedSystemApp))
-        val blockedVpn = policy() + ("homeFilter" to (policy().obj("homeFilter") + ("vpnPackage" to "com.android.chrome")))
-        assertEquals(RemoteFailure("doc-field-invalid", "/policy/homeFilter/vpnPackage"),
-            fresh.engine.commitBaseline(blockedVpn))
+        val refused = mapOf(
+            "/policy/apps/systemSelection" to policy(extra = mapOf("apps" to mapOf(
+                "mode" to "ALLOW_SELECTED", "allowed" to emptyList<String>(),
+                "systemSelection" to listOf(mapOf("package" to "com.android.vending",
+                    "signerSha256" to "00".repeat(32), "versionCode" to 1L))))),
+            "/policy/homeFilter/vpnPackage" to policy(filter = filter("com.android.chrome")),
+            // An enabled filter without routing settings could be stored and never verified.
+            "/policy/homeFilter/routing" to policy(filter = filter(VPN) - "routing"),
+            // A kiosk needs a local way out, which the remote console does not have yet.
+            "/policy/kiosk/mode" to policy(extra = mapOf("kiosk" to mapOf(
+                "mode" to "SINGLE_APP", "targetPackage" to READER))),
+        )
+        for ((path, policy) in refused) {
+            assertEquals(RemoteFailure("doc-field-invalid", path), fresh.engine.commitBaseline(policy))
+        }
+        assertEquals(RemoteFailure("doc-field-invalid", "/policy/kiosk/mode"), fresh.engine.commitBaseline(
+            policy(extra = mapOf("kiosk" to mapOf("mode" to "SINGLE_SITE", "siteUrl" to "https://kiosk.example.org/")))))
         assertNull(fresh.engine.state.policy)
         fresh.restart()
         assertNull(fresh.engine.state.policy)
@@ -125,6 +160,7 @@ class RemotePolicyGatewayFaultTest {
 
     /** The build gate is off: with a marker present, no runtime entry point reaches the journal. */
     @Test fun gateOffRefusesEveryRuntimeEntryPointAndWritesNothing() {
+        RemoteEnrolmentGate.openForTests(false)
         assertFalse(RemoteEnrolmentGate.permits())
         val unavailable = RemotePolicyApplier.UNAVAILABLE
         assertEquals(unavailable, RemotePolicyRuntime.bindFleet(context, f.binding, f.binding.deviceId, "")?.code)
@@ -135,52 +171,57 @@ class RemotePolicyGatewayFaultTest {
         assertEquals(unavailable, recovery.failure?.code)
         assertEquals(unavailable, RemotePolicyRuntime.dispatch(context, 1)?.code)
         assertEquals(listOf(unavailable), RemotePolicyRuntime.reconcile(context).errors())
-        assertTrue(context.getSharedPreferences("remote_policy_journal", Context.MODE_PRIVATE).all.isEmpty())
+        assertFalse(RemotePolicyRuntime.journalLost(context))
+        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE).all.isEmpty())
+        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE)
+            .all.isEmpty())
     }
 
-    /** Once the fault is gone, the next pass verifies and only then releases the package. */
+    /** Store writes are authorized only on the policy thread, with the gate on, for the journal's own generation. */
+    @Test fun projectionAuthorityNeedsTheGateThePolicyThreadAndTheJournalGeneration() {
+        fun <T> withAuthority(block: (AdminAuthority.CommittedPolicy) -> T): T =
+            AdminAuthority.CommittedPolicy.forProjection(context).use { block(it) }
+        fun permitted(): Boolean = withAuthority { AdminAuthority.CommittedPolicy.permits(context, it) }
+
+        assertTrue(onPolicyThread { permitted() })
+        assertEquals(target().sha256, onPolicyThread { withAuthority { it.generation() } })
+        // Any other thread, even with everything else in place.
+        assertFalse(permitted())
+        // The journal moved on while the authority was held.
+        assertFalse(onPolicyThread {
+            withAuthority { held ->
+                assertTrue(harness.journal.save(harness.engine.state.copy(overrides = setOf(RemoteOverride.NETWORK_OFF))))
+                AdminAuthority.CommittedPolicy.permits(context, held)
+            }
+        })
+        // A closed authority.
+        assertFalse(onPolicyThread { withAuthority { it }.let { AdminAuthority.CommittedPolicy.permits(context, it) } })
+        // The gate off: no authority, no projection and no pass.
+        RemoteEnrolmentGate.openForTests(false)
+        assertFalse(onPolicyThread { permitted() })
+        val refused = onPolicyThread {
+            withAuthority {
+                LockdownPolicyController.applyRemoteProjection(context, it, { true }, true, { true })
+            }
+        }
+        assertEquals(listOf(RemotePolicyApplier.UNAVAILABLE), refused.errors())
+        assertEquals("journal-write-failed", pass().failure?.code)
+        assertTrue(hidden(READER))
+        assertNull(dpm.getAlwaysOnVpnPackage(admin))
+    }
+
+    /** Once the fault is gone, the next pass verifies and only then releases the packages. */
     private fun assertNextPassVerifiesAndReleases() {
+        val target = target()
         device.refuseVpn = false
-        device.beforeVpnWrite = Runnable { assertTrue(dpm.isApplicationHidden(admin, READER)) }
-        val pass = harness.engine.ensureProjected()
-        assertTrue(projection.lastResult?.errors().toString(), pass.verified)
-        assertFalse(dpm.isApplicationHidden(admin, READER))
-        assertEquals(target, harness.engine.state.verified)
-    }
-
-    private fun policy(): JsonObject = mapOf(
-        "managementMode" to "REMOTE",
-        "protection" to mapOf("state" to "ON"),
-        "apps" to mapOf("mode" to "ALLOW_SELECTED", "allowed" to listOf(READER)),
-        "homeFilter" to mapOf(
-            "enabled" to true,
-            "vpnPackage" to VPN,
-            "vpnSignerSha256" to MessageDigest.getInstance("SHA-256").digest(SIGNER)
-                .joinToString("") { "%02x".format(it.toInt() and 255) },
-            "pacUrl" to "https://filter.example.org/proxy.pac",
-            "routing" to mapOf("tailnetId" to "Ttest1", "loginUrl" to "https://routing.example.org",
-                "exitNodeId" to "test-exit", "organizationName" to "TEST ONLY")
-        )
-    )
-
-    private fun install(name: String) {
-        val application = ApplicationInfo()
-        application.packageName = name
-        application.enabled = true
-        val signing = Shadow.newInstanceOf(SigningInfo::class.java)
-        Shadow.extract<ShadowSigningInfo>(signing).setSignatures(arrayOf(Signature(SIGNER)))
-        val info = PackageInfo()
-        info.packageName = name
-        info.applicationInfo = application
-        info.signingInfo = signing
-        Shadow.extract<ShadowPackageManager>(context.packageManager).installPackage(info)
-    }
-
-    private class ProcessDeath : Error()
-
-    private companion object {
-        const val VPN = "com.example.filter"
-        const val READER = "com.example.reader"
-        val SIGNER = byteArrayOf(1, 2, 3)
+        device.beforeVpnWrite = Runnable {
+            assertTrue(hidden(READER))
+            assertTrue(hidden(SECOND_READER))
+        }
+        assertVerified()
+        assertFalse(hidden(READER))
+        assertFalse(hidden(SECOND_READER))
+        assertEquals(target, verified())
+        assertTrue(harness.engine.state.releases.isEmpty())
     }
 }

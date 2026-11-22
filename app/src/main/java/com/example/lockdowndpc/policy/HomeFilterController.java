@@ -212,12 +212,31 @@ public final class HomeFilterController {
                 () -> AuthorizedPolicyWriter.finishRemoteFilterReadback(context), errors);
     }
 
+    /**
+     * The remote pass. An enabled filter is brought up and read back before anything
+     * older is removed. A teardown removes the PAC proxy and the certificates first
+     * and releases the VPN lockdown last, so a cleanup that fails leaves the old
+     * VPN in force.
+     */
     static boolean reconcileRemote(HomeFilterPolicy.Settings settings, int sdk, HomeFilterPolicy.Gateway gateway,
                                    Set<String> retiredCas, Set<HomeFilterPolicy.Config> retiredFilters,
                                    BooleanSupplier finish, List<String> errors) {
+        HomeFilterPolicy.Config active = settings.enabled() ? settings.config() : null;
+        Set<HomeFilterPolicy.Config> previous = new java.util.LinkedHashSet<>(retiredFilters);
+        if (active == null && settings.configured()) {
+            previous.add(settings.config());
+        }
         // Never make a hidden VPN available while trying to verify new protection.
-        boolean verified = !settings.configured()
+        boolean verified = active == null
                 || verifyReadback(settings, HomeFilterPolicy.reconcile(settings, sdk, gateway), errors);
+        if (verified) {
+            for (HomeFilterPolicy.Config retired : previous) {
+                if (!HomeFilterPolicy.retireProxy(retired, active, gateway)) {
+                    errors.add("home-filter:previous-config-removal-unverified");
+                    verified = false;
+                }
+            }
+        }
         if (verified) {
             for (String certificate : retiredCas) {
                 try {
@@ -231,19 +250,49 @@ public final class HomeFilterController {
             }
         }
         if (verified) {
-            for (var retired : retiredFilters) {
-                if (!HomeFilterPolicy.reconcileRetiredConfig(retired, settings.enabled() ? settings.config() : null,
-                        gateway)) {
+            for (HomeFilterPolicy.Config retired : previous) {
+                if (!HomeFilterPolicy.retireVpn(retired, active, gateway)) {
                     errors.add("home-filter:previous-config-removal-unverified");
                     verified = false;
                 }
             }
+        }
+        if (verified && active == null && settings.configured()) {
+            // Everything this filter owned is gone. Read the whole teardown back.
+            verified = verifyReadback(settings, HomeFilterPolicy.reconcile(settings, sdk, gateway), errors);
         }
         if (verified && !finish.getAsBoolean()) {
             errors.add("journal-write-failed");
             return false;
         }
         return verified;
+    }
+
+    /**
+     * The applications behind a filter VPN that may be in force right now: the
+     * always-on package Android reports, and every filter this store still owes
+     * a cleanup for. A built-in blocked package never qualifies.
+     */
+    static Set<String> liveFilterVpnPackages(Context context, DevicePolicyManager dpm, ComponentName admin) {
+        Set<String> packages = new java.util.LinkedHashSet<>();
+        try {
+            String alwaysOn = dpm.getAlwaysOnVpnPackage(admin);
+            if (alwaysOn != null) packages.add(alwaysOn);
+        } catch (RuntimeException unreadable) {
+            // The stored filters below still name what this owner configured.
+        }
+        try {
+            for (HomeFilterPolicy.Config retired : HomeFilterStore.retiredFilters(context)) {
+                packages.add(retired.vpnPackage());
+            }
+            HomeFilterPolicy.Settings stored = HomeFilterStore.read(context);
+            if (stored.configured()) packages.add(stored.config().vpnPackage());
+        } catch (RuntimeException corrupt) {
+            // A corrupt store stops the pass elsewhere.
+        }
+        packages.removeIf(BuiltInBlockExemptions::isBuiltInBlocked);
+        packages.remove(context.getPackageName());
+        return packages;
     }
 
     static boolean verifyReadback(HomeFilterPolicy.Settings enforced, HomeFilterPolicy.Report report,

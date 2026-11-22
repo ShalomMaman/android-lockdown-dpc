@@ -202,24 +202,6 @@ public class LockdownPolicyApplyTest {
         assertTrue(dpm.isPackageSuspended(admin, SOCIAL));
     }
 
-    @Test
-    public void remoteProjectionKeepsHiddenAppsHiddenWhenVpnLockdownFails() {
-        setRemoteMarker();
-        devicePolicy.refuseVpn = true;
-        devicePolicy.beforeVpnWrite = () -> {
-            assertTrue(dpm.isApplicationHidden(admin, ALLOWED));
-            assertTrue(dpm.isApplicationHidden(admin, BLOCKED));
-        };
-        try (var authority = AdminAuthority.CommittedPolicy.forProjection(context, "fixture")) {
-            var result = LockdownPolicyController.applyRemoteProjection(context, authority, () -> true, true);
-            assertFalse(result.applied());
-            assertTrue(result.errors().toString(),
-                    result.errors().stream().anyMatch(error -> error.startsWith("home-filter:vpn=REFUSED,")));
-        }
-        assertTrue(dpm.isApplicationHidden(admin, ALLOWED));
-        assertTrue(dpm.isApplicationHidden(admin, BLOCKED));
-    }
-
     private static HomeFilterPolicy.Settings filterSettings(String packageName, String signerPin, boolean enabled) {
         HomeFilterPolicy.Routing routing = new HomeFilterPolicy.Routing(
                 "T123", "https://vpn.example", "node", "Test");
@@ -288,13 +270,33 @@ public class LockdownPolicyApplyTest {
         private final Set<String> caCertificates = new HashSet<>();
         boolean refuseVpn;
         Runnable beforeVpnWrite = () -> {};
+        boolean refuseProxyChange;
+        /** Packages Android refuses to make visible. */
+        final Set<String> refuseUnhide = new HashSet<>();
+        /** Runs after a package became visible, to fail or stop a pass between two releases. */
+        java.util.function.Consumer<String> afterUnhide = packageName -> {};
+
+        @Implementation
+        protected boolean setApplicationHidden(ComponentName admin, String packageName, boolean hidden) {
+            if (!hidden && refuseUnhide.contains(packageName)) {
+                return false;
+            }
+            boolean wasHidden = isApplicationHidden(admin, packageName);
+            boolean changed = super.setApplicationHidden(admin, packageName, hidden);
+            if (!hidden && wasHidden) {
+                afterUnhide.accept(packageName);
+            }
+            return changed;
+        }
 
         @Implementation
         protected void setAlwaysOnVpnPackage(ComponentName admin, String packageName, boolean lockdown,
                                              Set<String> exemptions) throws PackageManager.NameNotFoundException {
             beforeVpnWrite.run();
-            assertFalse(isApplicationHidden(admin, packageName));
-            assertFalse(isPackageSuspended(admin, packageName));
+            if (packageName != null) {
+                assertFalse(isApplicationHidden(admin, packageName));
+                assertFalse(isPackageSuspended(admin, packageName));
+            }
             if (refuseVpn) {
                 throw new SecurityException("VPN refused");
             }
@@ -337,6 +339,9 @@ public class LockdownPolicyApplyTest {
 
         @Implementation
         protected void setRecommendedGlobalProxy(ComponentName admin, ProxyInfo proxy) {
+            if (refuseProxyChange) {
+                throw new SecurityException("Proxy refused");
+            }
             ConnectivityManager cm = RuntimeEnvironment.getApplication().getSystemService(ConnectivityManager.class);
             Network network = cm.getActiveNetwork();
             cm.bindProcessToNetwork(network);

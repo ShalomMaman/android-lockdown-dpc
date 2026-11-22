@@ -2,13 +2,25 @@ package com.example.lockdowndpc.remote
 
 import com.example.lockdowndpc.security.PinLockoutPolicy
 
+/** The journal's record of what a pass is about to make visible, written before the first such call. */
+internal fun interface ReleaseLedger {
+    fun record(packages: Set<String>): Boolean
+}
+
 internal interface RemoteProjection {
     /** Throws when the device stores cannot hold a schema-valid policy. Runs before the journal commit. */
     fun validate(policy: JsonObject) {}
 
     /** Persist the full effective policy. A refused write aborts the current pass. */
     fun project(policy: JsonObject, target: Generation): Boolean
-    fun apply(target: Generation, stillCurrent: () -> Boolean): Boolean
+    fun apply(target: Generation, stillCurrent: () -> Boolean): Boolean = false
+
+    /** A pass that makes a hidden package visible records it in [releases] first. */
+    fun apply(target: Generation, stillCurrent: () -> Boolean, releases: ReleaseLedger): Boolean =
+        apply(target, stillCurrent)
+
+    /** Hides again what an unverified pass made visible. Returns the packages not proven hidden. */
+    fun revoke(packages: Set<String>): Set<String> = emptySet()
 }
 
 /** All entry points, including recovery and dispatch, run on the same policy thread. */
@@ -22,12 +34,18 @@ internal class RemoteEngine(
     internal class CommandProcess {
         val liveDispatches = mutableSetOf<Long>()
         val callsStarted = mutableSetOf<Long>()
+        /** Outcomes this process knows and could not store yet. */
+        val unsaved = mutableMapOf<Long, CommandEntry>()
     }
 
     private val liveDispatches get() = commandProcess.liveDispatches
     private val callsStarted get() = commandProcess.callsStarted
+    private val unsaved get() = commandProcess.unsaved
+    private val ledger = ReleaseLedger { packages -> save(state.copy(releases = state.releases + packages)) == null }
     private var reconciling = false
     val state: JournalState get() = journal.state
+    /** The journal existed and cannot be read. Every entry point refuses with `journal-lost`. */
+    val lost: Boolean get() = journal.lost
 
     data class Pass(val verified: Boolean, val failure: RemoteFailure? = null)
     enum class RecoveryOutcome { UNCHANGED, REFUSED, COMMITTED }
@@ -37,7 +55,12 @@ internal class RemoteEngine(
         val projection: Pass? = null
     )
 
-    fun bindFleet(verifier: RemoteVerifier, binding: RemoteBinding, pinnedId: String, rootSpki: String): RemoteFailure? {
+    fun bindFleet(
+        verifier: RemoteVerifier, binding: RemoteBinding, pinnedId: String, rootSpki: String, sdk: Int
+    ): RemoteFailure? {
+        if (journal.lost) return LOST
+        // Below Android 10 the default controls cannot all be enforced, so no generation could verify.
+        if (sdk < MIN_SDK) return RemoteFailure("enrolment-sdk-unsupported")
         if (state.trust != null || state.binding != null) return RemoteFailure("doc-version-rollback")
         return try {
             val trust = verifier.bootstrap(pinnedId, rootSpki, binding)
@@ -50,6 +73,7 @@ internal class RemoteEngine(
     }
 
     fun commitBaseline(policy: JsonObject): RemoteFailure? {
+        if (journal.lost) return LOST
         if (state.policy != null) return RemoteFailure("doc-version-rollback")
         return try {
             schema.requireValid("policy", policy)
@@ -72,6 +96,7 @@ internal class RemoteEngine(
 
     fun receive(sync: RemoteSync, exchange: RemoteSync.Exchange, nonce: String, now: RemoteTime,
                 documents: List<RemoteDocument>): RemoteSync.Response {
+        if (journal.lost) return RemoteSync.Response(LOST)
         return sync.respond(exchange, nonce, now, documents, { requireNotNull(state.trust) }, { state.floor(it) }, ::accept)
     }
 
@@ -106,9 +131,12 @@ internal class RemoteEngine(
     }
 
     fun ensureProjected(): Pass {
+        if (journal.lost) return Pass(false, LOST)
         if (reconciling) return Pass(false)
         reconciling = true
         return try {
+            // Nothing an earlier, unverified pass exposed survives into this one.
+            revokeReleases()
             val target = state.generation() ?: return Pass(false, RemoteFailure("remote-policy-unavailable"))
             val body = try {
                 requireNotNull(state.policy).body(schema)
@@ -126,13 +154,19 @@ internal class RemoteEngine(
             val stillCurrent = { state.generation() == target && journal.stamped(target) }
             if (!stillCurrent()) return Pass(false)
             val verified = try {
-                projection.apply(target, stillCurrent)
+                projection.apply(target, stillCurrent, ledger)
             } catch (_: RuntimeException) {
                 false
             }
-            if (!verified || !stillCurrent()) return Pass(false)
-            val failure = save(state.copy(verified = target))
-            Pass(failure == null, failure)
+            if (verified && stillCurrent()) {
+                // The verified hash and the end of the release record are one commit.
+                val failure = save(state.copy(verified = target, releases = emptySet()))
+                if (failure == null) return Pass(true)
+                revokeReleases()
+                return Pass(false, failure)
+            }
+            revokeReleases()
+            Pass(false)
         } catch (error: Refused) {
             Pass(false, error.failure)
         } catch (_: RuntimeException) {
@@ -142,7 +176,20 @@ internal class RemoteEngine(
         }
     }
 
+    /** A package stays in the record until it is proven hidden or a pass verifies. */
+    private fun revokeReleases() {
+        val exposed = state.releases
+        if (exposed.isEmpty()) return
+        val stuck = try {
+            projection.revoke(exposed)
+        } catch (_: RuntimeException) {
+            exposed
+        }
+        if (stuck != exposed) save(state.copy(releases = stuck))
+    }
+
     fun recover(choices: Set<RemoteOverride>, code: String, now: RemoteTime): RecoveryResult {
+        if (journal.lost) return RecoveryResult(RecoveryOutcome.REFUSED, LOST)
         val stored = state.recovery ?: return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (choices.isEmpty()) return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (!now.known) return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = false)
@@ -155,21 +202,23 @@ internal class RemoteEngine(
             }
             return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = false, remainingMillis = evaluated.remainingMillis())
         }
+        // The attempt is counted durably before the code is looked at. A store that
+        // cannot count gives no answer, so it cannot be used to try codes for free.
+        val counted = PinLockoutPolicy.afterFailure(evaluated.state(), boot, now.elapsed, 0)
+        if (!journal.save(state.copy(lockout = counted))) {
+            return RecoveryResult(RecoveryOutcome.REFUSED, RECOVERY_WRITE_FAILED)
+        }
         val matches = try {
             RecoveryCode.matches(code, stored) { recoveryMac(it, false) }
         } catch (_: Exception) {
             return RecoveryResult(RecoveryOutcome.REFUSED, RECOVERY_WRITE_FAILED, false)
         }
         if (!matches) {
-            val next = PinLockoutPolicy.afterFailure(evaluated.state(), boot, now.elapsed, 0)
-            if (!journal.save(state.copy(lockout = next))) {
-                return RecoveryResult(RecoveryOutcome.REFUSED, RECOVERY_WRITE_FAILED, true)
-            }
-            return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = true, remainingMillis = next.penaltyMillis())
+            return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = true, remainingMillis = counted.penaltyMillis())
         }
 
         val commands = state.commands.mapValues { (seq, entry) ->
-            when {
+            unsaved[seq] ?: when {
                 entry.state == CommandState.DISPATCHING && seq !in liveDispatches ->
                     entry.copy(state = CommandState.OUTCOME_UNKNOWN, code = "dispatch-outcome-unknown")
                 entry.state == CommandState.ACCEPTED ||
@@ -181,6 +230,7 @@ internal class RemoteEngine(
         val next = state.copy(recovery = null, recoveryUses = state.recoveryUses + 1,
             lockout = PinLockoutPolicy.LockoutState.CLEARED, overrides = state.overrides + choices, commands = commands)
         if (!journal.save(next)) return RecoveryResult(RecoveryOutcome.REFUSED, RECOVERY_WRITE_FAILED)
+        settled()
         liveDispatches.retainAll(commands.filterValues { it.state == CommandState.DISPATCHING }.keys)
         return RecoveryResult(RecoveryOutcome.COMMITTED)
     }
@@ -191,7 +241,8 @@ internal class RemoteEngine(
     }
 
     fun dispatch(sequence: Long, clock: () -> RemoteTime, platform: CommandPlatform): RemoteFailure? {
-        if (sequence !in liveDispatches) {
+        if (journal.lost) return LOST
+        if (sequence !in liveDispatches || sequence in unsaved) {
             return settleInterruptedCommands() ?: state.commands[sequence]?.code?.let { RemoteFailure(it) }
         }
         val accepted = state.commands.getValue(sequence)
@@ -237,13 +288,18 @@ internal class RemoteEngine(
         if (failure == null) {
             liveDispatches.remove(entry.sequence)
             callsStarted.remove(entry.sequence)
+            unsaved.remove(entry.sequence)
+        } else {
+            // The outcome is known here. It is stored as soon as the journal takes writes again.
+            unsaved[entry.sequence] = entry
         }
         return failure ?: entry.code?.let { RemoteFailure(it) }
     }
 
     fun settleInterruptedCommands(): RemoteFailure? {
+        if (journal.lost) return LOST
         val next = state.commands.mapValues { (sequence, entry) ->
-            when {
+            unsaved[sequence] ?: when {
                 sequence in liveDispatches -> entry
                 entry.state == CommandState.ACCEPTED -> entry.copy(state = CommandState.EXPIRED, code = "command-expired")
                 entry.state == CommandState.DISPATCHING ->
@@ -251,14 +307,25 @@ internal class RemoteEngine(
                 else -> entry
             }
         }
-        return if (next == state.commands) null else save(state.copy(commands = next))
+        if (next == state.commands) return null
+        return save(state.copy(commands = next)).also { if (it == null) settled() }
+    }
+
+    /** The stored journal now carries every outcome this process was holding. */
+    private fun settled() {
+        liveDispatches.removeAll(unsaved.keys)
+        callsStarted.removeAll(unsaved.keys)
+        unsaved.clear()
     }
 
     private fun saveCommand(entry: CommandEntry) = save(state.copy(commands = state.commands + (entry.sequence to entry)))
     private fun save(next: JournalState) = if (journal.save(next)) null else WRITE_FAILED
 
-    private companion object {
-        val WRITE_FAILED = RemoteFailure("journal-write-failed")
-        val RECOVERY_WRITE_FAILED = RemoteFailure("recovery-commit-failed")
+    companion object {
+        /** Android 10: the first release that can enforce every default control and the home filter. */
+        const val MIN_SDK = 29
+        private val LOST = RemoteFailure("journal-lost")
+        private val WRITE_FAILED = RemoteFailure("journal-write-failed")
+        private val RECOVERY_WRITE_FAILED = RemoteFailure("recovery-commit-failed")
     }
 }

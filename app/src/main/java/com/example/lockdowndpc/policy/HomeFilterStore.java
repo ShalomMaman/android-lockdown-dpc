@@ -126,6 +126,8 @@ final class HomeFilterStore {
         return editor;
     }
 
+    static final int MAX_RETIRED = 16;
+
     private static final String[] REMOTE_KEYS = {PACKAGE, PAC, ENABLED, CA, REMOVE_CA, READBACK,
             SIGNER_PIN, TAILNET_ID, LOGIN_URL, EXIT_NODE_ID, ORGANIZATION, CANARY_URL, CANARY_BODY, RETIRED_CA, RETIRED_FILTER};
 
@@ -140,6 +142,9 @@ final class HomeFilterStore {
             retiredFilters.add(encodeConfig(previous.config()));
         }
         if (target.configured()) retiredFilters.remove(encodeConfig(target.config()));
+        // Each entry is a cleanup this device still owes, so none is dropped. A
+        // fleet that keeps replacing an unverified filter is stopped here instead.
+        if (retired.size() > MAX_RETIRED || retiredFilters.size() > MAX_RETIRED) return false;
         // Keep the configuration that could still be live across projection and process failures.
         HomeFilterPolicy.Settings settings = !target.enabled() && previous.configured()
                 ? new HomeFilterPolicy.Settings(previous.config(), false, null, false) : target;

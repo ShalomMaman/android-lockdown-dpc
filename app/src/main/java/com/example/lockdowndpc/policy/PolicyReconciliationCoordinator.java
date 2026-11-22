@@ -54,6 +54,11 @@ public final class PolicyReconciliationCoordinator {
      * FIFO queue. Re-entrant calls from the policy thread run directly to avoid
      * self-deadlock.
      */
+    /** Whether the caller is the single thread that serializes policy work. */
+    static boolean isPolicyThread() {
+        return Thread.currentThread() == ReconciliationThreadFactory.policyThread;
+    }
+
     public static <T> T callOnPolicyThread(Supplier<T> work) {
         if (Thread.currentThread() == ReconciliationThreadFactory.policyThread) {
             return work.get();

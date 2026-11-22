@@ -3,7 +3,9 @@ package com.example.lockdowndpc.ui
 import android.app.LocaleManager
 import android.content.Context
 import android.os.Build
+import android.os.Handler
 import android.os.LocaleList
+import android.os.Looper
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -50,7 +52,14 @@ internal object AppLocales {
         )
     }
 
-    /** Apply a committed remote choice even when no AppCompat activity is attached. */
+    /**
+     * Applies a committed remote choice and reports whether the platform confirms it.
+     *
+     * Android 13 and later store the choice in the system, so it is read back
+     * there. Earlier releases keep it inside AppCompat, whose answer is only an
+     * echo of the request. The choice is still handed over, on the main thread
+     * because AppCompat recreates live activities, and nothing is claimed.
+     */
     fun applyPolicyChoice(context: Context, choice: LanguageChoice): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             val locales = context.getSystemService(LocaleManager::class.java) ?: return false
@@ -58,8 +67,8 @@ internal object AppLocales {
             if (locales.applicationLocales != wanted) locales.applicationLocales = wanted
             return locales.applicationLocales == wanted
         }
-        if (current() != choice) apply(choice)
-        return current() == choice
+        Handler(Looper.getMainLooper()).post { if (current() != choice) apply(choice) }
+        return false
     }
 
     /**

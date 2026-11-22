@@ -52,7 +52,7 @@ public final class LockdownPolicyController {
         if (!ManagementModeStore.read(context).usesLocalPolicy()) {
             return RemotePolicyApplier.refusedLegacyPass();
         }
-        return applyProtectionOn(context, true, new ArrayList<>(), null);
+        return applyProtectionOn(context, true, new ArrayList<>(), null, null);
     }
 
     /** Temporary enforcement while remote policy projection is unavailable. */
@@ -70,21 +70,72 @@ public final class LockdownPolicyController {
         } catch (RuntimeException exception) {
             errors.add("maintenance-restore:" + exception.getClass().getSimpleName());
         }
-        return applyProtectionOn(context, false, errors, null);
+        return applyProtectionOn(context, false, errors, null, null);
     }
 
+    /**
+     * The pass for the journal's committed generation.
+     *
+     * @param recordReleases stores, before the first such write, the hidden packages
+     *                       this pass is about to make visible
+     */
     static synchronized PolicyResult applyRemoteProjection(Context context, AdminAuthority authority,
-                                                           BooleanSupplier stillCurrent, boolean localeVerified) {
+                                                           BooleanSupplier stillCurrent, boolean localeVerified,
+                                                           Predicate<Set<String>> recordReleases) {
         if (!AdminAuthority.CommittedPolicy.permits(context, authority) || !stillCurrent.getAsBoolean()) {
             return RemotePolicyApplier.refusedLegacyPass();
         }
         ArrayList<String> errors = new ArrayList<>();
         if (!localeVerified) errors.add("remote-locale-unverified");
-        return applyProtectionOn(context, false, errors, stillCurrent);
+        return applyProtectionOn(context, false, errors, stillCurrent, recordReleases);
+    }
+
+    /**
+     * Hides again the packages an unverified remote pass made visible.
+     *
+     * @return the packages that could not be proven hidden
+     */
+    static synchronized Set<String> revokeRemoteReleases(Context context, Set<String> packages) {
+        DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+        if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
+            return new LinkedHashSet<>(packages);
+        }
+        ComponentName admin = LockdownAdminReceiver.componentName(context);
+        Set<String> exposed = new LinkedHashSet<>();
+        for (String packageName : packages) {
+            try {
+                if (!isInstalled(context.getPackageManager(), packageName)) {
+                    continue;
+                }
+                if (!dpm.isApplicationHidden(admin, packageName)) {
+                    dpm.setApplicationHidden(admin, packageName, true);
+                }
+                if (!dpm.isApplicationHidden(admin, packageName)) {
+                    exposed.add(packageName);
+                }
+            } catch (RuntimeException exception) {
+                exposed.add(packageName);
+            }
+        }
+        return exposed;
+    }
+
+    /** What the remote package sweep leaves for the end of the pass. */
+    private static final class RemoteSweep {
+        /** Packages the policy shows. A hidden one is released only by a verified pass. */
+        final Set<String> releases = new LinkedHashSet<>();
+        /** The filter VPN that is live now. It is hidden only once its replacement or its removal is verified. */
+        final Set<String> liveFilterVpn;
+        final Set<String> deferredHides = new LinkedHashSet<>();
+
+        RemoteSweep(Set<String> liveFilterVpn) {
+            this.liveFilterVpn = liveFilterVpn;
+        }
     }
 
     private static PolicyResult applyProtectionOn(Context context, boolean local, ArrayList<String> errors,
-                                                  BooleanSupplier stillCurrent) {
+                                                  BooleanSupplier stillCurrent,
+                                                  Predicate<Set<String>> recordReleases) {
         boolean strictRemote = stillCurrent != null;
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
@@ -243,10 +294,11 @@ public final class LockdownPolicyController {
             errors.add("journal-write-failed");
             return new PolicyResult(true, false, 0, 0, errors);
         }
-        Set<String> remoteReleases = strictRemote ? new LinkedHashSet<>() : null;
+        RemoteSweep remoteSweep = strictRemote
+                ? new RemoteSweep(HomeFilterController.liveFilterVpnPackages(context, dpm, admin)) : null;
         int[] packageCounts = strictRemote
                 ? applyPackagePolicy(context, dpm, admin, trustedManagement, playCompatibility, enforcedFilter,
-                        social, chromeInScope, scheduleHold, false, true, remoteReleases, errors)
+                        social, chromeInScope, scheduleHold, false, true, remoteSweep, errors)
                 : null;
         boolean networkVerified = false;
         try {
@@ -268,8 +320,8 @@ public final class LockdownPolicyController {
             }
         }
         if (strictRemote) {
-            finishRemoteVisibility(context, dpm, admin, remoteReleases, packageCounts,
-                    networkVerified, stillCurrent, errors);
+            finishRemoteVisibility(context, dpm, admin, remoteSweep, packageCounts,
+                    networkVerified, stillCurrent, recordReleases, errors);
         } else {
             packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement, playCompatibility,
                     enforcedFilter, social, chromeInScope, scheduleHold, networkVerified, !local, null, errors);
@@ -1013,11 +1065,18 @@ public final class LockdownPolicyController {
             // console records the acceptance with. Computing either here in a
             // second format is how every acceptance once became unsatisfiable
             // and every opted-in package was silently revoked on each pass.
+            if (strictRemote) {
+                // A package this owner hid is still installed. Without the
+                // hidden-aware flag its signer and version read as missing, and a
+                // fleet could never hide an accepted system package and verify.
+                return new SystemAppSelection.InstalledIdentity(
+                        PackageIdentity.currentSignerSha256IncludingHidden(pm, packageName),
+                        Long.toString(PackageIdentity.versionCode(
+                                getPackageInfo(pm, packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES))));
+            }
             return new SystemAppSelection.InstalledIdentity(
                     PackageIdentity.currentSignerSha256(pm, packageName),
-                    strictRemote
-                            ? Long.toString(PackageIdentity.versionCode(getPackageInfo(pm, packageName, 0)))
-                            : PackageIdentity.versionText(getPackageInfo(pm, packageName, 0)));
+                    PackageIdentity.versionText(getPackageInfo(pm, packageName, 0)));
         } catch (RuntimeException | PackageManager.NameNotFoundException exception) {
             return SystemAppSelection.InstalledIdentity.unreadable();
         }
@@ -1035,9 +1094,10 @@ public final class LockdownPolicyController {
             ScheduleSuspension.Hold scheduleHold,
             boolean networkVerified,
             boolean containWithoutSelection,
-            Set<String> remoteReleases,
+            RemoteSweep remoteSweep,
             List<String> errors
     ) {
+        Set<String> remoteReleases = remoteSweep == null ? null : remoteSweep.releases;
         PackageManager pm = context.getPackageManager();
         Set<String> allowed = AllowedAppsStore.getAllowedPackages(context);
         Set<String> managed = AllowedAppsStore.getManagedPackages(context);
@@ -1231,6 +1291,12 @@ public final class LockdownPolicyController {
                 remoteReleases.add(packageName);
                 continue;
             }
+            if (remoteSweep != null && remoteSweep.liveFilterVpn.contains(packageName)) {
+                // Hiding the application behind the live VPN lockdown would take the
+                // filter down before this pass has proven what replaces it.
+                remoteSweep.deferredHides.add(packageName);
+                continue;
+            }
             try {
                 boolean hidden = reconcilePackageVisibility(packageName, shouldBlock, networkVerified,
                         () -> dpm.isApplicationHidden(admin, packageName),
@@ -1264,9 +1330,39 @@ public final class LockdownPolicyController {
     }
 
     private static void finishRemoteVisibility(Context context, DevicePolicyManager dpm, ComponentName admin,
-                                              Set<String> candidates, int[] counts, boolean protectionsVerified,
-                                              BooleanSupplier stillCurrent, List<String> errors) {
-        for (String packageName : candidates) {
+                                              RemoteSweep sweep, int[] counts, boolean protectionsVerified,
+                                              BooleanSupplier stillCurrent, Predicate<Set<String>> recordReleases,
+                                              List<String> errors) {
+        boolean verified = protectionsVerified && errors.isEmpty() && stillCurrent.getAsBoolean();
+        for (String packageName : sweep.deferredHides) {
+            // The old filter application goes only now that the new state is proven.
+            try {
+                boolean hidden = verified
+                        ? reconcilePackageVisibility(packageName, true, true,
+                                () -> dpm.isApplicationHidden(admin, packageName),
+                                hide -> dpm.setApplicationHidden(admin, packageName, hide), errors)
+                        : dpm.isApplicationHidden(admin, packageName);
+                counts[hidden ? 0 : 1]++;
+            } catch (RuntimeException exception) {
+                errors.add("package-policy-unreadable:" + packageName);
+            }
+        }
+        // The journal learns what is about to become visible before any of it does,
+        // so a refusal, a crash or a failed final write can be undone by the next pass.
+        Set<String> hiddenNow = new LinkedHashSet<>();
+        for (String packageName : sweep.releases) {
+            try {
+                if (dpm.isApplicationHidden(admin, packageName)) {
+                    hiddenNow.add(packageName);
+                }
+            } catch (RuntimeException exception) {
+                errors.add("package-policy-unreadable:" + packageName);
+            }
+        }
+        if (verified && errors.isEmpty() && !hiddenNow.isEmpty() && !recordReleases.test(hiddenNow)) {
+            errors.add("journal-write-failed");
+        }
+        for (String packageName : sweep.releases) {
             try {
                 boolean mayRelease = protectionsVerified && errors.isEmpty() && stillCurrent.getAsBoolean();
                 boolean hidden = reconcilePackageVisibility(packageName, false, mayRelease,

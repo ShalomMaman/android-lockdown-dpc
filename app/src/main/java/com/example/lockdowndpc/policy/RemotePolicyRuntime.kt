@@ -3,6 +3,7 @@ package com.example.lockdowndpc.policy
 import android.app.KeyguardManager
 import android.app.admin.DevicePolicyManager
 import android.content.Context
+import android.os.Build
 import android.os.SystemClock
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
@@ -40,6 +41,10 @@ internal object RemotePolicyRuntime {
         }
         return try {
             val current = open(context.applicationContext)
+            // A journal that existed and cannot be read names no generation, floor or
+            // trust. No pass runs: Android keeps the restrictions and hidden packages
+            // of the last one, and nothing can be accepted until the device is provisioned again.
+            if (current.engine.lost) return failed(JOURNAL_LOST)
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
@@ -60,8 +65,18 @@ internal object RemotePolicyRuntime {
 
     fun bindFleet(context: Context, binding: RemoteBinding, pinnedId: String, rootSpki: String): RemoteFailure? =
         onRemoteThread(context, DISABLED, WRITE_FAILED) {
-            engine.bindFleet(verifier, binding, pinnedId, rootSpki)
+            engine.bindFleet(verifier, binding, pinnedId, rootSpki, Build.VERSION.SDK_INT)
         }
+
+    /** Whether this enrolled device has lost its journal. The status screen says so instead of staying silent. */
+    fun journalLost(context: Context): Boolean = try {
+        val app = context.applicationContext
+        remoteEnabled(app) && RemoteJournal.isLost(
+            app.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
+            app.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE))
+    } catch (_: RuntimeException) {
+        false
+    }
 
     fun beginExchange(context: Context): RemoteSync.Exchange? = onRemoteThread(context, null) {
         val binding = engine.state.binding ?: return@onRemoteThread null
@@ -119,15 +134,28 @@ internal object RemotePolicyRuntime {
     )
 
     private val DISABLED = RemoteFailure(RemotePolicyApplier.UNAVAILABLE)
+    private val JOURNAL_LOST = RemoteFailure("journal-lost")
     private val WRITE_FAILED = RemoteFailure("journal-write-failed")
 
     private fun open(context: Context): Open = open ?: run {
         val schema = context.assets.open("v1.schema.json").use { RemoteSchema(it.readBytes()) }
         val projection = RemotePolicyProjection(context)
-        val journal = RemoteJournal(context.getSharedPreferences("remote_policy_journal", Context.MODE_PRIVATE))
-        Open(projection, RemoteEngine(journal, schema, projection, ::recoveryMac), RemoteVerifier(schema))
-            .also { open = it }
+        val journal = RemoteJournal(
+            context.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
+            context.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE))
+        val engine = RemoteEngine(journal, schema, projection, ::recoveryMac)
+        // Store writes are authorized only for the generation this journal holds.
+        AdminAuthority.CommittedPolicy.bindJournal { engine.state.generation()?.sha256 }
+        Open(projection, engine, RemoteVerifier(schema)).also { open = it }
     }
+
+    /** JVM tests build a new application for every test. The opened journal belongs to the previous one. */
+    internal fun closeForTests() {
+        open = null
+    }
+
+    const val JOURNAL_PREFS = "remote_policy_journal"
+    const val JOURNAL_MARKER_PREFS = "remote_policy_journal_marker"
 
     private fun failed(failure: RemoteFailure) =
         LockdownPolicyController.PolicyResult(false, false, 0, 0, listOf(failure.code))
