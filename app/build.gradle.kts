@@ -65,7 +65,7 @@ dependencies {
     // forwards to the platform LocaleManager on API 33+ and persists the choice
     // itself below that; see AndroidManifest.xml and ui/AppLocales.kt.
     implementation("androidx.appcompat:appcompat:1.7.1")
-    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
 
     implementation("androidx.compose.ui:ui")
