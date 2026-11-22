@@ -88,11 +88,13 @@ internal data class JournalGuard(
                     previous.policySha256 == current.policySha256 && pending.isEmpty())
             } else {
                 require(previous.bindingFingerprint == current.bindingFingerprint)
-                require(previous.bindingRootFingerprint == current.bindingRootFingerprint)
+                val keySet = pending[DocumentType.KEY_SET]
+                val advancesRoot = keySet != null && keySet.version == current.floors.getValue(DocumentType.KEY_SET) &&
+                    keySet.keySetSigner == current.rootFingerprint
+                require(previous.bindingRootFingerprint == current.bindingRootFingerprint ||
+                    (current.bindingRootFingerprint == current.rootFingerprint && advancesRoot))
                 require(previous.reanchored == current.reanchored)
-                require(previous.rootFingerprint == current.rootFingerprint ||
-                    (pending[DocumentType.KEY_SET]?.version == current.floors.getValue(DocumentType.KEY_SET) &&
-                        pending[DocumentType.KEY_SET]?.keySetSigner == current.rootFingerprint))
+                require(previous.rootFingerprint == current.rootFingerprint || advancesRoot)
             }
         }
     }

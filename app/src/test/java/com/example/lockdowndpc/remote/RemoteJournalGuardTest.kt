@@ -45,6 +45,22 @@ class RemoteJournalGuardTest {
     private fun replaceJournal(harness: RemoteFixtures.Harness, contents: JsonObject) =
         harness.damageJournal(WireJson.canonical(contents).toString(Charsets.UTF_8))
 
+    @Test fun formatFourGuardStillAuthenticatesASealWithTheHistoricalBindingRoot() {
+        val oldRoot = f.keys.obj("root").text("keyId")
+        val currentRoot = f.keys.obj("successor")
+        val state = JournalState(binding = f.binding, trust = RemoteTrust(currentRoot.text("spki"), version = 2),
+            recoveryPin = JournalRecoveryPin(oldRoot, oldRoot))
+        val seal = mapOf("bindingFingerprint" to f.binding.fingerprint(),
+            "rootFingerprint" to currentRoot.text("keyId"), "bindingRootFingerprint" to oldRoot,
+            "floors" to DocumentType.entries.associate { it.wire to if (it == DocumentType.KEY_SET) 2L else 0L },
+            "policySha256" to null,
+            "stateSha256" to "6423bde6d84b74d1513e405d0d7d80a586b98ae160a374f107a642c3b32de9d5")
+        val payload = WireJson.canonical(mapOf("format" to 4L, "current" to seal,
+            "previous" to null, "pending" to emptyMap<String, Any>()))
+        file.writeBytes(f.mac(payload) + payload)
+        assertTrue(requireNotNull(fileStore().read()).covers(JournalSeal.from(state)))
+    }
+
     @Test fun damagedOrEmptyJournalCannotBeTakenOverAndRetainsAllFloors() {
         val harness = harness()
         assertTrue(harness.journal.save(initial))

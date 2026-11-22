@@ -7,6 +7,7 @@ import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
+import java.util.function.Consumer
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
@@ -14,6 +15,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -104,8 +106,9 @@ class RemoteReanchorTest {
             restrictionCalls.clear()
         }
 
+        val pinStore get() = RecoveryPinFile(pin, pinKey::mac)
         private fun open() = RemoteJournal(preferences.preferences(), marker.preferences(),
-            RemoteJournalGuardFile(guard, guardKey::mac), recoveryPinFile = RecoveryPinFile(pin, pinKey::mac))
+            RemoteJournalGuardFile(guard, guardKey::mac), recoveryPinFile = pinStore)
         private fun engine() = RemoteEngine(journal, f.schema, projection, f::mac)
         fun restart() {
             preferences.restart()
@@ -144,6 +147,16 @@ class RemoteReanchorTest {
             return RemoteDocument(DocumentType.KEY_SET, sign(root, body))
         }
 
+        fun nominate(successor: KeyPair) {
+            val body = f.doc("keyset-2-current-root") + mapOf("keySetVersion" to 3L, "successorRoot" to spki(successor))
+            assertNull(receive(RemoteDocument(DocumentType.KEY_SET, sign(root, body))).decisions.single().failure)
+        }
+
+        fun rotation(successor: KeyPair): RemoteDocument {
+            val body = (f.doc("keyset-2-current-root") - "successorRoot") + ("keySetVersion" to 4L)
+            return RemoteDocument(DocumentType.KEY_SET, sign(successor, body))
+        }
+
         fun receive(vararg docs: RemoteDocument): RemoteSync.Response {
             val sync = RemoteSync(f.verifier, f.binding)
             val exchange = requireNotNull(sync.begin(f.nonce, now))
@@ -154,7 +167,7 @@ class RemoteReanchorTest {
     @Test fun eachRecognizedStorageRefusalCanRebuildWithoutCallingTheRestrictionGateway() {
         val failures: Map<RemoteFailure, Device.() -> Unit> = mapOf(
             RemoteJournal.JOURNAL_LOST to { damageJournal() },
-            RemoteJournal.GUARD_MISSING to { assertTrue(guard.delete()); assertTrue(pin.delete()) },
+            RemoteJournal.GUARD_MISSING to { assertTrue(guard.delete()) },
             RemoteJournal.GUARD_UNREADABLE to { guard.writeText("damaged") },
             RemoteJournal.GUARD_MISMATCH to {
                 val changed = engine.state.copy(policy = f.policy("policy-5"))
@@ -227,27 +240,105 @@ class RemoteReanchorTest {
         assertNull(device.submit(device.document(nonce)))
     }
 
-    @Test fun rotatedRootCannotSignAReanchorForTheOriginalBinding() {
-        val device = Device()
-        val successor = key()
-        val keyset = f.doc("keyset-2-current-root")
-        val nominate = keyset + mapOf("keySetVersion" to 3L, "successorRoot" to spki(successor))
-        val rotate = (keyset - "successorRoot") + ("keySetVersion" to 4L)
-        assertNull(device.receive(RemoteDocument(DocumentType.KEY_SET, sign(device.root, nominate)))
-            .decisions.single().failure)
-        assertNull(device.receive(RemoteDocument(DocumentType.KEY_SET, sign(successor, rotate)))
-            .decisions.single().failure)
-        assertEquals(spki(successor), device.engine.state.trust?.root)
+    @Test fun onlyTheCommittedRootCanReanchorEvenWhenOnlyTheBindRecordSurvives() {
+        for (loseGuard in listOf(false, true)) {
+            val device = Device()
+            val successor = key()
+            device.nominate(successor)
+            assertNull(device.receive(device.rotation(successor)).decisions.single().failure)
+            assertEquals(id(successor), device.pinStore.read()?.pin?.rootFingerprint)
+            val seal = RemoteJournalGuardFile(device.guard, device.guardKey::mac).read()?.current
+            assertEquals(id(successor), seal?.bindingRootFingerprint)
 
+            device.damageJournal()
+            if (loseGuard) assertTrue(device.guard.delete())
+            device.restart()
+            assertEquals(loseGuard, device.status().needsRootFingerprint)
+            val nonce = device.challenge()
+            val latest = floors + (DocumentType.KEY_SET to 4L)
+            val entered = id(successor).takeIf { loseGuard }
+            assertEquals("re-anchor-root-mismatch",
+                device.submit(device.document(nonce, versions = latest), entered)?.code)
+            assertNull(device.submit(device.document(nonce, successor, versions = latest), entered))
+            assertEquals(spki(successor), device.engine.state.trust?.root)
+            assertEquals(4L, device.journal.floor(DocumentType.KEY_SET))
+        }
+    }
+
+    @Test fun rotationRecoversOnBothSidesOfTheJournalWrite() {
+        for (journalCommitted in listOf(false, true)) {
+            val device = Device()
+            val successor = key()
+            device.nominate(successor)
+            val rotation = device.rotation(successor)
+            val crash = Consumer<Set<String>> { throw ProcessDeath() }
+            if (journalCommitted) device.preferences.afterCommit = crash
+            else device.preferences.beforeCommit = crash
+            assertThrows(ProcessDeath::class.java) { device.receive(rotation) }
+            device.preferences.beforeCommit = Consumer { }
+            device.preferences.afterCommit = Consumer { }
+
+            assertEquals(id(successor), device.pinStore.read()?.pending?.rootFingerprint)
+            device.restart()
+            assertNull(device.engine.failure)
+            assertNull(device.pinStore.read()?.pending)
+            val durable = if (journalCommitted) successor else device.root
+            assertEquals(spki(durable), device.engine.state.trust?.root)
+            assertEquals(id(durable), device.pinStore.read()?.pin?.rootFingerprint)
+            if (!journalCommitted) {
+                assertEquals(4L, device.journal.floor(DocumentType.KEY_SET))
+                assertNull(device.receive(rotation).decisions.single().failure)
+                assertEquals(id(successor), device.pinStore.read()?.pin?.rootFingerprint)
+            }
+        }
+    }
+
+    @Test fun disagreementBetweenAuthenticatedGuardAndBindRecordRequiresReset() {
+        val device = Device()
+        val prior = device.pin.readBytes()
+        val successor = key()
+        device.nominate(successor)
+        assertNull(device.receive(device.rotation(successor)).decisions.single().failure)
+        device.pin.writeBytes(prior)
         device.damageJournal()
         device.restart()
-        val nonce = device.challenge()
-        val latest = floors + (DocumentType.KEY_SET to 4L)
-        assertEquals("re-anchor-root-mismatch", device.submit(device.document(nonce, successor, versions = latest))?.code)
-        assertNull(device.submit(device.document(nonce, versions = latest)))
-        assertEquals(spki(device.root), device.engine.state.trust?.root)
-        assertEquals(4L, device.journal.floor(DocumentType.KEY_SET))
+        assertEquals("re-anchor-pin-unavailable", device.status().error?.code)
+        assertNull(device.status().nonce)
     }
+
+    @Test fun bindRecordAloneCannotChooseASideOfAnInterruptedRotation() {
+        val device = Device()
+        val successor = key()
+        device.nominate(successor)
+        device.preferences.afterCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { device.receive(device.rotation(successor)) }
+        device.preferences.afterCommit = Consumer { }
+        assertTrue(device.guard.delete())
+        device.damageJournal()
+        device.restart()
+        assertEquals("re-anchor-pin-unavailable", device.status().error?.code)
+        assertNull(device.status().nonce)
+    }
+
+    @Test fun aJournalProofAloneCannotAuthorizeRecoveryAfterTheIndependentRecordsAreLost() {
+        val device = Device()
+        assertTrue(device.guard.delete())
+        assertTrue(device.pin.delete())
+        device.restart()
+        assertEquals("re-anchor-pin-unavailable", device.status().error?.code)
+        assertNull(device.status().nonce)
+    }
+
+    @Test fun thePinnedSpkiVerifiesTheSignatureBeforeParsingThePayload() {
+        val device = Device()
+        device.damageJournal()
+        device.restart()
+        val envelope = WireJson.parse(device.document(device.challenge())).asObject()
+        assertEquals("doc-signature-invalid", device.submit(WireJson.canonical(
+            envelope + ("payload" to RemoteCrypto.encode("{".toByteArray()))))?.code)
+    }
+
+    private class ProcessDeath : Error()
 
     @Test fun nonceExpiresAtTheDeadlineAndAfterReboot() {
         val device = Device()

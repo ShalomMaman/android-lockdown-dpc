@@ -71,7 +71,7 @@ internal class RemoteEngine(
         return try {
             val trust = verifier.bootstrap(pinnedId, rootSpki, binding)
             val pin = try {
-                journal.bindPin(binding, pinnedId)
+                journal.bindPin(binding, rootSpki)
             } catch (_: Exception) {
                 return WRITE_FAILED
             }

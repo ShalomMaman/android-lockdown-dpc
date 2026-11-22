@@ -14,6 +14,8 @@
     <string name="admin_label">Device management and protection</string>
     <string name="admin_description">Manage apps, block installations, and restrict internet access.</string>
     <string name="remote_policy_unavailable">Managed policy unavailable</string>
+    <string name="remote_policy_locale_unsupported">This policy asks to change the app language. That requires Android 13 or later.</string>
+    <string name="remote_policy_filter_cleanup_limit">Too many previous filters are waiting to be removed. Finish the pending filter setup or send a policy that turns the filter off.</string>
     <string name="remote_policy_journal_lost">The device could not read its saved policy record. The existing restrictions are still in effect.</string>
     <string name="remote_policy_reenrolment_needed">The saved policy uses an older storage format. The existing restrictions are still in effect.</string>
     <string name="remote_policy_guard_blocked">The device could not verify its saved policy. The existing restrictions are still in effect.</string>

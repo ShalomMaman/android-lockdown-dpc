@@ -12,12 +12,15 @@ import com.example.lockdowndpc.kiosk.KioskHostActivity
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.remote.DocumentType
 import com.example.lockdowndpc.remote.JournalState
+import com.example.lockdowndpc.remote.JsonObject
 import com.example.lockdowndpc.remote.Refused
 import com.example.lockdowndpc.remote.RemoteCrypto
+import com.example.lockdowndpc.remote.RemoteDocument
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
 import com.example.lockdowndpc.remote.WireJson
 import java.io.File
+import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.Signature
 import java.security.spec.ECGenParameterSpec
@@ -112,7 +115,7 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
     @Test fun languageIsRefusedBeforeAndroid13AndAPolicyWithoutOneVerifies() {
         val fresh = f.harness(JournalState(), projection)
         for (language in listOf("en", "he", "iw")) {
-            assertEquals(RemoteFailure("doc-field-invalid", "/policy/locale"),
+            assertEquals(RemoteFailure(RemotePolicyProjection.LOCALE_UNSUPPORTED, "/policy/locale"),
                 fresh.engine.commitBaseline(policy(extra = mapOf("locale" to language))))
         }
         assertNull(fresh.engine.state.policy)
@@ -121,12 +124,54 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
 
         // A journal that already holds such a policy does not project it, and the next policy verifies.
         commit(policy(extra = mapOf("locale" to "en")))
-        assertEquals(RemoteFailure("doc-field-invalid", "/policy/locale"), pass().failure)
+        assertEquals(RemoteFailure(RemotePolicyProjection.LOCALE_UNSUPPORTED, "/policy/locale"), pass().failure)
         assertNull(projection.lastResult)
         replace(policy())
         assertVerified()
         assertEquals(setOf("choice"),
             context.getSharedPreferences("remote_policy_locale", Context.MODE_PRIVATE).all.keys)
+    }
+
+    @Test fun signedLocalePolicyIsRefusedBeforeCommitAndReportedToTheConsole() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        RemotePolicyRuntime.setPinMacForTests(f::mac)
+        assertTrue(Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 9))
+        val root = newKeyPair()
+        val signer = newKeyPair()
+        val rootSpki = RemoteCrypto.encode(root.public.encoded)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, RemoteCrypto.keyId(rootSpki), rootSpki))
+
+        fun submit(type: DocumentType, document: JsonObject, key: KeyPair): RemoteFailure? {
+            val bytes = WireJson.canonical(document)
+            val signature = Signature.getInstance("SHA256withECDSA").run {
+                initSign(key.private)
+                update(bytes)
+                sign()
+            }
+            val envelope = WireJson.canonical(mapOf("format" to "dg-signed/1",
+                "keyId" to RemoteCrypto.keyId(RemoteCrypto.encode(key.public.encoded)),
+                "payload" to RemoteCrypto.encode(bytes), "signature" to RemoteCrypto.encode(signature)))
+            val exchange = requireNotNull(RemotePolicyRuntime.beginExchange(context))
+            return RemotePolicyRuntime.receive(context, exchange, exchange.nonce, listOf(RemoteDocument(type, envelope)))
+                .decisions.single().failure
+        }
+
+        val keySet = (f.doc("keyset-2-current-root") - "successorRoot") + mapOf(
+            "fleetPolicyKeys" to listOf(RemoteCrypto.encode(signer.public.encoded)),
+            "serverKey" to newRoot())
+        assertNull(submit(DocumentType.KEY_SET, keySet, root))
+        val prefs = context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE)
+        val before = prefs.getString("state", null)
+        val document = f.doc("policy-6") + ("deviceIds" to listOf(binding.deviceId))
+        val unsupported = document + ("policy" to policy(filter = null, extra = mapOf("locale" to "he")))
+        val code = RemotePolicyProjection.LOCALE_UNSUPPORTED
+        assertEquals(RemoteFailure(code, "/policy/locale"), submit(DocumentType.POLICY, unsupported, signer))
+        assertEquals(before, prefs.getString("state", null))
+        assertEquals(code, RemotePolicyRuntime.policyRefusals.value)
+
+        assertNull(submit(DocumentType.POLICY, document + ("policy" to policy(filter = null)), signer))
+        assertNull(RemotePolicyRuntime.policyRefusals.value)
     }
 
     /** A system package the fleet accepted by signer and version can be hidden, verified again and shown again. */
@@ -318,11 +363,10 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertTrue(hidden(READER))
     }
 
-    private fun newRoot(): String {
-        val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
-            .generateKeyPair().public
-        return RemoteCrypto.encode(key.encoded)
-    }
+    private fun newKeyPair() = KeyPairGenerator.getInstance("EC")
+        .apply { initialize(ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+
+    private fun newRoot() = RemoteCrypto.encode(newKeyPair().public.encoded)
 
     private companion object {
         const val GALLERY = "com.oem.gallery"

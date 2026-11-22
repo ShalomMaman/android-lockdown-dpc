@@ -463,7 +463,7 @@ command.
 | `fleet-policy` | Fleet policy key | Lists 1–256 device IDs; the device must be listed | `fleetPolicyVersion` strictly increasing per fleet; no predecessor hash, so a device jumps straight to the newest version it receives |
 | `recovery` | Fleet policy key | Lists exactly one device | `recoveryVersion` per device strictly increasing |
 | `command` | Server key | One device and **the nonce of the sync request it answers** | `sequence` strictly increasing |
-| `re-anchor` | Original fleet root pinned at binding | One fleet, device and console challenge | Single-use, expiring nonce. Restores all four sync floors. |
+| `re-anchor` | Root of the latest committed keyset, or the binding root before the first keyset | One fleet, device and console challenge | Single-use, expiring nonce. Restores all four sync floors. |
 
 There are no server-signed policy documents and no time documents. No v1 rule
 depends on wall-clock time.
@@ -626,19 +626,19 @@ was not read back.
 
 When a journal or its guard fails closed, the device console names the problem,
 shows a copyable one-time challenge, and takes the signed document on a
-dedicated screen. For a device bound before the backup pin was introduced,
-the device must still have authenticated evidence of its original binding
-root. Where only the independent backup record survives, the administrator
-also enters the original root fingerprint. If that identity can no longer be
-authenticated, the console says that a factory reset and enrolment are required.
+dedicated screen. Where only the finalized independent bind record survives,
+the administrator also enters the current root fingerprint. The console
+requires a factory reset and enrolment if the device cannot authenticate the
+current identity or its authenticated sources disagree. Devices that rotated
+before PR8 and already lost both main records cannot use total-loss recovery.
 
 The fleet administrator signs the challenge, device, fleet and latest issued
-version of every sync document type using the original binding root. The
+version of every sync document type using the latest committed root. The
 device refuses smaller values than any locally readable floors. The full
 [wire and storage contract](remote-contract/README.md#console-re-anchor)
 specifies optional payload hashes for resending the exact keyset and policy at
-the same versions. After a rotation the fleet must still use the original root
-to sign the replacement keyset accepted by the rebuilt device.
+the same versions. That same root signs the replacement keyset accepted by
+the rebuilt device.
 
 An authorized re-anchor changes only remote management records and enters
 `ENROLLING`. Existing Android restrictions and projected stores stay in force
@@ -646,7 +646,8 @@ while the device waits. A replacement keyset and policy must pass the normal
 verification path, and projection must read the new policy back before
 returning the device to `REMOTE`. Old command outcomes and recovery codes
 do not carry over. Unverified package releases are retained only when still
-provable, so the next policy pass can undo them. The build gate remains off.
+provable, so the next policy pass can undo them. Apps exposed before the loss
+stay visible until a replacement policy arrives. The build gate remains off.
 Signing recovery documents for the console and delivering the replacement keyset
 and policy are responsibilities of the fleet server or offline operator.
 

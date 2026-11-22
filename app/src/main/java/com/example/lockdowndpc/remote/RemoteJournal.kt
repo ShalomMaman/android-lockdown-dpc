@@ -109,7 +109,7 @@ internal class RemoteJournal(
     private var marked: Boolean
     private var stateSeal: JournalSeal?
     private var guard: JournalGuard?
-    private val legacyPin: RecoveryPin?
+    private var legacyPin: RecoveryPin?
     private var floors: Map<DocumentType, Long>
     var state: JournalState
         private set
@@ -153,40 +153,57 @@ internal class RemoteJournal(
         return failure
     }
 
-    fun bindPin(binding: RemoteBinding, root: String): JournalRecoveryPin? =
-        recoveryPinFile?.write(RecoveryPin(root, binding.fingerprint()))
+    fun bindPin(binding: RemoteBinding, rootSpki: String): JournalRecoveryPin? {
+        val file = recoveryPinFile ?: return null
+        val pin = RecoveryPin(RemoteCrypto.keyId(rootSpki), binding.fingerprint(), rootSpki)
+        val existing = file.read()
+        require(existing?.pending == null && existing?.pin?.sameIdentity(pin) != false)
+        return file.proof(pin).also { file.write(RecoveryPinFile.Record(pin)) }
+    }
 
-    /** A healthy pre-upgrade binding at version zero still proves its original root. */
+    /** Upgrade a matching legacy bind record, or create one for a healthy version-zero binding. */
     fun preserveLegacyPin() {
         val binding = state.binding ?: return
         val trust = state.trust ?: return
-        if (lost || state.recoveryPin != null || trust.version != 0L || stateSeal == null) return
-        runCatching { bindPin(binding, RemoteCrypto.keyId(trust.root)) }
+        val seal = stateSeal ?: return
+        if (lost || (seal.bindingRootFingerprint != null && seal.bindingRootFingerprint != seal.rootFingerprint)) return
+        val file = recoveryPinFile ?: return
+        runCatching {
+            val record = file.read()
+            if (record?.pending == null && record?.pin?.rootSpki == null &&
+                (record?.pin != null || trust.version == 0L)) bindPin(binding, trust.root)
+        }
     }
 
     data class ReanchorPin(val pin: RecoveryPin, val needsRootFingerprint: Boolean)
 
     fun reanchorPin(): ReanchorPin? {
         val stored = read()
-        fun JournalSeal.pin(): RecoveryPin? {
-            val binding = bindingFingerprint ?: return null
-            // In a legacy seal, version zero proves that no root rotation has taken place.
-            val root = bindingRootFingerprint ?: rootFingerprint?.takeIf {
-                floors.getValue(DocumentType.KEY_SET) == 0L
-            } ?: return null
-            return RecoveryPin(root, binding)
-        }
         fun JournalState.pin(): RecoveryPin? = runCatching {
             val proof = recoveryPin ?: return null
-            val pin = RecoveryPin(proof.rootFingerprint, requireNotNull(binding).fingerprint())
+            val spki = trust?.root?.takeIf { RemoteCrypto.keyId(it) == proof.rootFingerprint }
+            val pin = RecoveryPin(proof.rootFingerprint, requireNotNull(binding).fingerprint(), spki)
             pin.takeIf { recoveryPinFile?.verifies(pin, proof.tag) == true }
         }.getOrNull()
-        val known = listOfNotNull(guard?.current?.pin(), stored.secondary?.current?.pin(),
-            legacyPin, stored.legacy?.pin, state.pin(), stored.state?.pin()).distinct()
-        if (known.size > 1) return null
-        known.singleOrNull()?.let { return ReanchorPin(it, false) }
-        return runCatching { recoveryPinFile?.read() }.getOrNull()?.let { ReanchorPin(it, true) }
+        val guards = listOfNotNull(guard, stored.secondary).distinct()
+        val guardPins = guards.mapNotNull { copy ->
+            val seal = if (copy.previousRootFingerprint == null) copy.current
+                else stored.seal?.takeIf(copy::covers) ?: return null
+            seal.pin()
+        }
+        val record = runCatching { recoveryPinFile?.read() }.getOrNull()
+        if (record?.pending != null) return null
+        val authenticatedGuards = guardPins + listOfNotNull(legacyPin, stored.legacy?.pin)
+        // A journal proof or a legacy bind record on its own can be stale after a rotation.
+        val pin = authenticatedGuards.firstOrNull() ?: record?.pin?.takeIf { it.rootSpki != null } ?: return null
+        val known = authenticatedGuards + listOfNotNull(state.pin(), stored.state?.pin())
+        val sources = known + listOfNotNull(record?.pin)
+        if (sources.any { !it.sameIdentity(pin) }) return null
+        return ReanchorPin(sources.firstOrNull { it.rootSpki != null } ?: pin, known.isEmpty())
     }
+
+    private fun JournalSeal.pin(): RecoveryPin? =
+        rootFingerprint?.let { root -> bindingFingerprint?.let { RecoveryPin(root, it) } }
 
     /** The guard reserves the recovered floors before the new journal can authorize anything. */
     fun reanchor(verified: RemoteVerifier.AuthenticatedReanchor, enterEnrolling: () -> Boolean): Boolean {
@@ -194,8 +211,11 @@ internal class RemoteJournal(
         return try {
             val minFloors = DocumentType.entries.associateWith { maxOf(floor(it), verified.floors.getValue(it)) }
             if (!writeMarker() || !enterEnrolling()) return false
-            val pin = RecoveryPin(RemoteCrypto.keyId(verified.trust.root), verified.binding.fingerprint())
-            val proof = requireNotNull(recoveryPinFile).write(pin, restoring = true)
+            val pin = RecoveryPin(RemoteCrypto.keyId(verified.trust.root), verified.binding.fingerprint(),
+                verified.trust.root)
+            val file = requireNotNull(recoveryPinFile)
+            val proof = file.proof(pin)
+            file.write(RecoveryPinFile.Record(pin))
             val (releases, source) = authenticatedReleases()
             val next = JournalState(trust = verified.trust, binding = verified.binding,
                 recoveryPin = proof, reanchorFloors = minFloors, floorPayloadSha256 = verified.floorPayloadSha256,
@@ -209,6 +229,7 @@ internal class RemoteJournal(
             if (!DurablePreferences.commit(preferences, update, STATE, STAMP)) return false
             state = next
             stateSeal = seal
+            legacyPin = null
             failure = null
             true
         } catch (_: Exception) {
@@ -232,7 +253,18 @@ internal class RemoteJournal(
 
     internal fun save(next: JournalState, doc: RemoteVerifier.Authenticated? = null): Boolean {
         if (lost) return false
-        val bounded = next.bounded()
+        val replacement = try {
+            if (doc?.type == DocumentType.KEY_SET) replacementPin(next)
+            else {
+                // A failed journal write can have reached disk. Leave the pending
+                // bind record intact until a retry commits or a fresh open reads disk.
+                require(pendingPinRecord() == null)
+                null
+            }
+        } catch (_: Exception) {
+            return false
+        }
+        val bounded = (replacement?.let { next.copy(recoveryPin = it.second) } ?: next).bounded()
         val nextSeal = try {
             JournalSeal.from(bounded)
         } catch (_: Exception) {
@@ -245,10 +277,58 @@ internal class RemoteJournal(
         }
         // Reserve floors before the journal write. A failed write leaves the
         // old snapshot usable and the exact authenticated document retryable.
-        if (!mark() || !writeGuard(nextGuard) || !write(STATE, encoded)) return false
+        if (!mark() || !writeGuard(nextGuard)) return false
+        if (replacement != null && !writePin(replacement.first)) return false
+        if (!write(STATE, encoded)) return false
         state = bounded
         stateSeal = nextSeal
         return finishGuardCommit()
+    }
+
+    private fun replacementPin(next: JournalState): Pair<RecoveryPinFile.Record, JournalRecoveryPin>? {
+        val file = recoveryPinFile ?: return null
+        val spki = requireNotNull(next.trust).root
+        val pin = RecoveryPin(RemoteCrypto.keyId(spki), requireNotNull(next.binding).fingerprint(), spki)
+        val record = file.read()
+        require(record?.pending == null || record.pending == pin)
+        val existing = record?.pin
+        if (existing == pin && state.recoveryPin?.rootFingerprint == pin.rootFingerprint) return null
+        val oldSeal = requireNotNull(stateSeal)
+        val oldPin = RecoveryPin(oldSeal.bindingRootFingerprint ?: requireNotNull(oldSeal.rootFingerprint),
+            requireNotNull(oldSeal.bindingFingerprint))
+        require(existing == null || existing.sameIdentity(oldPin))
+        return RecoveryPinFile.Record(existing, pending = pin) to file.proof(pin)
+    }
+
+    private fun writePin(record: RecoveryPinFile.Record): Boolean = try {
+        requireNotNull(recoveryPinFile).write(record)
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun pendingPinRecord(): RecoveryPinFile.Record? {
+        val transition = guard ?: return null
+        if (transition.previous == null || transition.pending[DocumentType.KEY_SET]?.version !=
+            transition.current.floors.getValue(DocumentType.KEY_SET)) return null
+        return recoveryPinFile?.read()?.takeIf { it.pending != null }
+    }
+
+    private fun finishPinCommit(): Boolean {
+        val record = runCatching(::pendingPinRecord).getOrElse { return false } ?: return true
+        val pending = requireNotNull(record.pending)
+        val transition = requireNotNull(guard)
+        if (transition.current.pin()?.sameIdentity(pending) != true ||
+            transition.current.bindingRootFingerprint != pending.rootFingerprint) {
+            failure = GUARD_MISMATCH
+            return false
+        }
+        val stable = when (stateSeal) {
+            transition.current -> pending
+            transition.previous -> record.pin
+            else -> return false
+        }
+        return writePin(RecoveryPinFile.Record(stable))
     }
 
     private fun guardFor(next: JournalSeal, doc: RemoteVerifier.Authenticated?): JournalGuard {
@@ -284,6 +364,10 @@ internal class RemoteJournal(
 
     /** If the journal did commit, remove the old snapshot before using the new one. */
     private fun finishGuardCommit(): Boolean {
+        if (!finishPinCommit()) {
+            if (failure == null) failure = GUARD_WRITE_FAILED
+            return false
+        }
         val current = guard ?: return true
         if (current.current != stateSeal) return true
         return writeGuard(current.copy(previous = null, pending = current.outstanding(state), reanchorSource = null))

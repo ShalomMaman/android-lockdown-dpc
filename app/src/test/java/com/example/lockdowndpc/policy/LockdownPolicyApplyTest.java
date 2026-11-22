@@ -269,6 +269,7 @@ public class LockdownPolicyApplyTest {
         private Set<String> exemptions;
         private final Set<String> caCertificates = new HashSet<>();
         boolean refuseVpn;
+        String vpnWithoutLockdown;
         Runnable beforeVpnWrite = () -> {};
         boolean refuseProxyChange;
         boolean refuseCaInstall;
@@ -321,7 +322,7 @@ public class LockdownPolicyApplyTest {
                 throw new SecurityException("VPN refused");
             }
             alwaysOnVpn = packageName;
-            this.lockdown = lockdown;
+            this.lockdown = lockdown && !java.util.Objects.equals(vpnWithoutLockdown, packageName);
             this.exemptions = exemptions;
         }
 

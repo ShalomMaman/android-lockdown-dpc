@@ -1,10 +1,13 @@
 package com.example.lockdowndpc.policy
 
 import com.example.lockdowndpc.remote.Generation
+import com.example.lockdowndpc.remote.Refused
+import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -40,6 +43,27 @@ class RemoteFilterTransitionTest : RemotePassFixture() {
         assertFirstFilterProtects()
 
         device.refuseVpn = false
+        assertSecondFilterTakesOver()
+    }
+
+    @Test fun replacementWithoutVerifiedLockdownRestoresThePreviousVpnAndItsSettings() {
+        install(OTHER_VPN)
+        replace(policy(filter = filter(OTHER_VPN, OTHER_PAC, CA_B)))
+        val exemptions = setOf("com.example.exempt")
+        dpm.setAlwaysOnVpnPackage(admin, VPN, true, exemptions)
+        device.vpnWithoutLockdown = OTHER_VPN
+        assertFalse(pass().verified)
+        assertTrue(errors().toString(), errors().any { it.startsWith("home-filter:vpn=UNCONFIRMED,") })
+        assertFirstFilterProtects()
+        assertEquals(exemptions, dpm.getAlwaysOnVpnLockdownWhitelist(admin))
+
+        dpm.setAlwaysOnVpnPackage(admin, VPN, false, emptySet())
+        assertFalse(pass().verified)
+        assertEquals(VPN, dpm.getAlwaysOnVpnPackage(admin))
+        assertFalse(dpm.isAlwaysOnVpnLockdownEnabled(admin))
+        assertFalse(errors().toString(), "home-filter:previous-protection-restore-unverified" in errors())
+
+        device.vpnWithoutLockdown = null
         assertSecondFilterTakesOver()
     }
 
@@ -92,6 +116,18 @@ class RemoteFilterTransitionTest : RemotePassFixture() {
         assertSecondFilterTakesOver()
     }
 
+    @Test fun suspendedReplacementIsRecordedBeforeItCanRun() {
+        install(OTHER_VPN)
+        assertTrue(dpm.setPackagesSuspended(admin, arrayOf(OTHER_VPN), true).isEmpty())
+        replace(policy(filter = filter(OTHER_VPN, OTHER_PAC, CA_B)))
+        device.beforeVpnWrite = Runnable { assertTrue(OTHER_VPN in harness.engine.state.releases) }
+        device.refuseProxyChange = true
+        assertFalse(pass().verified)
+        assertTrue(hidden(OTHER_VPN))
+        assertTrue(harness.engine.state.releases.isEmpty())
+        assertFirstFilterProtects()
+    }
+
     /** A teardown that stops anywhere before its last step leaves the VPN lockdown in force. */
     @Test fun teardownReleasesTheVpnLockdownOnlyAfterEverythingElseIsProvenGone() {
         replace(policy(filter = null))
@@ -132,6 +168,11 @@ class RemoteFilterTransitionTest : RemotePassFixture() {
         assertEquals(HomeFilterStore.MAX_RETIRED, HomeFilterStore.retiredFilters(context).size)
         // One more replacement is refused and nothing is lost.
         assertFalse(HomeFilterStore.projectRemote(context, settings(HomeFilterStore.MAX_RETIRED + 1)))
+        val refused = assertThrows(Refused::class.java) {
+            projection.validate(policy(filter = filter("com.example.filter17")))
+        }
+        assertEquals(RemoteFailure(RemotePolicyProjection.FILTER_CLEANUP_LIMIT, "/policy/homeFilter"), refused.failure)
+        projection.validate(policy(filter = null))
         assertEquals(HomeFilterStore.MAX_RETIRED, HomeFilterStore.retiredFilters(context).size)
         assertEquals("com.example.filter${HomeFilterStore.MAX_RETIRED}",
             HomeFilterStore.read(context).config().vpnPackage())

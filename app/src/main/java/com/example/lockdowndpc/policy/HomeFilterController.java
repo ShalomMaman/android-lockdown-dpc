@@ -212,7 +212,7 @@ public final class HomeFilterController {
         try {
             // A filter application the previous policy hid has to be visible before
             // Android can verify its VPN. The journal learns of that release first,
-            // so a pass that does not end verified hides the application again.
+            // so a pass that does not end verified contains the application again.
             gateway.restoreVpnAvailability(settings, recordReleases);
         } catch (RuntimeException exception) {
             errors.add("home-filter:vpn-availability:" + exception.getClass().getSimpleName());
@@ -308,10 +308,10 @@ public final class HomeFilterController {
     }
 
     /** The VPN lockdown and proxy in force before a pass, and whether its new certificate was already installed. */
-    private record LiveFilter(String vpnPackage, String pacUrl, boolean newCaInstalled) {
+    private record LiveFilter(HomeFilterPolicy.VpnState vpn, String pacUrl, boolean newCaInstalled) {
         static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newCa) {
             try {
-                return new LiveFilter(gateway.alwaysOnPackage(), pac(gateway),
+                return new LiveFilter(gateway.vpnState(), pac(gateway),
                         newCa != null && gateway.hasCa(newCa));
             } catch (RuntimeException unreadable) {
                 return null;
@@ -323,12 +323,12 @@ public final class HomeFilterController {
          * A device that had no filter VPN keeps whatever the attempt reached: that is not less than before.
          */
         boolean restore(HomeFilterPolicy.Gateway gateway, String newCa) {
-            if (vpnPackage == null) {
+            if (vpn.packageName() == null) {
                 return true;
             }
             try {
-                if (!vpnPackage.equals(gateway.alwaysOnPackage())) {
-                    gateway.setVpn(vpnPackage);
+                if (!vpnMatches(gateway)) {
+                    gateway.restoreVpn(vpn);
                 }
                 if (!pacUrl.equals(pac(gateway))) {
                     gateway.setProxy(pacUrl.isEmpty() ? null : pacUrl);
@@ -336,10 +336,17 @@ public final class HomeFilterController {
                 if (newCa != null && !newCaInstalled && gateway.hasCa(newCa)) {
                     gateway.setCa(newCa, false);
                 }
-                HomeFilterPolicy.VpnState vpn = gateway.vpnState();
-                return vpnPackage.equals(vpn.packageName()) && vpn.lockdown() && pacUrl.equals(pac(gateway))
+                return vpnMatches(gateway) && pacUrl.equals(pac(gateway))
                         && (newCa == null || newCaInstalled || !gateway.hasCa(newCa));
             } catch (RuntimeException refused) {
+                return false;
+            }
+        }
+
+        private boolean vpnMatches(HomeFilterPolicy.Gateway gateway) {
+            try {
+                return vpn.equals(gateway.vpnState());
+            } catch (RuntimeException unreadable) {
                 return false;
             }
         }
@@ -476,7 +483,7 @@ public final class HomeFilterController {
         private static final int VPN_PACKAGE_FLAGS =
                 PackageManager.MATCH_UNINSTALLED_PACKAGES | PackageManager.MATCH_DISABLED_COMPONENTS;
 
-        /** The filter itself must be launchable before Android can verify its VPN policy. */
+        /** Record any visibility or suspension change before making the filter launchable. */
         private void restoreVpnAvailability(HomeFilterPolicy.Settings settings,
                                             Predicate<Set<String>> recordRelease) {
             if (!settings.enabled() || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
@@ -496,10 +503,10 @@ public final class HomeFilterController {
                         || vpnSignerState(settings.config()) != HomeFilterPolicy.PackageState.INSTALLED) {
                     return;
                 }
+                if (recordRelease != null && !recordRelease.test(Set.of(packageName))) {
+                    throw new IllegalStateException("The release could not be recorded");
+                }
                 if (hidden) {
-                    if (recordRelease != null && !recordRelease.test(Set.of(packageName))) {
-                        throw new IllegalStateException("The release could not be recorded");
-                    }
                     dpm.setApplicationHidden(admin, packageName, false);
                 }
                 if (!dpm.isApplicationHidden(admin, packageName)
@@ -551,20 +558,27 @@ public final class HomeFilterController {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 throw new UnsupportedOperationException("Lockdown read-back requires Android 10");
             }
-            Set<String> exemptions = dpm.getAlwaysOnVpnLockdownWhitelist(admin);
             return new HomeFilterPolicy.VpnState(alwaysOnPackage(),
                     dpm.isAlwaysOnVpnLockdownEnabled(admin),
-                    exemptions != null && exemptions.isEmpty());
+                    dpm.getAlwaysOnVpnLockdownWhitelist(admin));
         }
 
         @Override
         public boolean setVpn(String packageName) {
+            return setVpn(packageName, packageName != null, Collections.emptySet());
+        }
+
+        @Override
+        public boolean restoreVpn(HomeFilterPolicy.VpnState previous) {
+            return setVpn(previous.packageName(), previous.lockdown(), previous.exemptions());
+        }
+
+        private boolean setVpn(String packageName, boolean lockdown, Set<String> exemptions) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    dpm.setAlwaysOnVpnPackage(admin, packageName, packageName != null,
-                            Collections.emptySet());
+                    dpm.setAlwaysOnVpnPackage(admin, packageName, lockdown, exemptions);
                 } else {
-                    dpm.setAlwaysOnVpnPackage(admin, packageName, packageName != null);
+                    dpm.setAlwaysOnVpnPackage(admin, packageName, lockdown);
                 }
                 return true;
             } catch (PackageManager.NameNotFoundException ignored) {

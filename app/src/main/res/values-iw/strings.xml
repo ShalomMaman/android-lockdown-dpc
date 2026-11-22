@@ -21,6 +21,8 @@
     <string name="admin_label">ניהול והגנת המכשיר</string>
     <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
     <string name="remote_policy_unavailable">המדיניות המנוהלת אינה זמינה</string>
+    <string name="remote_policy_locale_unsupported">המדיניות מבקשת לשנות את שפת האפליקציה. השינוי דורש Android 13 ומעלה.</string>
+    <string name="remote_policy_filter_cleanup_limit">יותר מדי מסננים קודמים ממתינים להסרה. יש להשלים את הגדרת המסנן הנוכחית או לשלוח מדיניות שמכבה אותו.</string>
     <string name="remote_policy_journal_lost">לא ניתן לקרוא את רשומת המדיניות השמורה במכשיר. ההגבלות הקיימות עדיין בתוקף.</string>
     <string name="remote_policy_reenrolment_needed">רשומת המדיניות שמורה בפורמט ישן. ההגבלות הקיימות עדיין בתוקף.</string>
     <string name="remote_policy_guard_blocked">לא ניתן לאמת את רשומת המדיניות. ההגבלות הקיימות עדיין בתוקף.</string>
