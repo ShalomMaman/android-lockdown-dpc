@@ -139,6 +139,9 @@ switch states why it cannot be turned on, and a pass with an enforcing schedule
 on those releases requires it again and is not verified while it is not
 confirmed. Turning the schedule off leaves automatic date and time required.
 
+- **An ended window can stay enforced while the filter is unverified.** If the home filter
+  configuration is corrupt or VPN verification fails, suspensions from the ended window
+  stay in place until a pass verifies the network. The policy errs on the strict side.
 - **Double write failure, then restart.** If both the ownership record and its "unknown"
   mark fail to save, and the process restarts outside a window, an older valid record can
   load. A package the schedule suspended can then stay suspended past the window until the

@@ -26,9 +26,9 @@ import java.util.List;
  *       filter's reconciliation — so a held teardown looks enabled to all.</li>
  * </ol>
  *
- * <p>Later steps may only show a package through the verified path. The
- * Android side is the {@link Steps} the controller supplies, so the order is a
- * JVM test.
+ * <p>Later steps wait for verification before showing packages other than the
+ * filter VPN itself. The {@link Steps} supplied by the controller let JVM tests
+ * check this ordering without Android.
  */
 final class ExemptionPassStart {
 

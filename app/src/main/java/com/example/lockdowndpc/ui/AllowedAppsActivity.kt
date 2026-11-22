@@ -157,10 +157,8 @@ class AllowedAppsActivity : AppCompatActivity() {
      * Persists both halves of the decision and hands application to the policy
      * engine.
      *
-     * The guarded system-package store is written after the selection: it is the
-     * only gate that puts a system package under allow/block control, and it
-     * strips the protected catalogues again on write, so a defect in this screen
-     * still cannot make an essential package blockable.
+     * The store saves the selection and system opt-ins together and strips
+     * protected packages from the opt-ins before writing.
      */
     private fun saveAndClose(
         adminSelectedSystem: Set<String>,
@@ -174,11 +172,10 @@ class AllowedAppsActivity : AppCompatActivity() {
         val hadSystemSelection = AllowedAppsStore
             .getAdminSelectedSystemPackages(this).isNotEmpty() || adminSelectedSystem.isNotEmpty()
 
-        if (!AllowedAppsStore.setAllowedPackages(this, selection, managed)) {
+        if (!AllowedAppsStore.setAllowedPackages(this, selection, managed, adminSelectedSystem)) {
             Toast.makeText(this, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
             return
         }
-        AllowedAppsStore.setAdminSelectedSystemPackages(this, adminSelectedSystem)
         AuditLog.append(this, AuditEvent.POLICY_ALLOWLIST_SAVED, getString(R.string.audit_apps_saved))
         if (hadSystemSelection) {
             AuditLog.append(this, AuditEvent.SYSTEM_SELECTION_SAVED, getString(R.string.sysinv_audit_system_saved))

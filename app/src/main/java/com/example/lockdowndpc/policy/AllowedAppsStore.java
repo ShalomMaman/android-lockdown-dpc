@@ -85,13 +85,13 @@ public final class AllowedAppsStore {
      * package: that is unrecoverable on many OEM builds. An operator who needs a
      * specific system app under allow/block control names it here.
      */
-    public static Set<String> getAdminSelectedSystemPackages(Context context) {
+    public static synchronized Set<String> getAdminSelectedSystemPackages(Context context) {
         return new HashSet<>(
                 prefs(context).getStringSet(KEY_ADMIN_SELECTED_SYSTEM, Collections.emptySet())
         );
     }
 
-    public static synchronized void setAdminSelectedSystemPackages(Context context, Set<String> packages) {
+    private static Set<String> guardedSystemSelection(Set<String> packages) {
         HashSet<String> selected = new HashSet<>(packages);
         // Protected packages can never be opted in; this guard belongs here so
         // no caller can turn an app store or kiosk escape surface into an
@@ -99,7 +99,7 @@ public final class AllowedAppsStore {
         selected.removeAll(LockdownPackages.ESSENTIAL_SYSTEM);
         selected.removeAll(LockdownPackages.ALWAYS_BLOCKED);
         selected.removeAll(LockdownPackages.KIOSK_ESCAPE_SURFACES);
-        prefs(context).edit().putStringSet(KEY_ADMIN_SELECTED_SYSTEM, selected).commit();
+        return selected;
     }
 
     /**
@@ -129,7 +129,7 @@ public final class AllowedAppsStore {
     /**
      * Records an administrator's explicit acceptance of one unclassified OEM
      * package's identity risk. Recording an acceptance never adds the package to
-     * {@link #setAdminSelectedSystemPackages}; the caller still has to opt the
+     * {@link #setAllowedPackages}; the caller still has to opt the
      * package in separately, which keeps this a pure audit record rather than a
      * privilege grant on its own.
      */
@@ -185,27 +185,30 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    /** Saves the selection against the active blocking method. Returns false on disk failure. */
+    /** Saves both parts of the selection together. Returns false on disk failure. */
     public static boolean setAllowedPackages(
             Context context,
             Set<String> packages,
-            Set<String> managedPackages
+            Set<String> managedPackages,
+            Set<String> adminSelectedSystem
     ) {
-        return setAllowedPackages(prefs(context), packages, managedPackages);
+        return setAllowedPackages(prefs(context), packages, managedPackages, adminSelectedSystem);
     }
 
     static synchronized boolean setAllowedPackages(
-            SharedPreferences preferences, Set<String> packages, Set<String> managedPackages
+            SharedPreferences preferences, Set<String> packages, Set<String> managedPackages,
+            Set<String> adminSelectedSystem
     ) {
         ProtectionMode mode = currentMode(preferences);
         SharedPreferences.Editor editor = preferences.edit()
                 .putStringSet(allowedKey(mode), new HashSet<>(packages))
                 .putStringSet(KEY_MANAGED_PACKAGES, new HashSet<>(managedPackages))
+                .putStringSet(KEY_ADMIN_SELECTED_SYSTEM, guardedSystemSelection(adminSelectedSystem))
                 .putBoolean(configuredKey(mode), true)
                 .remove(KEY_ALLOWED)
                 .remove(KEY_ALLOWLIST_CONFIGURED);
         return DurablePreferences.commit(preferences, editor, allowedKey(mode), KEY_MANAGED_PACKAGES,
-                configuredKey(mode), KEY_ALLOWED, KEY_ALLOWLIST_CONFIGURED);
+                KEY_ADMIN_SELECTED_SYSTEM, configuredKey(mode), KEY_ALLOWED, KEY_ALLOWLIST_CONFIGURED);
     }
 
     public static synchronized Set<String> getManagedPackages(Context context) {
@@ -242,7 +245,7 @@ public final class AllowedAppsStore {
      * engine puts every managed package under the allow/block rules, which in
      * "allow only what I select" mode would hide every system package an operator
      * had merely scrolled past. Membership stays the deliberate, separately
-     * guarded {@link #setAdminSelectedSystemPackages} decision.
+     * guarded {@link #setAllowedPackages} decision.
      */
     public static synchronized void rememberPackageLabel(Context context, String packageName, String label) {
         String sanitizedLabel = AppLabelSanitizer.sanitize(label);

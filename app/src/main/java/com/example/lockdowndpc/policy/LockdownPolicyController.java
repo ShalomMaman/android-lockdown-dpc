@@ -64,8 +64,9 @@ public final class LockdownPolicyController {
         ChromeFilterExemption.Gateway chromeGateway = deviceOwner && chromeInScope
                 ? new AndroidChromeGateway(context, dpm, admin) : null;
         ArrayList<String> errors = new ArrayList<>();
-        // The single containment step runs before any early return; every later
-        // step may only show a package through the verified path.
+        // The single containment step runs before any early return. Later
+        // package releases wait for network verification, except for the VPN
+        // itself, which must be available for verification to succeed.
         ExemptionPassStart.Start start = ExemptionPassStart.begin(new ExemptionPassStart.Steps() {
             @Override
             public boolean deviceOwner() {
@@ -138,8 +139,8 @@ public final class LockdownPolicyController {
         if (start.stop() == ExemptionPassStart.Stop.CORRUPT_HOME_FILTER) {
             errors.add(0, HomeFilterController.CORRUPT_CONFIGURATION);
             if (deviceOwner) {
-                // Night and work hours do not depend on the home filter: they
-                // are still enforced, and the pass still reports the filter.
+                // Active windows still suspend their targets. Ended windows
+                // keep their suspensions until the network is verified.
                 reconcileScheduleWithoutFilter(context, dpm, admin, social, chromeInScope, errors);
             }
             return new PolicyResult(deviceOwner, false, 0, 0, errors);
@@ -194,8 +195,7 @@ public final class LockdownPolicyController {
         } catch (RuntimeException exception) {
             errors.add("home-filter:reconcile:" + exception.getClass().getSimpleName());
         }
-        // No release is attempted before verification, so a failed filter
-        // reconciliation can never leave a package newly unhidden.
+        // The package sweep only releases apps after network verification.
         int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
                 playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold,
                 networkVerified, errors);
@@ -762,18 +762,24 @@ public final class LockdownPolicyController {
 
     static LockdownPackages.SignerVerdict managementSignerVerdict(
             Context context, LockdownPackages.ManagementPackage record) {
-        return LockdownPackages.verifySigner(
-                record, signingCertificateDigests(context, record.packageName()));
+        return managementSignerVerdict(context, record, 0);
     }
 
-    private static Set<String> signingCertificateDigests(Context context, String packageName) {
+    static LockdownPackages.SignerVerdict managementSignerVerdict(
+            Context context, LockdownPackages.ManagementPackage record, int matchFlags) {
+        return LockdownPackages.verifySigner(
+                record, signingCertificateDigests(context, record.packageName(), matchFlags));
+    }
+
+    private static Set<String> signingCertificateDigests(
+            Context context, String packageName, int matchFlags) {
         LinkedHashSet<String> digests = new LinkedHashSet<>();
         PackageManager pm = context.getPackageManager();
         try {
             Signature[] signatures;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 PackageInfo info = getPackageInfo(pm, packageName,
-                        PackageManager.GET_SIGNING_CERTIFICATES);
+                        PackageManager.GET_SIGNING_CERTIFICATES | matchFlags);
                 SigningInfo signingInfo = info.signingInfo;
                 if (signingInfo == null) {
                     return digests;
@@ -783,7 +789,7 @@ public final class LockdownPolicyController {
                         : signingInfo.getSigningCertificateHistory();
             } else {
                 //noinspection deprecation
-                PackageInfo info = getPackageInfo(pm, packageName, PackageManager.GET_SIGNATURES);
+                PackageInfo info = getPackageInfo(pm, packageName, PackageManager.GET_SIGNATURES | matchFlags);
                 //noinspection deprecation
                 signatures = info.signatures;
             }
@@ -1277,9 +1283,9 @@ public final class LockdownPolicyController {
     }
 
     /**
-     * Night and work hours: suspends every window target while a window is
-     * active, releases what the schedule suspended once none is, and re-arms
-     * the boundary alarm.
+     * Night and work hours: suspends every active window target, releases
+     * suspensions no window still needs once the network is verified, and
+     * re-arms the boundary alarm.
      *
      * <p>The schedule is the only step that suspends for a time window, and it
      * suspends only: hiding stays with {@link #applyPackagePolicy}. A package

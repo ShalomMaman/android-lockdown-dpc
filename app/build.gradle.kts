@@ -49,6 +49,24 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    testOptions.unitTests {
+        isIncludeAndroidResources = true
+        all {
+            // Robolectric's Android framework sandbox uses reflection on JDK 17.
+            it.jvmArgs(listOf(
+                "java.base/java.lang",
+                "java.base/java.util",
+                "java.base/java.io",
+                "java.base/java.net",
+                "java.base/java.security",
+                "java.base/java.text",
+                "java.base/jdk.internal.access",
+                "java.desktop/java.awt.font",
+                "jdk.compiler/com.sun.tools.javac.api",
+            ).map { modulePackage -> "--add-opens=$modulePackage=ALL-UNNAMED" })
+        }
+    }
 }
 
 dependencies {
@@ -73,6 +91,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
+    testImplementation("org.robolectric:robolectric:4.18.1")
 }
 
 // Ordinary releases deliberately have no update channel. Keep this verification

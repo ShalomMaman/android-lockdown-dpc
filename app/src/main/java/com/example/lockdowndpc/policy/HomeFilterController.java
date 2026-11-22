@@ -179,8 +179,14 @@ public final class HomeFilterController {
         if (held) {
             errors.add("home-filter:teardown-held:" + pass.hold());
         }
-        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT,
-                new AndroidGateway(context, dpm, admin));
+        AndroidGateway gateway = new AndroidGateway(context, dpm, admin);
+        try {
+            gateway.restoreVpnAvailability(enforced);
+        } catch (RuntimeException exception) {
+            errors.add("home-filter:vpn-availability:" + exception.getClass().getSimpleName());
+            return false;
+        }
+        HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT, gateway);
         boolean verified = verifyReadback(enforced, report, errors);
         if (held) {
             HomeFilterStore.saveReadback(context, report);
@@ -289,33 +295,69 @@ public final class HomeFilterController {
     private record AndroidGateway(Context context, DevicePolicyManager dpm, ComponentName admin)
             implements HomeFilterPolicy.Gateway {
 
+        @SuppressWarnings("deprecation")
+        private static final int VPN_PACKAGE_FLAGS =
+                PackageManager.MATCH_UNINSTALLED_PACKAGES | PackageManager.MATCH_DISABLED_COMPONENTS;
+
+        /** The filter itself must be launchable before Android can verify its VPN policy. */
+        private void restoreVpnAvailability(HomeFilterPolicy.Settings settings) {
+            if (!settings.enabled() || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
+                return;
+            }
+            String packageName = settings.config().vpnPackage();
+            if (!settings.keepsVpnVisible(packageName)) {
+                return;
+            }
+            try {
+                ApplicationInfo info = context.getPackageManager().getApplicationInfo(packageName, VPN_PACKAGE_FLAGS);
+                if ((info.flags & ApplicationInfo.FLAG_INSTALLED) == 0 || !info.enabled) {
+                    return;
+                }
+                boolean hidden = dpm.isApplicationHidden(admin, packageName);
+                if ((!hidden && !dpm.isPackageSuspended(admin, packageName))
+                        || vpnSignerState(settings.config()) != HomeFilterPolicy.PackageState.INSTALLED) {
+                    return;
+                }
+                if (hidden) {
+                    dpm.setApplicationHidden(admin, packageName, false);
+                }
+                if (!dpm.isApplicationHidden(admin, packageName)
+                        && dpm.isPackageSuspended(admin, packageName)) {
+                    dpm.setPackagesSuspended(admin, new String[]{packageName}, false);
+                }
+            } catch (PackageManager.NameNotFoundException ignored) {
+                // It disappeared from inventory. VPN read-back will report it missing.
+            }
+        }
+
         @Override
         public HomeFilterPolicy.PackageState vpnPackageState(HomeFilterPolicy.Config config) {
             String packageName = config.vpnPackage();
             PackageManager pm = context.getPackageManager();
             try {
                 // Hidden packages can be absent from ordinary queries but still installed.
-                @SuppressWarnings("deprecation")
-                ApplicationInfo info = pm.getApplicationInfo(packageName,
-                        PackageManager.MATCH_UNINSTALLED_PACKAGES);
+                ApplicationInfo info = pm.getApplicationInfo(packageName, VPN_PACKAGE_FLAGS);
                 if ((info.flags & ApplicationInfo.FLAG_INSTALLED) == 0) {
                     return HomeFilterPolicy.PackageState.MISSING;
                 }
-                if (!info.enabled || (info.flags & ApplicationInfo.FLAG_SUSPENDED) != 0
-                        || dpm.isApplicationHidden(admin, packageName)) {
+                if (!info.enabled || dpm.isApplicationHidden(admin, packageName)
+                        || dpm.isPackageSuspended(admin, packageName)) {
                     return HomeFilterPolicy.PackageState.HIDDEN;
                 }
-                Set<String> pins = config.signerPin().isEmpty()
-                        ? AllowedAppsStore.getManagementCertificatePins(context)
-                            .getOrDefault(packageName, Set.of())
-                        : Set.of(config.signerPin());
-                LockdownPackages.ManagementPackage record =
-                        new LockdownPackages.ManagementPackage(packageName, pins);
-                return HomeFilterPolicy.installedVpnState(
-                        LockdownPolicyController.managementSignerVerdict(context, record));
+                return vpnSignerState(config);
             } catch (PackageManager.NameNotFoundException ignored) {
                 return HomeFilterPolicy.PackageState.MISSING;
             }
+        }
+
+        private HomeFilterPolicy.PackageState vpnSignerState(HomeFilterPolicy.Config config) {
+            String packageName = config.vpnPackage();
+            Set<String> pins = config.signerPin().isEmpty()
+                    ? AllowedAppsStore.getManagementCertificatePins(context).getOrDefault(packageName, Set.of())
+                    : Set.of(config.signerPin());
+            LockdownPackages.ManagementPackage record = new LockdownPackages.ManagementPackage(packageName, pins);
+            return HomeFilterPolicy.installedVpnState(
+                    LockdownPolicyController.managementSignerVerdict(context, record, VPN_PACKAGE_FLAGS));
         }
 
         @Override

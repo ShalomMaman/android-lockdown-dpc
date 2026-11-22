@@ -36,15 +36,24 @@ public class PolicyStoreWriteTest {
     }
 
     @Test
-    public void failedAllowlistWriteRestoresSelectionInventoryAndConfiguredFlag() {
+    public void failedAllowlistWriteRestoresSelectionInventoryConfiguredFlagAndSystemOptIns() {
         Map<String, ?> before = Map.of(
                 "allowed_packages:BLOCK_SELECTED", Set.of("com.example.old"),
-                "managed_packages", Set.of("com.example.old", "com.example.other"));
-        SharedPreferences prefs = new MemoryPreferences(before).preferences();
+                "managed_packages", Set.of("com.example.old", "com.example.other"),
+                "admin_selected_system_packages", Set.of("com.example.oldsystem"));
+        MemoryPreferences fake = new MemoryPreferences(before);
+        SharedPreferences prefs = fake.preferences();
+        Set<String> systemSelection = Set.of("com.example.newsystem", "com.android.vending");
 
         assertFalse(AllowedAppsStore.setAllowedPackages(
-                prefs, Set.of("com.example.new"), Set.of("com.example.new")));
+                prefs, Set.of("com.example.new"), Set.of("com.example.new"), systemSelection));
         assertEquals(before, prefs.getAll());
+
+        fake.failCommit = false;
+        assertTrue(AllowedAppsStore.setAllowedPackages(
+                prefs, Set.of("com.example.new"), Set.of("com.example.new"), systemSelection));
+        assertEquals(Set.of("com.example.newsystem"),
+                prefs.getStringSet("admin_selected_system_packages", null));
     }
 
     @Test
