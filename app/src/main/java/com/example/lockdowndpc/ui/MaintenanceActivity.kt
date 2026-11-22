@@ -10,6 +10,7 @@ import android.os.SystemClock
 import android.text.format.DateFormat
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.annotation.StringRes
@@ -31,6 +32,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -147,6 +149,7 @@ class MaintenanceActivity : AppCompatActivity() {
 private fun MaintenanceScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
 
     var loading by remember { mutableStateOf(true) }
     var working by remember { mutableStateOf(false) }
@@ -159,7 +162,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
     var elapsedNow by remember { mutableStateOf(SystemClock.elapsedRealtime()) }
 
     /** Every device call goes through here, so persistence and audit cannot be skipped. */
-    fun perform(action: (Context) -> MaintenanceSnapshot) {
+    fun perform(announceResult: Boolean = true, action: (Context) -> MaintenanceSnapshot) {
         if (working) {
             return
         }
@@ -171,6 +174,9 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
             working = false
             loading = false
             snapshot = result
+            if (announceResult) {
+                result.result?.let { haptics.result(it.kind.tone == MaintenanceResultTone.FAILED) }
+            }
             elapsedNow = SystemClock.elapsedRealtime()
             // The selection is discarded after every completed action, including a
             // failed one. Nothing this screen offers may arrive pre-selected, least
@@ -195,7 +201,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         while (true) {
             elapsedNow = SystemClock.elapsedRealtime()
             if (current.remainingMillis(elapsedNow) <= 0L) {
-                perform { app -> closeMaintenance(app, CloseReason.EXPIRED) }
+                perform(announceResult = false) { app -> closeMaintenance(app, CloseReason.EXPIRED) }
                 return@LaunchedEffect
             }
             delay(1_000L)
@@ -213,6 +219,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
             working = working,
         )
         if (blocker != OpenBlocker.NONE) {
+            haptics.reject()
             blocked = blocker
             return
         }
@@ -238,7 +245,19 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         perform { app -> closeMaintenance(app, CloseReason.ADMINISTRATOR_CANCELLED) }
     }
 
+    fun backOneStep() {
+        if (!working) {
+            draft = draft.retreated()
+            blocked = null
+        }
+    }
+
     val window = snapshot.window
+    val canRetreat = window == null &&
+        (draft.step == MaintenanceStep.CONFIRM || draft.step == MaintenanceStep.CONFIRM_BREAK_GLASS)
+    BackHandler(enabled = canRetreat || working) {
+        if (canRetreat) backOneStep()
+    }
     LockdownScreen(
         title = stringResource(R.string.maint_title),
         subtitle = stringResource(R.string.maint_subtitle),
@@ -266,6 +285,8 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
 
         if (loading) {
             Spacer(Modifier.height(20.dp))
+            CircularProgressIndicator()
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.maint_loading),
                 style = MaterialTheme.typography.bodyMedium,
@@ -284,14 +305,14 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
                 MaintenanceStep.CONFIRM -> ConfirmSection(
                     draft = draft,
                     working = working,
-                    onProceed = { proceed() },
-                    onBack = { draft = draft.retreated() },
+                    onProceed = ::proceed,
+                    onBack = ::backOneStep,
                 )
 
                 MaintenanceStep.CONFIRM_BREAK_GLASS -> BreakGlassSection(
                     working = working,
-                    onProceed = { proceed() },
-                    onBack = { draft = draft.retreated() },
+                    onProceed = ::proceed,
+                    onBack = ::backOneStep,
                 )
 
                 // SELECT is the resting state, and it is also where READY lands:
@@ -301,20 +322,26 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
                     draft = draft,
                     working = working,
                     onCapability = { capability, selected ->
+                        haptics.toggle(selected)
                         draft = draft.withCapability(capability, selected)
                         blocked = null
                     },
                     onDuration = { millis ->
+                        haptics.tick()
                         draft = draft.withDuration(millis)
                         blocked = null
                     },
-                    onProceed = { proceed() },
+                    onProceed = ::proceed,
                 )
             }
         }
 
         Spacer(Modifier.height(12.dp))
-        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
+        SecondaryAction(
+            text = stringResource(R.string.action_back),
+            onClick = { if (canRetreat) backOneStep() else onBack() },
+            enabled = !working,
+        )
     }
 }
 
@@ -441,7 +468,7 @@ private fun OpenWindowSection(
             if (working) R.string.maint_action_closing else R.string.maint_action_close_now
         ),
         onClick = onCloseNow,
-        enabled = !working,
+        loading = working,
     )
 }
 
@@ -523,7 +550,7 @@ private fun SelectSection(
             if (working) R.string.maint_action_working else R.string.maint_action_review
         ),
         onClick = onProceed,
-        enabled = !working,
+        loading = working,
     )
 }
 
@@ -605,10 +632,10 @@ private fun ConfirmSection(
             }
         ),
         onClick = onProceed,
-        enabled = !working,
+        loading = working,
     )
     Spacer(Modifier.height(12.dp))
-    SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onBack)
+    SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onBack, enabled = !working)
 }
 
 /** The separate break-glass step: what the transport is, and what to do about it. */
@@ -667,10 +694,10 @@ private fun BreakGlassSection(
             if (working) R.string.maint_action_working else R.string.maint_break_glass_confirm
         ),
         onClick = onProceed,
-        enabled = !working,
+        loading = working,
     )
     Spacer(Modifier.height(12.dp))
-    SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onBack)
+    SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onBack, enabled = !working)
 }
 
 /** The standing error state for a restore this device did not confirm. */

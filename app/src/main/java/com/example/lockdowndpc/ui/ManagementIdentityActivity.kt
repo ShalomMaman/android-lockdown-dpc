@@ -13,6 +13,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -127,12 +129,14 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
 
     // Every write re-reads the device rather than patching the rows in memory:
     // what is on screen has to be what the next apply pass would compute, not
     // what this screen believes it just stored.
     var loading by remember { mutableStateOf(true) }
-    var working by remember { mutableStateOf(false) }
+    var writeInProgress by remember { mutableStateOf<IdentityWrite?>(null) }
+    val working = writeInProgress != null
     var rows by remember { mutableStateOf(emptyList<ManagementIdentityRow>()) }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var pendingPin by remember { mutableStateOf<ManagementIdentityRow?>(null) }
@@ -145,6 +149,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             AdminSession.extend()
             return true
         }
+        haptics.reject()
         message = UiMessage(resources.getString(R.string.mgmtid_error_auth), isError = true)
         return false
     }
@@ -198,8 +203,9 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
         resultTemplate: Int,
         auditEvent: AuditEvent,
         auditTemplate: Int,
+        action: IdentityWrite,
     ) {
-        if (working || !requireSession()) {
+        if (writeInProgress != null || !requireSession()) {
             return
         }
         // The pin set is built by the same guard the store write applies, and a
@@ -208,6 +214,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
         val pins = try {
             computePins()
         } catch (exception: IllegalArgumentException) {
+            haptics.reject()
             message = UiMessage(
                 resources.getString(
                     R.string.mgmtid_result_write_failed,
@@ -217,49 +224,55 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             )
             return
         }
-        working = true
+        writeInProgress = action
         message = null
         coroutineScope.launch {
-            val app = context.applicationContext
-            val outcome = withContext(Dispatchers.IO) {
-                writeManagementPins(app, row.packageName, pins)
-            }
-            working = false
-            val updated = outcome.rows
-            if (updated == null) {
+            try {
+                val app = context.applicationContext
+                val outcome = withContext(Dispatchers.IO) {
+                    writeManagementPins(app, row.packageName, pins)
+                }
+                val updated = outcome.rows
+                if (updated == null) {
+                    haptics.reject()
+                    message = UiMessage(
+                        resources.getString(
+                            R.string.mgmtid_result_write_failed,
+                            outcome.failure.bidiIsolated(),
+                        ),
+                        isError = true,
+                    )
+                    return@launch
+                }
+                val after = updated.firstOrNull { it.packageName == row.packageName }
+                val identity = resources.getString(labelOf(after?.state ?: row.state))
+                withContext(Dispatchers.IO) {
+                    AuditLog.append(
+                        app,
+                        auditEvent,
+                        app.getString(
+                            auditTemplate,
+                            row.packageName.ltrIsolated(),
+                            (after?.status?.verdict()?.name ?: row.status.verdict().name).ltrIsolated(),
+                        ),
+                    )
+                }
+                // The tone comes from the re-read, not from the write having
+                // returned. A well-formed but wrong digest is stored successfully
+                // and leaves the package refused, which is the state that will
+                // withhold management privilege at the next apply — it must not be
+                // announced in the same neutral line as a success.
+                rows = updated
+                val isError = after?.status?.refused() ?: true
                 message = UiMessage(
-                    resources.getString(
-                        R.string.mgmtid_result_write_failed,
-                        outcome.failure.bidiIsolated(),
-                    ),
-                    isError = true,
+                    text = resources.getString(resultTemplate, identity),
+                    isError = isError,
                 )
-                return@launch
+                haptics.result(isError)
+                auditRefusals(updated)
+            } finally {
+                writeInProgress = null
             }
-            rows = updated
-            val after = updated.firstOrNull { it.packageName == row.packageName }
-            val identity = resources.getString(labelOf(after?.state ?: row.state))
-            withContext(Dispatchers.IO) {
-                AuditLog.append(
-                    app,
-                    auditEvent,
-                    app.getString(
-                        auditTemplate,
-                        row.packageName.ltrIsolated(),
-                        (after?.status?.verdict()?.name ?: row.status.verdict().name).ltrIsolated(),
-                    ),
-                )
-            }
-            // The tone comes from the re-read, not from the write having
-            // returned. A well-formed but wrong digest is stored successfully
-            // and leaves the package refused, which is the state that will
-            // withhold management privilege at the next apply — it must not be
-            // announced in the same neutral line as a success.
-            message = UiMessage(
-                text = resources.getString(resultTemplate, identity),
-                isError = after?.status?.refused() ?: true,
-            )
-            auditRefusals(updated)
         }
     }
 
@@ -293,6 +306,8 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
 
         if (loading) {
             Spacer(Modifier.height(20.dp))
+            CircularProgressIndicator()
+            Spacer(Modifier.height(8.dp))
             Text(
                 text = stringResource(R.string.mgmtid_loading),
                 style = MaterialTheme.typography.bodyMedium,
@@ -305,6 +320,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             ManagementIdentityCard(
                 row = row,
                 enabled = !working,
+                writeInProgress = writeInProgress?.takeIf { it.packageName == row.packageName },
                 onPinInstalled = { pendingPin = row },
                 onAddManual = { manualEntryFor = row },
                 onRemove = { digest -> pendingRemoval = PendingRemoval(row, digest) },
@@ -331,6 +347,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     resultTemplate = R.string.mgmtid_result_pinned,
                     auditEvent = AuditEvent.MANAGEMENT_PIN_ADDED,
                     auditTemplate = R.string.mgmtid_audit_pin_added,
+                    action = IdentityWrite(row.packageName, R.string.mgmtid_action_pin_installed),
                 )
             },
             onDismiss = { pendingPin = null },
@@ -352,6 +369,9 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     resultTemplate = R.string.mgmtid_result_removed,
                     auditEvent = AuditEvent.MANAGEMENT_PIN_REMOVED,
                     auditTemplate = R.string.mgmtid_audit_pin_removed,
+                    action = IdentityWrite(
+                        removal.row.packageName, R.string.mgmtid_action_remove, removal.digest,
+                    ),
                 )
             },
             onDismiss = { pendingRemoval = null },
@@ -374,12 +394,15 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     resultTemplate = R.string.mgmtid_result_pinned,
                     auditEvent = AuditEvent.MANAGEMENT_PIN_ADDED,
                     auditTemplate = R.string.mgmtid_audit_pin_added,
+                    action = IdentityWrite(row.packageName, R.string.mgmtid_action_add_manual),
                 )
             },
             onDismiss = { manualEntryFor = null },
         )
     }
 }
+
+private data class IdentityWrite(val packageName: String, val action: Int, val digest: String? = null)
 
 /**
  * One management package: what the platform reported, what was approved, and the
@@ -392,6 +415,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
 private fun ManagementIdentityCard(
     row: ManagementIdentityRow,
     enabled: Boolean,
+    writeInProgress: IdentityWrite?,
     onPinInstalled: () -> Unit,
     onAddManual: () -> Unit,
     onRemove: (String) -> Unit,
@@ -464,29 +488,38 @@ private fun ManagementIdentityCard(
                         // trailing side in Hebrew as well as in English.
                         Column(modifier = Modifier.weight(1f)) { DigestText(digest) }
                         Spacer(Modifier.size(8.dp))
-                        TextButton(onClick = { onRemove(digest) }, enabled = enabled) {
-                            Text(stringResource(R.string.mgmtid_action_remove))
-                        }
+                        ConsoleTextAction(
+                            text = stringResource(R.string.mgmtid_action_remove),
+                            onClick = { onRemove(digest) },
+                            enabled = enabled,
+                            loading = writeInProgress?.digest == digest,
+                        )
                     }
                 }
             }
 
             Spacer(Modifier.height(12.dp))
-            if (row.canPinInstalledSigner) {
-                TextButton(onClick = onPinInstalled, enabled = enabled) {
-                    Text(stringResource(R.string.mgmtid_action_pin_installed))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (row.canPinInstalledSigner) {
+                    ConsoleTextAction(
+                        text = stringResource(R.string.mgmtid_action_pin_installed),
+                        onClick = onPinInstalled,
+                        enabled = enabled,
+                        loading = writeInProgress?.action == R.string.mgmtid_action_pin_installed,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(pinUnavailableReasonOf(row)),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            } else {
-                // Why the action is absent, rather than a disabled control that
-                // explains nothing.
-                Text(
-                    text = stringResource(pinUnavailableReasonOf(row)),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                ConsoleTextAction(
+                    text = stringResource(R.string.mgmtid_action_add_manual),
+                    onClick = onAddManual,
+                    enabled = enabled,
+                    loading = writeInProgress?.action == R.string.mgmtid_action_add_manual,
                 )
-            }
-            TextButton(onClick = onAddManual, enabled = enabled) {
-                Text(stringResource(R.string.mgmtid_action_add_manual))
             }
         }
     }
@@ -580,6 +613,7 @@ private fun ManualDigestDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
     var typed by remember { mutableStateOf("") }
     val pasted = pastedDigestOf(typed, row.status.pinnedCertificateSha256())
     AlertDialog(
@@ -591,7 +625,15 @@ private fun ManualDigestDialog(
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
                     value = typed,
-                    onValueChange = { typed = it },
+                    onValueChange = { input ->
+                        val problem = pastedDigestOf(input, row.status.pinnedCertificateSha256()).problem
+                        if (problem != pasted.problem &&
+                            (problem == DigestProblem.NOT_HEXADECIMAL || problem == DigestProblem.ALREADY_PINNED)
+                        ) {
+                            haptics.reject()
+                        }
+                        typed = input
+                    },
                     label = { Text(stringResource(R.string.mgmtid_manual_field)) },
                     singleLine = true,
                     isError = typed.isNotEmpty() && !pasted.usable,

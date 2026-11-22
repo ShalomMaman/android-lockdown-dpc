@@ -15,15 +15,18 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -41,6 +44,7 @@ import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -104,54 +108,80 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
 
+    var loading by remember { mutableStateOf(true) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
     var snapshot by remember { mutableStateOf<DeviceHealthSnapshot?>(null) }
     var report by remember { mutableStateOf("") }
     var exportVisible by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<UiMessage?>(null) }
 
-    val loading = stringResource(R.string.health_value_unknown)
-
-    // Reading the stores touches disk, so it happens off the main thread. The
-    // rendering itself is pure and needs resources, so it happens back here.
-    LaunchedEffect(Unit) {
-        val read = withContext(Dispatchers.IO) { DeviceHealthCollector.read(context) }
-        snapshot = read
-        report = DeviceHealthReport.local(
-            read,
-            null,
-            System.currentTimeMillis(),
-            { id, args -> resources.getString(id, *args) },
-            { millis -> formatTimestamp(context, millis) },
-        )
+    // The stores are read off the main thread. Report formatting uses the current resources.
+    LaunchedEffect(refreshVersion) {
+        try {
+            val read = withContext(Dispatchers.IO) { DeviceHealthCollector.read(context) }
+            report = DeviceHealthReport.local(
+                read,
+                null,
+                System.currentTimeMillis(),
+                { id, args -> resources.getString(id, *args) },
+                { millis -> formatTimestamp(context, millis) },
+            )
+            snapshot = read
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            snapshot = null
+            report = ""
+            message = UiMessage(resources.getString(R.string.health_load_failed), isError = true)
+            haptics.reject()
+        } finally {
+            loading = false
+        }
     }
 
     LockdownScreen(
         title = stringResource(R.string.health_title),
         subtitle = stringResource(R.string.health_local_only),
+        refreshing = loading && refreshVersion > 0,
+        onRefresh = {
+            if (!loading) {
+                if (!AdminSession.isUnlocked()) {
+                    haptics.reject()
+                    onBack()
+                } else {
+                    loading = true
+                    message = null
+                    refreshVersion++
+                }
+            }
+        },
     ) {
-        MessageBanner(message)
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-        }
+        MessageBanner(message, Modifier.padding(bottom = 16.dp))
         // LockdownScreen already scrolls the page, so the report is plain text
         // inside it rather than a second scrolling region.
-        Text(
-            text = report.ifBlank { loading },
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.fillMaxWidth(),
-        )
+        if (loading && refreshVersion == 0) {
+            CircularProgressIndicator()
+        } else if (report.isNotBlank()) {
+            Text(
+                text = report,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
 
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
             text = stringResource(R.string.health_export_action),
             icon = Icons.Rounded.ContentCopy,
-            enabled = snapshot != null,
+            enabled = snapshot != null && !loading,
             onClick = {
                 if (AdminSession.isUnlocked()) {
                     AdminSession.extend()
                     exportVisible = true
                 } else {
+                    haptics.reject()
                     onBack()
                 }
             },
@@ -177,7 +207,16 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
                         }
                         // The redacted form, never the screen's own text.
                         val export = DeviceHealthReport.export(current, System.currentTimeMillis())
-                        copyToClipboard(context, export)
+                        val copied = try {
+                            copyToClipboard(context, export)
+                        } catch (_: RuntimeException) {
+                            false
+                        }
+                        if (!copied) {
+                            message = UiMessage(resources.getString(R.string.health_export_failed), isError = true)
+                            haptics.reject()
+                            return@TextButton
+                        }
                         coroutineScope.launch(Dispatchers.IO) {
                             // The action is audited; the exported text is not.
                             AuditLog.append(
@@ -190,6 +229,7 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
                             text = resources.getString(R.string.health_export_copied),
                             isError = false,
                         )
+                        haptics.confirm()
                     },
                 ) {
                     Text(stringResource(R.string.health_export_confirm))
@@ -210,10 +250,11 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
  * goes. The label is marked sensitive so newer Android releases do not preview
  * the content in the paste toast.
  */
-private fun copyToClipboard(context: Context, text: String) {
-    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
+private fun copyToClipboard(context: Context, text: String): Boolean {
+    val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return false
     val clip = ClipData.newPlainText(context.getString(R.string.health_title), text)
     clipboard.setPrimaryClip(clip)
+    return true
 }
 
 private fun formatTimestamp(context: Context, millis: Long): String {

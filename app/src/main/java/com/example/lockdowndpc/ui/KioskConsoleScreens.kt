@@ -6,6 +6,8 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.annotation.StringRes
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,6 +27,7 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -39,6 +42,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,7 +69,9 @@ import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.policy.BuiltInExemptionsController
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.LockdownPackages
+import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.security.AppLabelSanitizer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -174,6 +180,8 @@ internal fun readManagementEntries(context: Context): List<ManagementEntry> =
 internal fun KioskProfileScreen(
     snapshot: KioskSnapshot,
     busy: Boolean,
+    clearing: Boolean,
+    exiting: Boolean,
     message: UiMessage?,
     onConfigureApp: () -> Unit,
     onConfigureSite: () -> Unit,
@@ -185,6 +193,7 @@ internal fun KioskProfileScreen(
     // The radio group is a *pending* choice. Saving it is a separate, explicit
     // step, and locking the device is a third one behind its own screen, so no
     // single tap can take a classroom device away from whoever is holding it.
+    val haptics = rememberHaptics()
     var pending by remember(snapshot.mode) { mutableStateOf(snapshot.mode) }
 
     LockdownScreen(
@@ -192,10 +201,7 @@ internal fun KioskProfileScreen(
         subtitle = stringResource(R.string.kiosk_subtitle),
     ) {
         KioskStatusCard(snapshot)
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(24.dp))
         SectionCard(title = stringResource(R.string.kiosk_section_profile)) {
@@ -210,7 +216,11 @@ internal fun KioskProfileScreen(
                     mode = mode,
                     selected = pending == mode,
                     current = snapshot.mode == mode,
-                    onSelect = { pending = mode },
+                    enabled = !busy,
+                    onSelect = {
+                        if (pending != mode) haptics.tick()
+                        pending = mode
+                    },
                 )
             }
         }
@@ -218,18 +228,14 @@ internal fun KioskProfileScreen(
         Spacer(Modifier.height(20.dp))
         when (pending) {
             KioskMode.SINGLE_APP -> PrimaryAction(
-                text = stringResource(
-                    if (busy) R.string.kiosk_action_working else R.string.kiosk_action_choose_app
-                ),
+                text = stringResource(R.string.kiosk_action_choose_app),
                 icon = Icons.Rounded.Apps,
                 enabled = !busy,
                 onClick = onConfigureApp,
             )
 
             KioskMode.SINGLE_SITE -> PrimaryAction(
-                text = stringResource(
-                    if (busy) R.string.kiosk_action_working else R.string.kiosk_action_choose_site
-                ),
+                text = stringResource(R.string.kiosk_action_choose_site),
                 icon = Icons.Rounded.Language,
                 enabled = !busy,
                 onClick = onConfigureSite,
@@ -237,11 +243,10 @@ internal fun KioskProfileScreen(
 
             else -> if (snapshot.mode != KioskMode.OFF) {
                 PrimaryAction(
-                    text = stringResource(
-                        if (busy) R.string.kiosk_action_working else R.string.kiosk_action_clear
-                    ),
+                    text = stringResource(R.string.kiosk_action_clear),
                     icon = Icons.Rounded.Close,
                     enabled = !busy,
+                    loading = clearing,
                     onClick = onClear,
                 )
             }
@@ -260,6 +265,7 @@ internal fun KioskProfileScreen(
                         // locked" — asserted the opposite of the card.
                         supporting = stringResource(R.string.kiosk_action_exit_supporting),
                         enabled = !busy,
+                        loading = exiting,
                         onClick = onExit,
                     )
                 } else if (snapshot.configValid) {
@@ -282,7 +288,7 @@ internal fun KioskProfileScreen(
         RecoveryNote(snapshot.mode)
 
         Spacer(Modifier.height(24.dp))
-        SecondaryAction(text = stringResource(R.string.kiosk_back), onClick = onBack)
+        SecondaryAction(text = stringResource(R.string.kiosk_back), onClick = onBack, enabled = !busy)
     }
 }
 
@@ -291,17 +297,18 @@ private fun ProfileOption(
     mode: KioskMode,
     selected: Boolean,
     current: Boolean,
+    enabled: Boolean,
     onSelect: () -> Unit,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onSelect)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        RadioButton(selected = selected, onClick = null)
+        RadioButton(selected = selected, onClick = null, enabled = enabled)
         Spacer(Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -446,13 +453,30 @@ internal fun KioskAppPickerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val haptics = rememberHaptics()
     var loading by remember { mutableStateOf(true) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
+    var loadFailed by remember { mutableStateOf(false) }
+    var pendingPackage by remember { mutableStateOf<String?>(null) }
     var rows by remember { mutableStateOf(emptyList<KioskAppRow>()) }
     var query by remember { mutableStateOf("") }
 
-    LaunchedEffect(Unit) {
-        rows = withContext(Dispatchers.IO) { loadKioskAppRows(context) }
-        loading = false
+    LaunchedEffect(refreshVersion) {
+        try {
+            rows = withContext(Dispatchers.IO) { loadKioskAppRows(context) }
+            loadFailed = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            rows = emptyList()
+            loadFailed = true
+            haptics.reject()
+        } finally {
+            loading = false
+        }
+    }
+    LaunchedEffect(busy) {
+        if (!busy) pendingPackage = null
     }
     val filtered = remember(rows, query) {
         rows.filter { matchesAppQuery(it.label, it.packageName, query) }
@@ -461,6 +485,17 @@ internal fun KioskAppPickerScreen(
     LockdownScreen(
         title = stringResource(R.string.kiosk_app_title),
         subtitle = stringResource(R.string.kiosk_app_subtitle),
+        refreshing = loading && refreshVersion > 0,
+        onRefresh = {
+            if (!loading && !busy) {
+                if (!AdminSession.isUnlocked()) {
+                    onBack() // The console returns to the PIN gate if the session has expired.
+                } else {
+                    loading = true
+                    refreshVersion++
+                }
+            }
+        },
     ) {
         Text(
             text = stringResource(R.string.kiosk_app_note),
@@ -495,10 +530,18 @@ internal fun KioskAppPickerScreen(
         Spacer(Modifier.height(16.dp))
 
         when {
-            loading -> Text(
-                text = stringResource(R.string.apps_loading),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            loading && refreshVersion == 0 -> {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.apps_loading),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            loadFailed -> MessageBanner(
+                UiMessage(stringResource(R.string.kiosk_app_load_failed), isError = true)
             )
 
             rows.isEmpty() -> KioskEmptyNote(
@@ -519,15 +562,19 @@ internal fun KioskAppPickerScreen(
                     KioskAppEntry(
                         row = row,
                         showDivider = index > 0,
-                        enabled = !busy,
-                        onClick = { onSelect(row.packageName) },
+                        enabled = !busy && !loading,
+                        loading = busy && pendingPackage == row.packageName,
+                        onClick = {
+                            pendingPackage = row.packageName
+                            onSelect(row.packageName)
+                        },
                     )
                 }
             }
         }
 
         Spacer(Modifier.height(24.dp))
-        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
+        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack, enabled = !busy)
     }
 }
 
@@ -536,6 +583,7 @@ private fun KioskAppEntry(
     row: KioskAppRow,
     showDivider: Boolean,
     enabled: Boolean,
+    loading: Boolean,
     onClick: () -> Unit,
 ) {
     val description = stringResource(
@@ -553,7 +601,8 @@ private fun KioskAppEntry(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .semantics(mergeDescendants = true) { contentDescription = description }
+            .clickable(enabled = enabled && !loading, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description }
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -583,9 +632,16 @@ private fun KioskAppEntry(
             )
         }
         Spacer(Modifier.size(12.dp))
-        TextButton(enabled = enabled, onClick = onClick) {
-            Text(stringResource(R.string.action_save))
+        Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            if (loading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         }
+        Spacer(Modifier.size(8.dp))
+        Text(
+            text = stringResource(R.string.action_save),
+            style = MaterialTheme.typography.labelLarge,
+            color = if (enabled) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -676,22 +732,18 @@ internal fun KioskSiteScreen(
             )
         }
 
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
-            text = stringResource(
-                if (busy) R.string.kiosk_action_working else R.string.kiosk_site_save
-            ),
+            text = stringResource(R.string.kiosk_site_save),
             icon = Icons.Rounded.Language,
-            enabled = !busy && preview.usable,
+            enabled = preview.usable,
+            loading = busy,
             onClick = { onSave(raw) },
         )
         Spacer(Modifier.height(12.dp))
-        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
+        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack, enabled = !busy)
     }
 }
 
@@ -749,22 +801,17 @@ internal fun KioskConfirmScreen(
         Spacer(Modifier.height(20.dp))
         RecoveryNote(snapshot.mode)
 
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(28.dp))
         PrimaryAction(
-            text = stringResource(
-                if (busy) R.string.kiosk_action_working else R.string.kiosk_action_activate
-            ),
+            text = stringResource(R.string.kiosk_action_activate),
             icon = Icons.Rounded.Lock,
-            enabled = !busy,
+            loading = busy,
             onClick = onConfirm,
         )
         Spacer(Modifier.height(12.dp))
-        SecondaryAction(text = stringResource(R.string.kiosk_confirm_cancel), onClick = onCancel)
+        SecondaryAction(text = stringResource(R.string.kiosk_confirm_cancel), onClick = onCancel, enabled = !busy)
     }
 }
 

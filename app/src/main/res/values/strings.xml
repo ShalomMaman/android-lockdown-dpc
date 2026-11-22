@@ -323,4 +323,12 @@
     <string name="audit_mode_allow">Mode selected: allowed apps only</string>
     <string name="audit_mode_block">Mode selected: block the selected apps</string>
     <string name="audit_apps_saved">The app list was saved</string>
+    <string name="action_retry">Try again</string>
+    <string name="update_up_to_date">Device Guard is up to date.</string>
+    <string name="health_load_failed">Could not read the device health report. Pull down to try again.</string>
+    <string name="health_export_failed">Could not copy the device health report.</string>
+    <string name="sysinv_load_failed">Could not read the application inventory. Pull down to try again.</string>
+    <string name="kiosk_app_load_failed">Could not read the kiosk app list. Pull down to try again.</string>
+    <string name="home_filter_apply_success">Home filter changes verified on this device.</string>
+    <string name="home_filter_apply_unverified">The device has not confirmed the home filter changes. Review the status and reapply if needed.</string>
 </resources>

@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -96,6 +97,7 @@ import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import com.example.lockdowndpc.updates.SecureUpdateManager
+import com.example.lockdowndpc.updates.UpdateCheckResult
 import com.example.lockdowndpc.updates.UpdateConfig
 import com.example.lockdowndpc.updates.UpdatePhase
 import com.example.lockdowndpc.updates.UpdateScheduler
@@ -183,26 +185,7 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-/**
- * @param secure          keep the screen out of screenshots and the recents thumbnail
- * @param requiresSession the screen may only be shown while an administrator
- *                        session is valid, and is abandoned for the PIN screen
- *                        the moment it is not — including on resume, so a
- *                        console left open on a kiosk configuration screen
- *                        cannot be picked up later by whoever finds the device
- */
-internal enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
-    ENROLLMENT(false),
-    REMOTE_STATUS(false),
-    PIN_SETUP(true),
-    LOCKED(true),
-    ADMIN(false, requiresSession = true),
-    RECOVERY(true, requiresSession = true),
-    KIOSK(false, requiresSession = true),
-    KIOSK_APPS(false, requiresSession = true),
-    KIOSK_SITE(false, requiresSession = true),
-    KIOSK_CONFIRM(false, requiresSession = true),
-}
+private enum class ProtectionAction { APPLY, PAUSE }
 
 /**
  * How long the console waits for the serialized policy pass a kiosk transition
@@ -296,6 +279,7 @@ private fun AdminConsole(
         return
     }
     var replacingPin by remember { mutableStateOf(false) }
+    var replacingAfterRecovery by remember { mutableStateOf(false) }
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var applyFailureMessage by remember { mutableStateOf<UiMessage?>(null) }
@@ -304,14 +288,16 @@ private fun AdminConsole(
     var auditLogVisible by remember { mutableStateOf(false) }
     var recoveryRotateVisible by remember { mutableStateOf(false) }
     var managementVisible by remember { mutableStateOf(false) }
-    var policyOperationInProgress by remember { mutableStateOf(false) }
+    var policyActionInProgress by remember { mutableStateOf<ProtectionAction?>(null) }
     var updateOperationInProgress by remember { mutableStateOf(false) }
-    var kioskOperationInProgress by remember { mutableStateOf(false) }
+    var kioskActionInProgress by remember { mutableStateOf<Int?>(null) }
+    val kioskOperationInProgress = kioskActionInProgress != null
     var updateSnapshot by remember { mutableStateOf(UpdateStateStore.read(context)) }
     var kiosk by remember { mutableStateOf(KioskSnapshot.Empty) }
     var managementEntries by remember { mutableStateOf(emptyList<ManagementEntry>()) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
     val status = remember(screen, statusRevision) {
         val status = readStatus(context)
         if (screen == ConsoleScreen.ADMIN && status.policyState == AllowedAppsStore.PolicyState.ACTIVE
@@ -338,6 +324,7 @@ private fun AdminConsole(
         message = null
         applyFailureMessage = null
         replacingPin = false
+        replacingAfterRecovery = false
         screen = ConsoleScreen.LOCKED
     }
 
@@ -353,6 +340,7 @@ private fun AdminConsole(
         if (AdminAuthority.localSession(context) != null) {
             return true
         }
+        haptics.reject()
         showLocked()
         return false
     }
@@ -379,16 +367,30 @@ private fun AdminConsole(
         screen = ConsoleScreen.RECOVERY
     }
 
+    fun backFromPinReplacement() {
+        if (replacingAfterRecovery) {
+            showLocked()
+        } else if (requireSession()) {
+            showAdmin()
+        }
+    }
+
+    fun backToKiosk() {
+        if (kioskActionInProgress == null && requireSession()) screen = ConsoleScreen.KIOSK
+    }
+
     fun savePin(first: String, second: String) {
         if (enterRemoteStatusIfNeeded()) return
         if (replacingPin && !requireSession()) {
             return
         }
         if (!AdminPinStore.isValidPin(first)) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.pin_error_format), isError = true)
             return
         }
         if (first != second) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.pin_error_mismatch), isError = true)
             return
         }
@@ -399,6 +401,7 @@ private fun AdminConsole(
                 AdminPinStore.setInitialPin(context, first)
             }
             if (!saved) {
+                haptics.reject()
                 showLocked()
                 return
             }
@@ -413,7 +416,9 @@ private fun AdminConsole(
             AdminSession.unlock()
             statusRevision++
             showRecovery(code)
+            haptics.confirm()
         } catch (exception: RuntimeException) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.pin_error_save), isError = true)
         }
     }
@@ -425,8 +430,10 @@ private fun AdminConsole(
         when (result.status()) {
             AdminPinStore.Status.SUCCESS -> {
                 AdminSession.unlock()
+                haptics.confirm()
                 if (result.usedRecoveryCode()) {
                     replacingPin = true
+                    replacingAfterRecovery = true
                     message = null
                     screen = ConsoleScreen.PIN_SETUP
                 } else {
@@ -434,11 +441,15 @@ private fun AdminConsole(
                 }
             }
 
-            AdminPinStore.Status.INVALID ->
+            AdminPinStore.Status.INVALID -> {
+                haptics.reject()
                 message = UiMessage(resources.getString(R.string.pin_error_invalid), isError = true)
+            }
 
-            AdminPinStore.Status.LOCKED ->
+            AdminPinStore.Status.LOCKED -> {
+                haptics.reject()
                 message = UiMessage(lockoutText(context, result.remainingMillis()), isError = true)
+            }
 
             AdminPinStore.Status.NOT_CONFIGURED -> {
                 replacingPin = false
@@ -446,24 +457,27 @@ private fun AdminConsole(
                 screen = ConsoleScreen.PIN_SETUP
             }
 
-            AdminPinStore.Status.ERROR ->
+            AdminPinStore.Status.ERROR -> {
+                haptics.reject()
                 message = UiMessage(resources.getString(R.string.pin_error_verify), isError = true)
+            }
 
             else -> Unit
         }
     }
 
     fun applyProtection() {
-        if (policyOperationInProgress || !requireSession()) {
+        if (policyActionInProgress != null || !requireSession()) {
             return
         }
         AdminSession.extend()
         if (!AllowedAppsStore.isAllowlistConfigured(context)) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.admin_error_allowlist), isError = true)
             onOpenAppList()
             return
         }
-        policyOperationInProgress = true
+        policyActionInProgress = ProtectionAction.APPLY
         message = null
         applyFailureMessage = null
         coroutineScope.launch {
@@ -472,8 +486,13 @@ private fun AdminConsole(
                     LockdownPolicyController.apply(context.applicationContext)
                 }
             }
-            policyOperationInProgress = false
+            policyActionInProgress = null
             statusRevision++
+            if (result.deviceOwner() && result.applied()) {
+                AuditLog.append(context, AuditEvent.POLICY_APPLIED, resources.getString(R.string.audit_apply))
+            }
+            if (screen != ConsoleScreen.ADMIN || !AdminSession.isUnlocked()) return@launch
+            haptics.result(!result.deviceOwner() || !result.applied())
             if (!result.deviceOwner()) {
                 message = UiMessage(resources.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
@@ -489,7 +508,6 @@ private fun AdminConsole(
                 message = failure
                 applyFailureMessage = failure
             } else {
-                AuditLog.append(context, AuditEvent.POLICY_APPLIED, resources.getString(R.string.audit_apply))
                 showAdmin()
                 val blocked = result.blockedPackages()
                 message = UiMessage(
@@ -501,11 +519,11 @@ private fun AdminConsole(
     }
 
     fun pauseProtection() {
-        if (policyOperationInProgress || !requireSession()) {
+        if (policyActionInProgress != null || !requireSession()) {
             return
         }
         AdminSession.extend()
-        policyOperationInProgress = true
+        policyActionInProgress = ProtectionAction.PAUSE
         message = null
         applyFailureMessage = null
         coroutineScope.launch {
@@ -514,8 +532,13 @@ private fun AdminConsole(
                     LockdownPolicyController.pause(context.applicationContext)
                 }
             }
-            policyOperationInProgress = false
+            policyActionInProgress = null
             statusRevision++
+            if (result.deviceOwner() && result.applied()) {
+                AuditLog.append(context, AuditEvent.POLICY_PAUSED, resources.getString(R.string.audit_pause))
+            }
+            if (screen != ConsoleScreen.ADMIN || !AdminSession.isUnlocked()) return@launch
+            haptics.result(!result.deviceOwner() || !result.applied())
             if (!result.deviceOwner()) {
                 message = UiMessage(resources.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
@@ -526,7 +549,6 @@ private fun AdminConsole(
                     isError = true,
                 )
             } else {
-                AuditLog.append(context, AuditEvent.POLICY_PAUSED, resources.getString(R.string.audit_pause))
                 showAdmin()
                 message = UiMessage(resources.getString(R.string.admin_pause_ok), isError = false)
             }
@@ -540,7 +562,9 @@ private fun AdminConsole(
         try {
             AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, resources.getString(R.string.audit_recovery))
             showRecovery(AdminPinStore.rotateRecoveryCode(context))
+            haptics.confirm()
         } catch (exception: RuntimeException) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.admin_error_recovery), isError = true)
         }
     }
@@ -552,11 +576,28 @@ private fun AdminConsole(
         AdminSession.extend()
         updateOperationInProgress = true
         coroutineScope.launch {
-            withContext(Dispatchers.IO) {
-                SecureUpdateManager.checkNow(context.applicationContext)
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    SecureUpdateManager.checkNow(context.applicationContext)
+                }
+                updateSnapshot = UpdateStateStore.read(context)
+                if (screen == ConsoleScreen.ADMIN && AdminSession.isUnlocked()) {
+                    val summary = when (result) {
+                        UpdateCheckResult.DISABLED -> R.string.update_disabled_title
+                        UpdateCheckResult.BUSY -> R.string.update_checking_title
+                        UpdateCheckResult.UP_TO_DATE -> R.string.update_up_to_date
+                        UpdateCheckResult.INSTALLING -> R.string.update_installing_title
+                        UpdateCheckResult.FAILED -> R.string.update_failed_title
+                    }
+                    val isError = result == UpdateCheckResult.FAILED ||
+                        result == UpdateCheckResult.DISABLED || result == UpdateCheckResult.BUSY
+                    message = UiMessage(resources.getString(summary), isError)
+                    applyFailureMessage = null
+                    haptics.result(isError)
+                }
+            } finally {
+                updateOperationInProgress = false
             }
-            updateSnapshot = UpdateStateStore.read(context)
-            updateOperationInProgress = false
         }
     }
 
@@ -577,12 +618,12 @@ private fun AdminConsole(
         successMessage: Int,
         request: (Context, AdminAuthority, Consumer<Boolean>) -> KioskController.Result,
     ) {
-        if (kioskOperationInProgress || !requireSession()) {
+        if (kioskActionInProgress != null || !requireSession()) {
             return
         }
         AdminSession.extend()
         val authority = AdminAuthority.localSession(context) ?: return
-        kioskOperationInProgress = true
+        kioskActionInProgress = successMessage
         message = null
         coroutineScope.launch {
             val app = context.applicationContext
@@ -594,7 +635,7 @@ private fun AdminConsole(
             }
             val result = attempt.result
             kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
-            kioskOperationInProgress = false
+            kioskActionInProgress = null
             statusRevision++
             if (isKioskSuccessReason(result.reason())) {
                 screen = ConsoleScreen.KIOSK
@@ -617,8 +658,10 @@ private fun AdminConsole(
                     // claim nothing checked.
                     UiMessage(kioskApplyErrorMessage(context, result.errors()), isError = true)
                 }
+                haptics.result(message?.isError == true)
                 return@launch
             }
+            haptics.reject()
             val text = kioskFailureMessage(context, result.reason(), result.errors())
             if (kioskFailureOf(result.reason()) == KioskFailure.AUTH_REQUIRED) {
                 showLocked()
@@ -680,6 +723,18 @@ private fun AdminConsole(
     // first read has to happen without waiting for a resume event.
     LaunchedEffect(Unit) { refreshKiosk() }
 
+    val backDestination = screen.backDestination(replacingPin, replacingAfterRecovery)
+    BackHandler(enabled = backDestination != null) {
+        if (kioskActionInProgress == null) {
+            when (backDestination) {
+                ConsoleScreen.LOCKED -> showLocked()
+                ConsoleScreen.ADMIN -> if (requireSession()) showAdmin()
+                ConsoleScreen.KIOSK -> backToKiosk()
+                else -> Unit
+            }
+        }
+    }
+
     when (screen) {
         ConsoleScreen.ENROLLMENT -> EnrollmentScreen()
         ConsoleScreen.REMOTE_STATUS -> Unit
@@ -688,7 +743,7 @@ private fun AdminConsole(
             replacing = replacingPin,
             message = message,
             onSave = ::savePin,
-            onCancel = { if (requireSession()) showAdmin() },
+            onCancel = ::backFromPinReplacement,
         )
 
         ConsoleScreen.LOCKED -> LockedScreen(
@@ -699,7 +754,7 @@ private fun AdminConsole(
         ConsoleScreen.ADMIN -> AdminScreen(
             status = status,
             kiosk = kiosk,
-            policyOperationInProgress = policyOperationInProgress,
+            policyActionInProgress = policyActionInProgress,
             updateOperationInProgress = updateOperationInProgress,
             updateSnapshot = updateSnapshot,
             message = message,
@@ -749,6 +804,7 @@ private fun AdminConsole(
             onChangePin = {
                 if (requireSession()) {
                     replacingPin = true
+                    replacingAfterRecovery = false
                     message = null
                     screen = ConsoleScreen.PIN_SETUP
                 }
@@ -768,6 +824,8 @@ private fun AdminConsole(
         ConsoleScreen.KIOSK -> KioskProfileScreen(
             snapshot = kiosk,
             busy = kioskOperationInProgress,
+            clearing = kioskActionInProgress == R.string.kiosk_cleared,
+            exiting = kioskActionInProgress == R.string.kiosk_exited,
             message = message,
             onConfigureApp = {
                 if (requireSession()) {
@@ -800,7 +858,7 @@ private fun AdminConsole(
                     KioskController.requestExit(appContext, authority, done)
                 }
             },
-            onBack = { if (requireSession()) showAdmin() },
+            onBack = { if (kioskActionInProgress == null && requireSession()) showAdmin() },
         )
 
         ConsoleScreen.KIOSK_APPS -> KioskAppPickerScreen(
@@ -816,7 +874,7 @@ private fun AdminConsole(
                     )
                 }
             },
-            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+            onBack = ::backToKiosk,
         )
 
         ConsoleScreen.KIOSK_SITE -> KioskSiteScreen(
@@ -830,7 +888,7 @@ private fun AdminConsole(
                     )
                 }
             },
-            onBack = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+            onBack = ::backToKiosk,
         )
 
         ConsoleScreen.KIOSK_CONFIRM -> KioskConfirmScreen(
@@ -842,7 +900,7 @@ private fun AdminConsole(
                     KioskController.requestEnter(appContext, authority, done)
                 }
             },
-            onCancel = { if (requireSession()) screen = ConsoleScreen.KIOSK },
+            onCancel = ::backToKiosk,
         )
     }
 
@@ -863,6 +921,7 @@ private fun AdminConsole(
                         context, AdminAuthority.localSession(context), chosen,
                     )
                 ) {
+                    haptics.reject()
                     message = UiMessage(
                         resources.getString(R.string.policy_settings_save_failed),
                         isError = true,
@@ -881,6 +940,7 @@ private fun AdminConsole(
                     ),
                 )
                 showAdmin()
+                haptics.confirm()
             },
         )
     }
@@ -1003,10 +1063,7 @@ private fun PinSetupScreen(
             imeAction = ImeAction.Done,
             onImeAction = { onSave(first, second) },
         )
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
             text = stringResource(
@@ -1052,10 +1109,7 @@ private fun LockedScreen(
             imeAction = ImeAction.Done,
             onImeAction = ::submit,
         )
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
             text = stringResource(R.string.locked_unlock),
@@ -1069,7 +1123,7 @@ private fun LockedScreen(
 private fun AdminScreen(
     status: ConsoleStatus,
     kiosk: KioskSnapshot,
-    policyOperationInProgress: Boolean,
+    policyActionInProgress: ProtectionAction?,
     updateOperationInProgress: Boolean,
     updateSnapshot: UpdateSnapshot,
     message: UiMessage?,
@@ -1105,22 +1159,20 @@ private fun AdminScreen(
             facts = statusFacts(status),
             detail = statusDetail(status),
         )
-        if (message != null) {
-            Spacer(Modifier.height(16.dp))
-            MessageBanner(message)
-        }
+        MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
             text = stringResource(
                 when {
-                    policyOperationInProgress -> R.string.admin_policy_working
+                    policyActionInProgress == ProtectionAction.APPLY -> R.string.admin_policy_working
                     status.protectionEnabled -> R.string.admin_apply_refresh
                     else -> R.string.admin_apply
                 }
             ),
             icon = if (status.protectionEnabled) Icons.Rounded.Refresh else Icons.Rounded.Shield,
-            enabled = !policyOperationInProgress,
+            enabled = policyActionInProgress == null,
+            loading = policyActionInProgress == ProtectionAction.APPLY,
             onClick = onApply,
         )
 
@@ -1164,12 +1216,14 @@ private fun AdminScreen(
                 onClick = onOpenMaintenance,
                 showDivider = true,
             )
-            if (status.protectionEnabled) {
+            if (status.protectionEnabled || policyActionInProgress == ProtectionAction.PAUSE) {
                 ActionRow(
                     icon = Icons.Rounded.Pause,
                     title = stringResource(R.string.admin_pause),
                     supporting = stringResource(R.string.admin_pause_supporting),
                     onClick = onPause,
+                    enabled = policyActionInProgress == null,
+                    loading = policyActionInProgress == ProtectionAction.PAUSE,
                     showDivider = true,
                 )
             }
@@ -1215,7 +1269,8 @@ private fun AdminScreen(
                             R.string.update_disabled_supporting
                         }
                     ),
-                enabled = UpdateConfig.isConfigured && !updateOperationInProgress,
+                enabled = UpdateConfig.isConfigured,
+                loading = updateOperationInProgress,
                 onClick = onCheckUpdate,
             )
         }
