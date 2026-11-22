@@ -68,6 +68,9 @@ internal class RemotePolicyProjection(
             // The VPN read-back needs the routing settings. Without them no pass could verify.
             refuse("doc-field-invalid", "/policy/homeFilter/routing")
         }
+        if (!HomeFilterStore.canProjectRemote(context, filter)) {
+            refuse(FILTER_CLEANUP_LIMIT, "/policy/homeFilter")
+        }
         // A kiosk needs a local way out, and the remote console has none yet.
         // Until it does, a fleet policy cannot contain a device in one.
         if ((policy["kiosk"]?.asObject()?.get("mode") ?: "OFF") != "OFF") {
@@ -147,7 +150,7 @@ internal class RemotePolicyProjection(
      * there could be stored and never verified, so the policy is refused instead.
      */
     private fun languageOnThisRelease(choice: LanguageChoice): LanguageChoice {
-        if (sdk < Build.VERSION_CODES.TIRAMISU) refuse("doc-field-invalid", "/policy/locale")
+        if (sdk < Build.VERSION_CODES.TIRAMISU) refuse(LOCALE_UNSUPPORTED, "/policy/locale")
         return choice
     }
 
@@ -172,8 +175,10 @@ internal class RemotePolicyProjection(
         return HomeFilterPolicy.Settings(config, true, certificate, false)
     }
 
-    private companion object {
-        const val LOCALE_PREFS = "remote_policy_locale"
-        const val LOCALE = "choice"
+    companion object {
+        const val LOCALE_UNSUPPORTED = "remote-locale-sdk-unsupported"
+        const val FILTER_CLEANUP_LIMIT = "remote-filter-cleanup-limit"
+        private const val LOCALE_PREFS = "remote_policy_locale"
+        private const val LOCALE = "choice"
     }
 }

@@ -134,26 +134,41 @@ final class HomeFilterStore {
     static synchronized boolean projectRemote(Context context, HomeFilterPolicy.Settings target) {
         SharedPreferences prefs = prefs(context);
         HomeFilterPolicy.Settings previous = read(prefs);
-        Set<String> retired = new HashSet<>(retiredCas(context));
-        if (previous.ca() != null) retired.add(previous.ca());
-        if (target.ca() != null) retired.remove(target.ca());
+        RemoteCleanup cleanup = remoteCleanup(prefs, previous, target);
+        if (!cleanup.canProject(target)) return false;
+        // Keep the configuration that could still be live across projection and process failures.
+        HomeFilterPolicy.Settings settings = !target.enabled() && previous.configured()
+                ? new HomeFilterPolicy.Settings(previous.config(), false, null, false) : target;
+        return DurablePreferences.commit(prefs, edit(prefs, settings).putStringSet(RETIRED_CA, cleanup.cas())
+                .putStringSet(RETIRED_FILTER, cleanup.filters()), REMOTE_KEYS);
+    }
+
+    static synchronized boolean canProjectRemote(Context context, HomeFilterPolicy.Settings target) {
+        SharedPreferences prefs = prefs(context);
+        return remoteCleanup(prefs, read(prefs), target).canProject(target);
+    }
+
+    private static RemoteCleanup remoteCleanup(SharedPreferences prefs, HomeFilterPolicy.Settings previous,
+                                               HomeFilterPolicy.Settings target) {
+        Set<String> retiredCas = new HashSet<>(prefs.getStringSet(RETIRED_CA, Set.of()));
+        if (previous.ca() != null) retiredCas.add(previous.ca());
+        if (target.ca() != null) retiredCas.remove(target.ca());
         Set<String> retiredFilters = new HashSet<>(prefs.getStringSet(RETIRED_FILTER, Set.of()));
         if (previous.configured() && !previous.config().equals(target.config())) {
             retiredFilters.add(encodeConfig(previous.config()));
         }
         if (target.configured()) retiredFilters.remove(encodeConfig(target.config()));
+        return new RemoteCleanup(retiredCas, retiredFilters);
+    }
+
+    private record RemoteCleanup(Set<String> cas, Set<String> filters) {
         // Each entry is a cleanup this device still owes, so none is dropped. A
         // fleet that keeps replacing an unverified filter is stopped here instead.
         // Turning the filter off is never stopped: that is the way out, and the
         // recovery path, and its one extra entry is cleared by the same teardown.
-        if (target.enabled() && (retired.size() > MAX_RETIRED || retiredFilters.size() > MAX_RETIRED)) {
-            return false;
+        boolean canProject(HomeFilterPolicy.Settings target) {
+            return !target.enabled() || (cas.size() <= MAX_RETIRED && filters.size() <= MAX_RETIRED);
         }
-        // Keep the configuration that could still be live across projection and process failures.
-        HomeFilterPolicy.Settings settings = !target.enabled() && previous.configured()
-                ? new HomeFilterPolicy.Settings(previous.config(), false, null, false) : target;
-        return DurablePreferences.commit(prefs, edit(prefs, settings).putStringSet(RETIRED_CA, retired)
-                .putStringSet(RETIRED_FILTER, retiredFilters), REMOTE_KEYS);
     }
 
     static synchronized Set<String> retiredCas(Context context) {

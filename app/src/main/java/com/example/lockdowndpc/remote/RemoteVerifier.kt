@@ -122,15 +122,20 @@ internal class RemoteVerifier(private val schema: RemoteSchema, private val allo
                     refuse("re-anchor-root-mismatch")
                 }
                 val payload = RemoteCrypto.decode(envelope.text("payload"))
-                // Read only the candidate verification key before checking the signature.
-                // The full SPKI must hash to the independently authenticated fingerprint.
-                val body = verifier.schema.decode(payload).asObject()
-                val spki = body["rootSpki"] as? String ?: refuse("doc-field-invalid", "/rootSpki")
+                val signature = RemoteCrypto.decode(envelope.text("signature"))
+                // Older records only carry a fingerprint and need to locate the candidate SPKI.
+                val legacyBody = if (pin.rootSpki == null) verifier.schema.decode(payload).asObject() else null
+                val spki = pin.rootSpki ?: (legacyBody?.get("rootSpki") as? String)
+                    ?: refuse("doc-field-invalid", "/rootSpki")
                 if (RemoteCrypto.keyId(spki) != pin.rootFingerprint) refuse("re-anchor-root-mismatch")
-                if (!RemoteCrypto.verifies(RemoteCrypto.publicKey(spki), payload,
-                        RemoteCrypto.decode(envelope.text("signature")))) refuse("doc-signature-invalid")
+                if (!RemoteCrypto.verifies(RemoteCrypto.publicKey(spki), payload, signature)) {
+                    refuse("doc-signature-invalid")
+                }
+                val body = legacyBody ?: verifier.schema.decode(payload).asObject()
                 verifier.schema.requireValid(RemoteReanchor.TYPE, body)
-                if (body.text("rootFingerprint") != pin.rootFingerprint) refuse("re-anchor-root-mismatch")
+                if (body.text("rootFingerprint") != pin.rootFingerprint || body.text("rootSpki") != spki) {
+                    refuse("re-anchor-root-mismatch")
+                }
                 val binding = RemoteBinding(body.text("fleetId"), body.text("deviceId"))
                 if (binding.fingerprint() != pin.bindingFingerprint) refuse("re-anchor-binding-mismatch")
                 if (body.text("nonce") != nonce) refuse("re-anchor-nonce-invalid")

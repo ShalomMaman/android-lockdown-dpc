@@ -13,10 +13,12 @@ import android.os.Bundle;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -212,7 +214,7 @@ public final class HomeFilterController {
         try {
             // A filter application the previous policy hid has to be visible before
             // Android can verify its VPN. The journal learns of that release first,
-            // so a pass that does not end verified hides the application again.
+            // so a pass that does not end verified contains the application again.
             gateway.restoreVpnAvailability(settings, recordReleases);
         } catch (RuntimeException exception) {
             errors.add("home-filter:vpn-availability:" + exception.getClass().getSimpleName());
@@ -227,11 +229,10 @@ public final class HomeFilterController {
      * The remote pass never leaves the device with less than it had.
      *
      * <p>An enabled filter is brought up and read back before anything older is
-     * removed. If any part of it fails after the VPN lockdown or the proxy
-     * already moved, the lockdown and proxy that were in force are put back and
-     * read back. A teardown removes the PAC proxy and the certificates, then the
-     * uninstall block, the routing settings and the profile restrictions, each
-     * read back, and releases the VPN lockdown as its last Android call.
+     * removed. If verification fails, the previous VPN lockdown, proxy and VPN
+     * app configuration are restored and read back. A teardown removes the PAC
+     * proxy and certificates, then the uninstall block, routing settings and
+     * profile restrictions, each read back, before releasing the VPN lockdown.
      */
     static boolean reconcileRemote(HomeFilterPolicy.Settings settings, int sdk, HomeFilterPolicy.Gateway gateway,
                                    Set<String> retiredCas, Set<HomeFilterPolicy.Config> retiredFilters,
@@ -243,7 +244,7 @@ public final class HomeFilterController {
         }
         boolean verified = true;
         if (active != null) {
-            LiveFilter before = LiveFilter.read(gateway, settings.ca());
+            LiveFilter before = LiveFilter.read(gateway, active.vpnPackage(), settings.ca());
             if (before == null) {
                 // Nothing is changed that could not be put back afterwards.
                 errors.add("home-filter:live-state-unreadable");
@@ -307,12 +308,22 @@ public final class HomeFilterController {
         return verified;
     }
 
-    /** The VPN lockdown and proxy in force before a pass, and whether its new certificate was already installed. */
-    private record LiveFilter(String vpnPackage, String pacUrl, boolean newCaInstalled) {
-        static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newCa) {
+    /** Live protection and VPN app configuration captured before trying a replacement. */
+    private record LiveFilter(HomeFilterPolicy.VpnState vpn, String pacUrl, boolean newCaInstalled,
+                              List<BooleanSupplier> managedConfigRollbacks) {
+        static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newVpnPackage, String newCa) {
             try {
-                return new LiveFilter(gateway.alwaysOnPackage(), pac(gateway),
-                        newCa != null && gateway.hasCa(newCa));
+                HomeFilterPolicy.VpnState vpn = gateway.vpnState();
+                String previousPackage = vpn.packageName();
+                List<BooleanSupplier> managedConfigRollbacks = new ArrayList<>(2);
+                if (previousPackage != null) {
+                    managedConfigRollbacks.add(gateway.captureManagedConfig(previousPackage));
+                    if (!previousPackage.equals(newVpnPackage)) {
+                        managedConfigRollbacks.add(gateway.captureManagedConfig(newVpnPackage));
+                    }
+                }
+                return new LiveFilter(vpn, pac(gateway), newCa != null && gateway.hasCa(newCa),
+                        managedConfigRollbacks);
             } catch (RuntimeException unreadable) {
                 return null;
             }
@@ -320,15 +331,16 @@ public final class HomeFilterController {
 
         /**
          * Puts back what a failed attempt moved, withdraws a certificate it added, and reads all of it back.
-         * A device that had no filter VPN keeps whatever the attempt reached: that is not less than before.
+         * A device that had no filter VPN keeps any protection the attempt added.
          */
         boolean restore(HomeFilterPolicy.Gateway gateway, String newCa) {
-            if (vpnPackage == null) {
+            if (vpn.packageName() == null) {
                 return true;
             }
+            boolean restored;
             try {
-                if (!vpnPackage.equals(gateway.alwaysOnPackage())) {
-                    gateway.setVpn(vpnPackage);
+                if (!vpnMatches(gateway)) {
+                    gateway.restoreVpn(vpn);
                 }
                 if (!pacUrl.equals(pac(gateway))) {
                     gateway.setProxy(pacUrl.isEmpty() ? null : pacUrl);
@@ -336,10 +348,25 @@ public final class HomeFilterController {
                 if (newCa != null && !newCaInstalled && gateway.hasCa(newCa)) {
                     gateway.setCa(newCa, false);
                 }
-                HomeFilterPolicy.VpnState vpn = gateway.vpnState();
-                return vpnPackage.equals(vpn.packageName()) && vpn.lockdown() && pacUrl.equals(pac(gateway))
+                restored = vpnMatches(gateway) && pacUrl.equals(pac(gateway))
                         && (newCa == null || newCaInstalled || !gateway.hasCa(newCa));
             } catch (RuntimeException refused) {
+                restored = false;
+            }
+            for (BooleanSupplier rollback : managedConfigRollbacks) {
+                try {
+                    if (!rollback.getAsBoolean()) restored = false;
+                } catch (RuntimeException refused) {
+                    restored = false;
+                }
+            }
+            return restored;
+        }
+
+        private boolean vpnMatches(HomeFilterPolicy.Gateway gateway) {
+            try {
+                return vpn.equals(gateway.vpnState());
+            } catch (RuntimeException unreadable) {
                 return false;
             }
         }
@@ -476,7 +503,7 @@ public final class HomeFilterController {
         private static final int VPN_PACKAGE_FLAGS =
                 PackageManager.MATCH_UNINSTALLED_PACKAGES | PackageManager.MATCH_DISABLED_COMPONENTS;
 
-        /** The filter itself must be launchable before Android can verify its VPN policy. */
+        /** Record any visibility or suspension change before making the filter launchable. */
         private void restoreVpnAvailability(HomeFilterPolicy.Settings settings,
                                             Predicate<Set<String>> recordRelease) {
             if (!settings.enabled() || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
@@ -496,10 +523,10 @@ public final class HomeFilterController {
                         || vpnSignerState(settings.config()) != HomeFilterPolicy.PackageState.INSTALLED) {
                     return;
                 }
+                if (recordRelease != null && !recordRelease.test(Set.of(packageName))) {
+                    throw new IllegalStateException("The release could not be recorded");
+                }
                 if (hidden) {
-                    if (recordRelease != null && !recordRelease.test(Set.of(packageName))) {
-                        throw new IllegalStateException("The release could not be recorded");
-                    }
                     dpm.setApplicationHidden(admin, packageName, false);
                 }
                 if (!dpm.isApplicationHidden(admin, packageName)
@@ -551,20 +578,27 @@ public final class HomeFilterController {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 throw new UnsupportedOperationException("Lockdown read-back requires Android 10");
             }
-            Set<String> exemptions = dpm.getAlwaysOnVpnLockdownWhitelist(admin);
             return new HomeFilterPolicy.VpnState(alwaysOnPackage(),
                     dpm.isAlwaysOnVpnLockdownEnabled(admin),
-                    exemptions != null && exemptions.isEmpty());
+                    dpm.getAlwaysOnVpnLockdownWhitelist(admin));
         }
 
         @Override
         public boolean setVpn(String packageName) {
+            return setVpn(packageName, packageName != null, Collections.emptySet());
+        }
+
+        @Override
+        public boolean restoreVpn(HomeFilterPolicy.VpnState previous) {
+            return setVpn(previous.packageName(), previous.lockdown(), previous.exemptions());
+        }
+
+        private boolean setVpn(String packageName, boolean lockdown, Set<String> exemptions) {
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    dpm.setAlwaysOnVpnPackage(admin, packageName, packageName != null,
-                            Collections.emptySet());
+                    dpm.setAlwaysOnVpnPackage(admin, packageName, lockdown, exemptions);
                 } else {
-                    dpm.setAlwaysOnVpnPackage(admin, packageName, packageName != null);
+                    dpm.setAlwaysOnVpnPackage(admin, packageName, lockdown);
                 }
                 return true;
             } catch (PackageManager.NameNotFoundException ignored) {
@@ -618,6 +652,41 @@ public final class HomeFilterController {
             });
             dpm.setApplicationRestrictions(admin, packageName, updated);
             return true;
+        }
+
+        @Override
+        public BooleanSupplier captureManagedConfig(String packageName) {
+            Bundle previous = dpm.getApplicationRestrictions(admin, packageName).deepCopy();
+            return () -> {
+                if (managedConfigMatches(packageName, previous)) return true;
+                dpm.setApplicationRestrictions(admin, packageName, previous);
+                return managedConfigMatches(packageName, previous);
+            };
+        }
+
+        private boolean managedConfigMatches(String packageName, Bundle expected) {
+            try {
+                return restrictionValuesMatch(expected, dpm.getApplicationRestrictions(admin, packageName));
+            } catch (RuntimeException unreadable) {
+                // Still attempt a restore if the current configuration cannot be inspected.
+                return false;
+            }
+        }
+
+        @SuppressWarnings("deprecation")
+        private static boolean restrictionValuesMatch(Object expected, Object actual) {
+            if (expected instanceof Bundle before && actual instanceof Bundle after) {
+                return before.keySet().equals(after.keySet()) && before.keySet().stream()
+                        .allMatch(key -> restrictionValuesMatch(before.get(key), after.get(key)));
+            }
+            if (expected instanceof Object[] before && actual instanceof Object[] after) {
+                if (before.length != after.length) return false;
+                for (int i = 0; i < before.length; i++) {
+                    if (!restrictionValuesMatch(before[i], after[i])) return false;
+                }
+                return true;
+            }
+            return Objects.deepEquals(expected, actual);
         }
 
         @Override

@@ -11,13 +11,19 @@ import java.nio.file.StandardCopyOption.REPLACE_EXISTING
 import java.security.MessageDigest
 import java.security.SecureRandom
 
-internal data class RecoveryPin(val rootFingerprint: String, val bindingFingerprint: String) {
+internal data class RecoveryPin(
+    val rootFingerprint: String, val bindingFingerprint: String, val rootSpki: String? = null
+) {
     init {
         require(RemoteCrypto.decode(rootFingerprint).size == 32)
         require(RemoteCrypto.decode(bindingFingerprint).size == 32)
+        require(rootSpki == null || RemoteCrypto.keyId(rootSpki) == rootFingerprint)
     }
 
     fun bytes() = RemoteCrypto.decode(rootFingerprint) + RemoteCrypto.decode(bindingFingerprint)
+
+    fun sameIdentity(other: RecoveryPin) =
+        rootFingerprint == other.rootFingerprint && bindingFingerprint == other.bindingFingerprint
 }
 
 internal fun RemoteBinding.fingerprint(): String {
@@ -31,44 +37,65 @@ internal data class JournalRecoveryPin(val rootFingerprint: String, val tag: Str
 internal class RecoveryPinFile(
     private val file: File, private val mac: (ByteArray, Boolean) -> ByteArray
 ) {
+    // A pending replacement disables standalone recovery until the guarded
+    // journal proves which side of the commit survived.
+    data class Record(val pin: RecoveryPin?, val pending: RecoveryPin? = null)
+
     fun exists(): Boolean = !Files.notExists(file.toPath(), NOFOLLOW_LINKS)
 
-    fun read(): RecoveryPin? {
+    fun read(): Record? {
         if (!exists()) return null
-        val record = ByteArray(96)
-        DataInputStream(FileInputStream(file)).use {
-            it.readFully(record)
-            require(it.read() == -1)
+        val record = FileInputStream(file).use { input ->
+            val size = input.channel.size()
+            require(size in 33L..1024L)
+            ByteArray(size.toInt()).also {
+                DataInputStream(input).readFully(it)
+                require(input.read() == -1)
+            }
         }
-        val pin = RecoveryPin(RemoteCrypto.encode(record.copyOfRange(0, 32)),
-            RemoteCrypto.encode(record.copyOfRange(32, 64)))
-        require(verifies(pin, RemoteCrypto.encode(record.copyOfRange(64, 96))))
-        return pin
+        if (record.size == 96) {
+            val pin = RecoveryPin(RemoteCrypto.encode(record.copyOfRange(0, 32)),
+                RemoteCrypto.encode(record.copyOfRange(32, 64)))
+            require(verifies(pin, RemoteCrypto.encode(record.copyOfRange(64, 96))))
+            return Record(pin)
+        }
+        val payload = record.copyOfRange(32, record.size)
+        require(MessageDigest.isEqual(mac(payload, false), record.copyOf(32)))
+        val json = WireJson.parse(payload).asObject()
+        require(json.number("format") == 2L)
+        return Record(decodePin(json["pin"]), decodePin(json["pending"]))
     }
 
     fun verifies(pin: RecoveryPin, tag: String): Boolean =
         MessageDigest.isEqual(mac(pin.bytes(), false), RemoteCrypto.decode(tag))
 
-    fun write(pin: RecoveryPin, restoring: Boolean = false): JournalRecoveryPin {
-        if (!restoring) {
-            val existing = read()
-            require(existing == null || existing == pin)
-        }
-        val bytes = pin.bytes()
+    fun proof(pin: RecoveryPin): JournalRecoveryPin =
+        JournalRecoveryPin(pin.rootFingerprint, RemoteCrypto.encode(mac(pin.bytes(), true)))
+
+    fun write(record: Record) {
+        val bytes = WireJson.canonical(mapOf("format" to 2L,
+            "pin" to encodePin(record.pin), "pending" to encodePin(record.pending)))
         val tag = mac(bytes, true)
         require(tag.size == 32)
         val staged = File.createTempFile(file.name, ".pending", file.parentFile)
         try {
             FileOutputStream(staged).use {
-                it.write(bytes)
                 it.write(tag)
+                it.write(bytes)
                 it.fd.sync()
             }
             Files.move(staged.toPath(), file.toPath(), ATOMIC_MOVE, REPLACE_EXISTING)
         } finally {
             staged.delete()
         }
-        return JournalRecoveryPin(pin.rootFingerprint, RemoteCrypto.encode(tag))
+    }
+
+    private fun encodePin(pin: RecoveryPin?) = pin?.let {
+        mapOf("root" to it.rootFingerprint, "binding" to it.bindingFingerprint, "spki" to it.rootSpki)
+    }
+
+    private fun decodePin(value: Any?) = value?.asObject()?.let {
+        RecoveryPin(it.text("root"), it.text("binding"), it["spki"] as String?)
     }
 }
 

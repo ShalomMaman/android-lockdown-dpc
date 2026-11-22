@@ -163,10 +163,14 @@ never verify or safely leave:
   remote console has no recovery entry yet. Remote kiosk comes back with that
   console;
 - a `locale` or kiosk mode this build does not know. Nothing unknown is read as
-  the default;
-- any `locale` on Android 10–12. Only Android 13 and later keep the application
-  language where a pass can read it back, so the admin tool must not set
-  `locale` for older devices.
+  the default.
+
+On Android 10–12 the device refuses an explicit `locale` with
+`remote-locale-sdk-unsupported` before commit. Only Android 13 and later keep
+the application language where a pass can read it back. When a new enabled
+filter would exceed the 16-entry cleanup limit, the device refuses it with
+`remote-filter-cleanup-limit` before commit. Turning the filter off is still
+available. Both reasons appear inline in the device console.
 
 Other device rules:
 
@@ -265,12 +269,13 @@ it before attempting any authorized write. After an interrupted write the
 operator requests a new document for the new challenge.
 
 The operator looks up the device and fleet in the existing fleet inventory.
-The original binding root signs a standard `dg-signed/1` envelope no larger
-than 65,536 bytes. The closed payload contains these fields.
+The root from the latest committed keyset signs a standard `dg-signed/1`
+envelope no larger than 65,536 bytes. Before the first keyset, the binding root
+signs. The closed payload contains these fields.
 
 - `schemaVersion: 1`, `type: "re-anchor"`, `fleetId`, `deviceId`, `nonce`,
   `rootFingerprint` and `rootSpki`. The root fingerprint is the key ID of
-  the original binding SPKI. The device verifies its independently stored
+  the current root SPKI. The device verifies its independently stored
   binding fingerprint, `base64url(SHA-256(canonical([fleetId, deviceId])))`.
 - `floors` with the latest issued versions for `keyset`, `fleet-policy`,
   `recovery` and `command`, including issued versions the device may never
@@ -284,19 +289,25 @@ than 65,536 bytes. The closed payload contains these fields.
   A recovery code and a command always need versions above their floors.
   This preserves strict replay protection when two signed payloads share a version.
 
-At bind, a third 96-byte no-backup record stores the original root fingerprint,
-binding fingerprint and an HMAC under an independent Android Keystore alias.
-The journal also carries the binding's HMAC proof and the authenticated guard
-records the original root fingerprint separately from the current rotation
-root. A readable authenticated guard or a journal with a valid binding proof
-is sufficient. With only the third record, the operator also enters the
-original root fingerprint and the device compares it with the recorded value.
-Unreadable or missing evidence requires a factory reset and re-enrolment.
-Readable legacy guards can contribute higher floors. A legacy version-zero
-authenticated binding still proves the original root and a healthy one can
-save the third record on upgrade. A legacy binding that has already advanced
-its keyset may lack proof of the original root. A public checksum or a plain
-journal cannot authenticate a root.
+The bind record in no-backup storage protects the root SPKI, its fingerprint
+and the binding fingerprint with an independent Android Keystore HMAC. A
+rotation first writes the guard and stages the new recovery root in the bind
+record, then commits the journal and finalizes the bind record. On restart the
+guarded journal can finish or retry an interrupted rotation. A staged bind
+record alone cannot authorize recovery.
+
+An authenticated guard can prove the current root. With only a finalized bind
+record, the operator also enters its root fingerprint. A journal proof
+can corroborate either source. Disagreeing authenticated sources require a
+factory reset and re-enrolment. The stored SPKI, when available, lets the
+device check the signature before parsing the payload.
+
+Readable legacy guards can contribute higher floors. A healthy older binding
+can upgrade a matching legacy bind record, and a newly verified keyset can
+replace a legacy record that still names the original root. The legacy
+96-byte bind record alone cannot prove that its root is still current.
+Devices that rotated before PR8 and already lost both main records have no
+total-loss recovery path.
 
 After verification, a durable mode record puts the device in `ENROLLING` and
 the fresh guard reserves every floor before writing the new journal. A missing
@@ -304,9 +315,9 @@ guard HMAC key can be created at this point. An interruption keeps the device
 locked down and preserves any floors already reserved. The rebuild discards
 the old policy, recovery verifier, overrides, and command history. A verifiable
 pending package-release ledger is retained for the next policy pass, so an
-interrupted release can still be reversed. Recovery and the waiting period make
-no policy or restriction writes. The original root must sign the next keyset
-even if the old live trust had rotated. Recovery codes and command processing
+interrupted release can still be reversed. Apps exposed before the loss stay
+visible until a replacement policy arrives. The recovered root must sign the
+next keyset. Recovery codes and command processing
 resume after the first replacement policy passes live read-back. The device
 then returns to `REMOTE`.
 
@@ -321,7 +332,7 @@ then returns to `REMOTE`.
 | `vectors/dispatch.json` | Dispatch commits, crashes, recovery before and after the call, secure lock evidence and reapply outcomes |
 | `vectors/journal.json` | The eight section 5.5 crash scenarios, each projection checkpoint, write failures and section 15 read-back requirements |
 | `vectors/recovery.json` | Code derivation, lockout, atomic-use outcomes, replay, in-flight commands and override lifetime |
-| `vectors/re-anchor.json` | Original-root signature, fleet and device binding, console nonce and replay floors |
+| `vectors/re-anchor.json` | Pinned-root signature, fleet and device binding, console nonce and replay floors |
 
 Shape fixtures apply a JSON Pointer mutation to a decoded signed document.
 Their outcomes describe schema and decoder validation. `device-id-range`

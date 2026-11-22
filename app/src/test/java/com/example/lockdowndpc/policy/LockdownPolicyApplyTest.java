@@ -12,6 +12,7 @@ import android.net.ConnectivityManager;
 import android.net.Network;
 import android.net.ProxyInfo;
 import android.net.Uri;
+import android.os.Bundle;
 
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 
@@ -36,6 +37,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -269,11 +271,13 @@ public class LockdownPolicyApplyTest {
         private Set<String> exemptions;
         private final Set<String> caCertificates = new HashSet<>();
         boolean refuseVpn;
+        String vpnWithoutLockdown;
         Runnable beforeVpnWrite = () -> {};
         boolean refuseProxyChange;
         boolean refuseCaInstall;
         boolean refuseUninstallUnblock;
         boolean refuseManagedConfigChange;
+        BiPredicate<String, Bundle> ignoreManagedConfigWrite = (packageName, restrictions) -> false;
 
         @Implementation
         protected void setUninstallBlocked(ComponentName admin, String packageName, boolean blocked) {
@@ -284,12 +288,13 @@ public class LockdownPolicyApplyTest {
         }
 
         @Implementation
-        protected void setApplicationRestrictions(ComponentName admin, String packageName,
-                                                  android.os.Bundle restrictions) {
+        protected void setApplicationRestrictions(ComponentName admin, String packageName, Bundle restrictions) {
             if (refuseManagedConfigChange) {
                 throw new SecurityException("Managed configuration refused");
             }
-            super.setApplicationRestrictions(admin, packageName, restrictions);
+            if (!ignoreManagedConfigWrite.test(packageName, restrictions)) {
+                super.setApplicationRestrictions(admin, packageName, restrictions);
+            }
         }
         /** Packages Android refuses to make visible. */
         final Set<String> refuseUnhide = new HashSet<>();
@@ -321,7 +326,7 @@ public class LockdownPolicyApplyTest {
                 throw new SecurityException("VPN refused");
             }
             alwaysOnVpn = packageName;
-            this.lockdown = lockdown;
+            this.lockdown = lockdown && !java.util.Objects.equals(vpnWithoutLockdown, packageName);
             this.exemptions = exemptions;
         }
 

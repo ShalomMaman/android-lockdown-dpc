@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import com.example.lockdowndpc.remote.DocumentType
 import com.example.lockdowndpc.remote.RecoveryPinFile
 import com.example.lockdowndpc.remote.RemoteReanchor
 import com.example.lockdowndpc.remote.RemoteBinding
@@ -32,6 +33,8 @@ import java.security.UnrecoverableKeyException
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.SecretKey
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /** Policy-thread owner of the journal. Provisioning and sync entry points are gated separately. */
 internal object RemotePolicyRuntime {
@@ -43,6 +46,8 @@ internal object RemotePolicyRuntime {
     private var open: Open? = null
     private var guardMac: (ByteArray, Boolean) -> ByteArray = ::keystoreGuardMac
     private var pinMac: (ByteArray, Boolean) -> ByteArray = ::keystorePinMac
+    private val policyRefusal = MutableStateFlow<String?>(null)
+    val policyRefusals = policyRefusal.asStateFlow()
 
     @JvmStatic
     fun reconcile(context: Context): LockdownPolicyController.PolicyResult {
@@ -65,7 +70,10 @@ internal object RemotePolicyRuntime {
                 return LockdownPolicyController.applyRemoteContainment(context)
             }
             val pass = current.engine.reconcile()
-            if (pass.failure != null) return failed(pass.failure)
+            if (pass.failure != null) {
+                if (isInlinePolicyRefusal(pass.failure.code)) policyRefusal.value = pass.failure.code
+                return failed(pass.failure)
+            }
             val result = current.projection.lastResult
             if (pass.verified && current.engine.state.reanchored && !ManagementModeStore.commitRemote(context)) {
                 return failed(WRITE_FAILED)
@@ -115,7 +123,10 @@ internal object RemotePolicyRuntime {
             val result = engine.reanchor(verifier, envelope, rootFingerprint, now(context)) {
                 ManagementModeStore.commitReanchorEnrolling(context.applicationContext)
             }
-            if (result == null) sync = null
+            if (result == null) {
+                sync = null
+                policyRefusal.value = null
+            }
             result
         }
 
@@ -131,8 +142,15 @@ internal object RemotePolicyRuntime {
         RemoteSync.Response = onRemoteThread(context, RemoteSync.Response(DISABLED), RemoteSync.Response(WRITE_FAILED)) {
         engine.failure?.let { return@onRemoteThread RemoteSync.Response(it) }
         val pendingSync = sync ?: return@onRemoteThread RemoteSync.Response(RemoteFailure("sync-response-stale"))
-        engine.receive(pendingSync, exchange, nonce, now(context), documents)
+        engine.receive(pendingSync, exchange, nonce, now(context), documents).also { response ->
+            val policies = response.decisions.filter { documents[it.index].type == DocumentType.POLICY }
+            val reason = policies.firstNotNullOfOrNull { it.failure?.code?.takeIf(::isInlinePolicyRefusal) }
+            if (reason != null || policies.any { it.failure == null }) policyRefusal.value = reason
+        }
     }
+
+    private fun isInlinePolicyRefusal(code: String) =
+        code == RemotePolicyProjection.LOCALE_UNSUPPORTED || code == RemotePolicyProjection.FILTER_CLEANUP_LIMIT
 
     fun recover(context: Context, choices: Set<RemoteOverride>, code: String): RemoteEngine.RecoveryResult =
         onRemoteThread(context, RemoteEngine.RecoveryResult(RemoteEngine.RecoveryOutcome.REFUSED, DISABLED),
@@ -226,6 +244,7 @@ internal object RemotePolicyRuntime {
     /** JVM tests build a new application for every test. The opened journal belongs to the previous one. */
     internal fun closeForTests() {
         open = null
+        policyRefusal.value = null
     }
 
     internal fun setGuardMacForTests(mac: ((ByteArray, Boolean) -> ByteArray)?) {

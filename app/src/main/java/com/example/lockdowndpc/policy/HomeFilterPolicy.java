@@ -169,7 +169,19 @@ public final class HomeFilterPolicy {
 
     public enum PackageState { INSTALLED, MISSING, HIDDEN, UNTRUSTED }
 
-    public record VpnState(String packageName, boolean lockdown, boolean noExemptions) {}
+    public record VpnState(String packageName, boolean lockdown, Set<String> exemptions) {
+        public VpnState {
+            if (exemptions != null) exemptions = Set.copyOf(exemptions);
+        }
+
+        public VpnState(String packageName, boolean lockdown, boolean noExemptions) {
+            this(packageName, lockdown, noExemptions ? Set.of() : null);
+        }
+
+        public boolean noExemptions() {
+            return exemptions != null && exemptions.isEmpty();
+        }
+    }
 
     public enum ProbeState { NOT_RUN, PASSED, FAILED }
 
@@ -212,11 +224,16 @@ public final class HomeFilterPolicy {
         String alwaysOnPackage();
         VpnState vpnState();
         boolean setVpn(String packageName);
+        default boolean restoreVpn(VpnState previous) {
+            return previous.lockdown() && previous.noExemptions() && setVpn(previous.packageName());
+        }
         boolean uninstallBlocked(String packageName);
         boolean setVpnUninstallBlocked(String packageName, boolean blocked);
         boolean retainVpnUninstallBlock(String packageName);
         Map<String, Object> managedConfig(String packageName);
         boolean setManagedConfig(String packageName, Map<String, Object> changes, boolean enabled);
+        /** Captures the complete configuration and returns a rollback that verifies it after restoration. */
+        BooleanSupplier captureManagedConfig(String packageName);
         boolean privateDnsOpportunistic();
         boolean setPrivateDnsOpportunistic();
         String proxyPacUrl();

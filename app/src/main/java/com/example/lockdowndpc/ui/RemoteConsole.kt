@@ -28,7 +28,9 @@ import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.RemotePolicyProjection
 import com.example.lockdowndpc.policy.RemotePolicyRuntime
 import com.example.lockdowndpc.remote.RemoteReanchor
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +46,7 @@ internal fun RemoteConsole(onSecureScreen: (Boolean) -> Unit) {
     var showingRecovery by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val policyRefusal by RemotePolicyRuntime.policyRefusals.collectAsStateWithLifecycle()
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         if (!busy) scope.launch {
@@ -65,6 +68,15 @@ internal fun RemoteConsole(onSecureScreen: (Boolean) -> Unit) {
                 else -> R.string.remote_policy_unavailable
             }),
         ) {
+            val refusalMessage = when (policyRefusal) {
+                RemotePolicyProjection.LOCALE_UNSUPPORTED -> R.string.remote_policy_locale_unsupported
+                RemotePolicyProjection.FILTER_CLEANUP_LIMIT -> R.string.remote_policy_filter_cleanup_limit
+                else -> null
+            }
+            if (refusalMessage != null) {
+                MessageBanner(UiMessage(stringResource(refusalMessage), isError = true))
+                Spacer(Modifier.height(12.dp))
+            }
             if (RemoteReanchor.supports(status.reason)) {
                 PrimaryAction(stringResource(R.string.remote_reanchor_title), onClick = {
                     haptics.tick()
