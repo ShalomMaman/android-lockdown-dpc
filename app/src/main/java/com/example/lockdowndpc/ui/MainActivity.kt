@@ -62,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -269,6 +270,7 @@ private fun AdminConsole(
     onOpenHealth: () -> Unit,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     var screen by remember { mutableStateOf(initialScreen(context)) }
     var replacingPin by remember { mutableStateOf(false) }
     var recoveryCode by remember { mutableStateOf("") }
@@ -293,7 +295,7 @@ private fun AdminConsole(
             && HomeFilterController.vpnBlocksActiveStatus(context)) {
             status.copy(
                 policyState = AllowedAppsStore.PolicyState.FAILED,
-                policyError = context.getString(R.string.home_filter_vpn_unverified),
+                policyError = resources.getString(R.string.home_filter_vpn_unverified),
             )
         } else {
             status
@@ -351,11 +353,11 @@ private fun AdminConsole(
             return
         }
         if (!AdminPinStore.isValidPin(first)) {
-            message = UiMessage(context.getString(R.string.pin_error_format), isError = true)
+            message = UiMessage(resources.getString(R.string.pin_error_format), isError = true)
             return
         }
         if (first != second) {
-            message = UiMessage(context.getString(R.string.pin_error_mismatch), isError = true)
+            message = UiMessage(resources.getString(R.string.pin_error_mismatch), isError = true)
             return
         }
         try {
@@ -372,7 +374,7 @@ private fun AdminConsole(
             AuditLog.append(
                 context,
                 if (replacingPin) AuditEvent.PIN_REPLACED else AuditEvent.PIN_SET,
-                context.getString(
+                resources.getString(
                     if (replacingPin) R.string.audit_pin_replaced else R.string.audit_pin_set
                 ),
             )
@@ -380,7 +382,7 @@ private fun AdminConsole(
             statusRevision++
             showRecovery(code)
         } catch (exception: RuntimeException) {
-            message = UiMessage(context.getString(R.string.pin_error_save), isError = true)
+            message = UiMessage(resources.getString(R.string.pin_error_save), isError = true)
         }
     }
 
@@ -399,7 +401,7 @@ private fun AdminConsole(
             }
 
             AdminPinStore.Status.INVALID ->
-                message = UiMessage(context.getString(R.string.pin_error_invalid), isError = true)
+                message = UiMessage(resources.getString(R.string.pin_error_invalid), isError = true)
 
             AdminPinStore.Status.LOCKED ->
                 message = UiMessage(lockoutText(context, result.remainingMillis()), isError = true)
@@ -411,7 +413,7 @@ private fun AdminConsole(
             }
 
             AdminPinStore.Status.ERROR ->
-                message = UiMessage(context.getString(R.string.pin_error_verify), isError = true)
+                message = UiMessage(resources.getString(R.string.pin_error_verify), isError = true)
 
             else -> Unit
         }
@@ -423,7 +425,7 @@ private fun AdminConsole(
         }
         AdminSession.extend()
         if (!AllowedAppsStore.isAllowlistConfigured(context)) {
-            message = UiMessage(context.getString(R.string.admin_error_allowlist), isError = true)
+            message = UiMessage(resources.getString(R.string.admin_error_allowlist), isError = true)
             onOpenAppList()
             return
         }
@@ -439,21 +441,21 @@ private fun AdminConsole(
             policyOperationInProgress = false
             statusRevision++
             if (!result.deviceOwner()) {
-                message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
+                message = UiMessage(resources.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
                 // Policy details are produced by the policy layer and mix prose
                 // with Latin class and package names, so each one is isolated
                 // before it is embedded in a localized sentence.
-                val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
+                val detail = result.errors().firstOrNull() ?: resources.getString(R.string.error_unknown)
                 showAdmin()
                 val failure = UiMessage(
-                    context.getString(R.string.policy_failed, detail.bidiIsolated()),
+                    resources.getString(R.string.policy_failed, detail.bidiIsolated()),
                     isError = true,
                 )
                 message = failure
                 applyFailureMessage = failure
             } else {
-                AuditLog.append(context, AuditEvent.POLICY_APPLIED, context.getString(R.string.audit_apply))
+                AuditLog.append(context, AuditEvent.POLICY_APPLIED, resources.getString(R.string.audit_apply))
                 showAdmin()
                 val blocked = result.blockedPackages()
                 message = UiMessage(
@@ -481,18 +483,18 @@ private fun AdminConsole(
             policyOperationInProgress = false
             statusRevision++
             if (!result.deviceOwner()) {
-                message = UiMessage(context.getString(R.string.not_device_owner), isError = true)
+                message = UiMessage(resources.getString(R.string.not_device_owner), isError = true)
             } else if (!result.applied()) {
-                val detail = result.errors().firstOrNull() ?: context.getString(R.string.error_unknown)
+                val detail = result.errors().firstOrNull() ?: resources.getString(R.string.error_unknown)
                 showAdmin()
                 message = UiMessage(
-                    context.getString(R.string.admin_pause_failed, detail.bidiIsolated()),
+                    resources.getString(R.string.admin_pause_failed, detail.bidiIsolated()),
                     isError = true,
                 )
             } else {
-                AuditLog.append(context, AuditEvent.POLICY_PAUSED, context.getString(R.string.audit_pause))
+                AuditLog.append(context, AuditEvent.POLICY_PAUSED, resources.getString(R.string.audit_pause))
                 showAdmin()
-                message = UiMessage(context.getString(R.string.admin_pause_ok), isError = false)
+                message = UiMessage(resources.getString(R.string.admin_pause_ok), isError = false)
             }
         }
     }
@@ -502,10 +504,10 @@ private fun AdminConsole(
             return
         }
         try {
-            AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, context.getString(R.string.audit_recovery))
+            AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, resources.getString(R.string.audit_recovery))
             showRecovery(AdminPinStore.rotateRecoveryCode(context))
         } catch (exception: RuntimeException) {
-            message = UiMessage(context.getString(R.string.admin_error_recovery), isError = true)
+            message = UiMessage(resources.getString(R.string.admin_error_recovery), isError = true)
         }
     }
 
@@ -565,15 +567,15 @@ private fun AdminConsole(
             if (isKioskSuccessReason(result.reason())) {
                 screen = ConsoleScreen.KIOSK
                 message = if (result.allowed() && attempt.reconciliationVerified) {
-                    UiMessage(context.getString(successMessage), isError = false)
+                    UiMessage(resources.getString(successMessage), isError = false)
                 } else if (!attempt.reconciliationCompleted) {
                     UiMessage(
-                        context.getString(R.string.kiosk_error_reconcile_timeout),
+                        resources.getString(R.string.kiosk_error_reconcile_timeout),
                         isError = true,
                     )
                 } else if (!attempt.reconciliationVerified) {
                     UiMessage(
-                        context.getString(R.string.kiosk_error_reconcile_failed),
+                        resources.getString(R.string.kiosk_error_reconcile_failed),
                         isError = true,
                     )
                 } else {
@@ -827,7 +829,7 @@ private fun AdminConsole(
                     AuditLog.append(
                         context,
                         AuditEvent.POLICY_MODE_CHANGED,
-                        context.getString(
+                        resources.getString(
                             if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
                                 R.string.audit_mode_allow
                             } else {

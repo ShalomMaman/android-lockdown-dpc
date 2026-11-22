@@ -37,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
@@ -122,6 +123,7 @@ private class WriteOutcome(val rows: List<ManagementIdentityRow>?, val failure: 
 @Composable
 private fun ManagementIdentityScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
 
     // Every write re-reads the device rather than patching the rows in memory:
@@ -141,7 +143,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             AdminSession.extend()
             return true
         }
-        message = UiMessage(context.getString(R.string.mgmtid_error_auth), isError = true)
+        message = UiMessage(resources.getString(R.string.mgmtid_error_auth), isError = true)
         return false
     }
 
@@ -205,7 +207,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             computePins()
         } catch (exception: IllegalArgumentException) {
             message = UiMessage(
-                context.getString(
+                resources.getString(
                     R.string.mgmtid_result_write_failed,
                     exception.javaClass.simpleName.bidiIsolated(),
                 ),
@@ -224,7 +226,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             val updated = outcome.rows
             if (updated == null) {
                 message = UiMessage(
-                    context.getString(
+                    resources.getString(
                         R.string.mgmtid_result_write_failed,
                         outcome.failure.bidiIsolated(),
                     ),
@@ -234,7 +236,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             }
             rows = updated
             val after = updated.firstOrNull { it.packageName == row.packageName }
-            val identity = context.getString(labelOf(after?.state ?: row.state))
+            val identity = resources.getString(labelOf(after?.state ?: row.state))
             withContext(Dispatchers.IO) {
                 AuditLog.append(
                     app,
@@ -252,7 +254,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
             // withhold management privilege at the next apply — it must not be
             // announced in the same neutral line as a success.
             message = UiMessage(
-                text = context.getString(resultTemplate, identity),
+                text = resources.getString(resultTemplate, identity),
                 isError = after?.status?.refused() ?: true,
             )
             auditRefusals(updated)
