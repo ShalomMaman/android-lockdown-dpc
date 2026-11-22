@@ -615,6 +615,9 @@ def reanchor(args: argparse.Namespace) -> None:
             attestation.verify_signature(signer, raw, decode(envelope["signature"]))
         except attestation.AttestationError:
             raise FleetError(f"{kind} envelope signature is invalid") from None
+        if kind == "fleet-policy" and payload["keySetVersion"] < floors["keyset"]:
+            # The device refuses a policy whose keySetVersion is below its active key set.
+            raise FleetError("fleet-policy envelope must be bound to the re-anchor key set version or later")
         if kind == "keyset":
             checked_key_roles(payload, b64url(key.spki))
             trusted_signers["fleet-policy"] = tuple(decode(spki) for spki in payload["fleetPolicyKeys"])
