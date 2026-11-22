@@ -94,6 +94,21 @@ class RecoveryConsoleTest {
     }
 
     @Test
+    fun partlyCoveringTheConsoleRevokesTheGrantButRotationKeepsIt() {
+        val context = seedDeviceOwner()
+        LegacyAdminPinTest.startConsoleRecovery(context)
+
+        Robolectric.buildActivity(MainActivity::class.java).setup().use { controller ->
+            controller.configurationChange()
+            assertNotNull(AdminPinStore.getRecoveryGrant(context))
+            controller.pause()
+            assertNull(AdminPinStore.getRecoveryGrant(context))
+            controller.resume()
+            assertNull(AdminPinStore.getRecoveryGrant(context))
+        }
+    }
+
+    @Test
     fun staleRecoverySetupReturnsToAdminWhenAnotherConsoleHasCompletedTheReset() {
         assertEquals(ConsoleScreen.ADMIN,
             ConsoleScreen.PIN_SETUP.afterRecoveryGrantEnds(PinSetupMode.RECOVERY, adminUnlocked = true))

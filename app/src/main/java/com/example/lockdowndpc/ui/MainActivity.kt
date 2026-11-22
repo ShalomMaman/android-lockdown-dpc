@@ -170,8 +170,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // A recovery grant ends as soon as the console loses the foreground, even when it is only
+    // partly covered (onPause without onStop). A configuration change (rotation, theme,
+    // locale) recreates the console in place and keeps the grant.
+    override fun onPause() {
+        if (!isChangingConfigurations) AdminPinStore.clearRecoveryGrant()
+        super.onPause()
+    }
+
     override fun onStop() {
-        AdminPinStore.clearRecoveryGrant()
+        if (!isChangingConfigurations) AdminPinStore.clearRecoveryGrant()
         super.onStop()
     }
 
