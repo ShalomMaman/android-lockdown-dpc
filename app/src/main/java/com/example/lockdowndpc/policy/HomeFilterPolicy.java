@@ -301,6 +301,28 @@ public final class HomeFilterPolicy {
         return new Report(vpn, proxy, ca, restrictions, privateDns);
     }
 
+    /** Removes only settings issued for a superseded filter, preserving an active replacement. */
+    static boolean reconcileRetiredConfig(Config previous, Config active, Gateway gateway) {
+        String packageName = previous.vpnPackage();
+        if (active == null || !packageName.equals(active.vpnPackage())) {
+            if (removeIfMatching(packageName, gateway::alwaysOnPackage,
+                    () -> gateway.setVpn(null), true) != State.CONFIRMED) return false;
+            if (verify(() -> gateway.retainVpnUninstallBlock(packageName) || !gateway.uninstallBlocked(packageName),
+                    () -> gateway.setVpnUninstallBlocked(packageName, false), true) != State.CONFIRMED) return false;
+        }
+        if ((active == null || !previous.pacUrl().equals(active.pacUrl()))
+                && removeIfMatching(previous.pacUrl(), gateway::proxyPacUrl,
+                        () -> gateway.setProxy(null), true) != State.CONFIRMED) return false;
+        if (previous.routing() == null) return true;
+        Map<String, Object> retired = new LinkedHashMap<>(previous.routing().restrictions());
+        if (active != null && packageName.equals(active.vpnPackage()) && active.routing() != null) {
+            retired.entrySet().removeAll(active.routing().restrictions().entrySet());
+        }
+        return retired.isEmpty() || verify(
+                () -> retired.entrySet().stream().noneMatch(gateway.managedConfig(packageName).entrySet()::contains),
+                () -> gateway.setManagedConfig(packageName, retired, false), true) == State.CONFIRMED;
+    }
+
     private static State evaluateVpn(Settings settings, int sdk, Gateway gateway, boolean write) {
         if (!settings.configured()) {
             return State.NOT_REQUESTED;

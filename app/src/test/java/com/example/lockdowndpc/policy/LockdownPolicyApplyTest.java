@@ -202,6 +202,24 @@ public class LockdownPolicyApplyTest {
         assertTrue(dpm.isPackageSuspended(admin, SOCIAL));
     }
 
+    @Test
+    public void remoteProjectionKeepsHiddenAppsHiddenWhenVpnLockdownFails() {
+        setRemoteMarker();
+        devicePolicy.refuseVpn = true;
+        devicePolicy.beforeVpnWrite = () -> {
+            assertTrue(dpm.isApplicationHidden(admin, ALLOWED));
+            assertTrue(dpm.isApplicationHidden(admin, BLOCKED));
+        };
+        try (var authority = AdminAuthority.CommittedPolicy.forProjection(context, "fixture")) {
+            var result = LockdownPolicyController.applyRemoteProjection(context, authority, () -> true, true);
+            assertFalse(result.applied());
+            assertTrue(result.errors().toString(),
+                    result.errors().stream().anyMatch(error -> error.startsWith("home-filter:vpn=REFUSED,")));
+        }
+        assertTrue(dpm.isApplicationHidden(admin, ALLOWED));
+        assertTrue(dpm.isApplicationHidden(admin, BLOCKED));
+    }
+
     private static HomeFilterPolicy.Settings filterSettings(String packageName, String signerPin, boolean enabled) {
         HomeFilterPolicy.Routing routing = new HomeFilterPolicy.Routing(
                 "T123", "https://vpn.example", "node", "Test");

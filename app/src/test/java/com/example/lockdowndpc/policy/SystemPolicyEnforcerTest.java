@@ -270,7 +270,7 @@ public final class SystemPolicyEnforcerTest {
     }
 
     /** An in-memory device whose refusals can be scripted. */
-    private static final class FakeGateway implements SystemPolicyGateway {
+    static final class FakeGateway implements SystemPolicyGateway {
 
         final Set<String> inForce = new LinkedHashSet<>();
         final Set<String> touched = new LinkedHashSet<>();

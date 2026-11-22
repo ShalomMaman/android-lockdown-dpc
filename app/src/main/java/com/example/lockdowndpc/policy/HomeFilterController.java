@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.UnaryOperator;
 
 public final class HomeFilterController {
@@ -199,6 +200,48 @@ public final class HomeFilterController {
                 AuthorizedPolicyWriter.finishHomeFilterReadback(context, settings, report);
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
+        }
+        return verified;
+    }
+
+    static boolean reconcileRemote(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                   HomeFilterPolicy.Settings settings, List<String> errors) {
+        AndroidGateway gateway = new AndroidGateway(context, dpm, admin);
+        return reconcileRemote(settings, Build.VERSION.SDK_INT, gateway, HomeFilterStore.retiredCas(context),
+                HomeFilterStore.retiredFilters(context),
+                () -> AuthorizedPolicyWriter.finishRemoteFilterReadback(context), errors);
+    }
+
+    static boolean reconcileRemote(HomeFilterPolicy.Settings settings, int sdk, HomeFilterPolicy.Gateway gateway,
+                                   Set<String> retiredCas, Set<HomeFilterPolicy.Config> retiredFilters,
+                                   BooleanSupplier finish, List<String> errors) {
+        // Never make a hidden VPN available while trying to verify new protection.
+        boolean verified = !settings.configured()
+                || verifyReadback(settings, HomeFilterPolicy.reconcile(settings, sdk, gateway), errors);
+        if (verified) {
+            for (String certificate : retiredCas) {
+                try {
+                    if (gateway.hasCa(certificate)) gateway.setCa(certificate, false);
+                    if (!gateway.hasCa(certificate)) continue;
+                } catch (RuntimeException ignored) {
+                    // No positive read-back that the retired CA is gone.
+                }
+                errors.add("home-filter:previous-ca-removal-unverified");
+                verified = false;
+            }
+        }
+        if (verified) {
+            for (var retired : retiredFilters) {
+                if (!HomeFilterPolicy.reconcileRetiredConfig(retired, settings.enabled() ? settings.config() : null,
+                        gateway)) {
+                    errors.add("home-filter:previous-config-removal-unverified");
+                    verified = false;
+                }
+            }
+        }
+        if (verified && !finish.getAsBoolean()) {
+            errors.add("journal-write-failed");
+            return false;
         }
         return verified;
     }

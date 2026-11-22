@@ -148,6 +148,28 @@ public final class SystemPolicyStore {
         return DurablePreferences.commit(preferences, editor, choice, KEY_SCHEMA_VERSION, outcome, detail);
     }
 
+    static synchronized boolean projectControls(Context context, Map<String, Boolean> choices) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor edit = prefs.edit().putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION);
+        ArrayList<String> keys = new ArrayList<>();
+        keys.add(KEY_SCHEMA_VERSION);
+        if (!prefs.contains(KEY_PROFILE)) {
+            edit.putString(KEY_PROFILE, SystemPolicyProfile.detect(context.getPackageName()).name());
+            keys.add(KEY_PROFILE);
+        }
+        for (SystemPolicyControl control : SystemPolicyControl.values()) {
+            String id = control.storageKey();
+            String key = KEY_CHOICE_PREFIX + id;
+            keys.add(key);
+            if (choices.containsKey(id)) {
+                edit.putBoolean(key, choices.get(id));
+            } else {
+                edit.remove(key);
+            }
+        }
+        return DurablePreferences.commit(prefs, edit, keys.toArray(new String[0]));
+    }
+
     /**
      * Stores the verified outcome of a pass so the console can render evidence
      * rather than intent, including after a process restart.
@@ -165,6 +187,22 @@ public final class SystemPolicyStore {
             );
         }
         editor.putLong(KEY_VERIFIED_AT, System.currentTimeMillis()).commit();
+    }
+
+    /** The remote pass counts its evidence as stored only when the write is durable. */
+    static synchronized boolean saveReportDurably(Context context, SystemPolicyReport report) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor editor = prefs.edit().putLong(KEY_VERIFIED_AT, System.currentTimeMillis());
+        ArrayList<String> keys = new ArrayList<>();
+        keys.add(KEY_VERIFIED_AT);
+        for (SystemPolicyControlStatus status : report.statuses()) {
+            String outcome = KEY_OUTCOME_PREFIX + status.control().storageKey();
+            String detail = KEY_DETAIL_PREFIX + status.control().storageKey();
+            editor.putString(outcome, status.outcome().name()).putString(detail, status.detail());
+            keys.add(outcome);
+            keys.add(detail);
+        }
+        return DurablePreferences.commit(prefs, editor, keys.toArray(new String[0]));
     }
 
     /**

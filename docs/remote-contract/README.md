@@ -22,6 +22,11 @@ closed schemas and replay the state transitions in an in-memory model.
 Release builds and `fleet_admin` must refuse every fixture key ID, whether
 presented as a signer or derived from SPKI in a key role.
 
+The app validates documents against its own packaged copy of the schema,
+`app/src/main/assets/v1.schema.json`. It must stay byte-identical to
+`v1.schema.json` here. `RemoteContractTest` fails when the two differ, and
+when a vector file or section is added without a Kotlin test that replays it.
+
 | Fixture key | Key ID |
 | --- | --- |
 | `root` | `wqxIfMAeuyha6pKbj8Ob-aoDUU9-ZGwnbb-EgRBEaZU` |

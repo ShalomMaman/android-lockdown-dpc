@@ -60,10 +60,13 @@ public final class PackageIdentity {
 
     /** {@link #versionText(String, long)} for an already-loaded {@code PackageInfo}. */
     public static String versionText(PackageInfo info) {
-        long code = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+        return versionText(info.versionName, versionCode(info));
+    }
+
+    static long versionCode(PackageInfo info) {
+        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
                 ? info.getLongVersionCode()
                 : legacyVersionCode(info);
-        return versionText(info.versionName, code);
     }
 
     /**

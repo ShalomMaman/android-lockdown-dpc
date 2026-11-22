@@ -416,7 +416,7 @@ public class HomeFilterPolicyTest {
         assertFalse(report.androidSettingsConfirmed(REQUEST));
     }
 
-    private static final class FakeGateway implements HomeFilterPolicy.Gateway {
+    static final class FakeGateway implements HomeFilterPolicy.Gateway {
         HomeFilterPolicy.PackageState packageState = HomeFilterPolicy.PackageState.INSTALLED;
         String vpnPackage;
         String pacUrl;

@@ -23,8 +23,10 @@ import com.example.lockdowndpc.policy.AdminAuthority;
 import com.example.lockdowndpc.policy.AuthorizedPolicyWriter;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -440,6 +442,48 @@ public final class KioskController {
                 errors
         );
         return false;
+    }
+
+    /**
+     * Fleet verification requires the exact lock-task allowlist and the resolved HOME.
+     *
+     * @return {@code true} when persistent preferred activities were cleared, so
+     *         the caller can re-register the managed-filtering link handlers
+     */
+    public static boolean reconcileRemote(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                          List<String> errors) {
+        var settings = KioskConfigStore.read(context);
+        if (!validate(context).valid()) {
+            errors.add("kiosk-configuration-unverified");
+            return false;
+        }
+        boolean cleared = reconcile(context, dpm, admin, errors);
+        Set<String> expected = new LinkedHashSet<>();
+        boolean active = KioskConfigStore.isContainmentState(settings.state());
+        if (active) {
+            expected.add(context.getPackageName());
+            if (settings.config().requiresAppTarget()) expected.add(settings.config().targetPackage());
+        }
+        if (!expected.equals(new LinkedHashSet<>(Arrays.asList(dpm.getLockTaskPackages(admin))))) {
+            errors.add("kiosk-lock-task-packages-unverified");
+        }
+        if (active) {
+            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo resolved = context.getPackageManager().resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+            if (resolved == null || resolved.activityInfo == null
+                    || !context.getPackageName().equals(resolved.activityInfo.packageName)
+                    || !HOST_ACTIVITY.equals(resolved.activityInfo.name)) {
+                errors.add("kiosk-home-unverified");
+            }
+        }
+        return cleared;
+    }
+
+    /** Stores fleet intent. The reconciliation pass validates it against this device. */
+    public static boolean projectRemote(Context context, AdminAuthority authority, KioskConfig config) {
+        return AuthorizedPolicyWriter.commitRemoteKioskChange(context, authority,
+                () -> KioskConfigStore.writeConfig(context, config, config.siteUrl(),
+                        config.mode() == KioskMode.OFF ? KioskState.OFF : KioskState.ACTIVE));
     }
 
     /** Records the last visibility pass for later kiosk cleanup. */

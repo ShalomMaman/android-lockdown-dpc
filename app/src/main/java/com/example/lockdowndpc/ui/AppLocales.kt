@@ -1,5 +1,9 @@
 package com.example.lockdowndpc.ui
 
+import android.app.LocaleManager
+import android.content.Context
+import android.os.Build
+import android.os.LocaleList
 import androidx.annotation.StringRes
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
@@ -44,6 +48,18 @@ internal object AppLocales {
                 LocaleListCompat.forLanguageTags(tag)
             }
         )
+    }
+
+    /** Apply a committed remote choice even when no AppCompat activity is attached. */
+    fun applyPolicyChoice(context: Context, choice: LanguageChoice): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val locales = context.getSystemService(LocaleManager::class.java) ?: return false
+            val wanted = LocaleList.forLanguageTags(languageTagOf(choice).orEmpty())
+            if (locales.applicationLocales != wanted) locales.applicationLocales = wanted
+            return locales.applicationLocales == wanted
+        }
+        if (current() != choice) apply(choice)
+        return current() == choice
     }
 
     /**
