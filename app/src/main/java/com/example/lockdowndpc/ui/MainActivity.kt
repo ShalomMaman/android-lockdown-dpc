@@ -824,21 +824,26 @@ private fun AdminConsole(
                 // could otherwise be saved by whoever picked the device up three
                 // minutes later — and the write commits before `showAdmin` drops
                 // back to the PIN screen.
-                if (requireSession()) {
-                    AllowedAppsStore.setProtectionMode(context, chosen)
-                    AuditLog.append(
-                        context,
-                        AuditEvent.POLICY_MODE_CHANGED,
-                        resources.getString(
-                            if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
-                                R.string.audit_mode_allow
-                            } else {
-                                R.string.audit_mode_block
-                            }
-                        ),
+                if (!requireSession()) return@ModePickerDialog
+                if (!AllowedAppsStore.setProtectionMode(context, chosen)) {
+                    message = UiMessage(
+                        resources.getString(R.string.policy_settings_save_failed),
+                        isError = true,
                     )
-                    showAdmin()
+                    return@ModePickerDialog
                 }
+                AuditLog.append(
+                    context,
+                    AuditEvent.POLICY_MODE_CHANGED,
+                    resources.getString(
+                        if (chosen == AllowedAppsStore.ProtectionMode.ALLOW_SELECTED) {
+                            R.string.audit_mode_allow
+                        } else {
+                            R.string.audit_mode_block
+                        }
+                    ),
+                )
+                showAdmin()
             },
         )
     }

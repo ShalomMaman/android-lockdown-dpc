@@ -32,7 +32,7 @@ import java.util.Set;
  *       blocked, and the Play Store itself stays in that set: this is an
  *       exception applied at the policy pass, not a hole in the catalogue. It is
  *       therefore still ineligible as a kiosk target and still refused by
- *       {@code AllowedAppsStore.setAdminSelectedSystemPackages}.</li>
+ *       {@code AllowedAppsStore.setAllowedPackages}.</li>
  *   <li><b>Priced.</b> Making the Store available raises the base policy floor:
  *       {@link #REQUIRED_INSTALL_CONTROLS} are requested regardless of what the
  *       administrator chose for them, and they are read back like every other

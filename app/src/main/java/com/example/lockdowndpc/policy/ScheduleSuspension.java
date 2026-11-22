@@ -181,6 +181,17 @@ public final class ScheduleSuspension {
             Gateway gateway,
             List<String> errors
     ) {
+        return reconcile(settings, now, device, gateway, true, errors);
+    }
+
+    static Result reconcile(
+            ScheduleSettings settings,
+            Instant now,
+            Device device,
+            Gateway gateway,
+            boolean allowRelease,
+            List<String> errors
+    ) {
         if (settings.unreadable()) {
             errors.add(ScheduleSettings.UNREADABLE_ERROR);
         }
@@ -188,9 +199,11 @@ public final class ScheduleSuspension {
         // null: the record is unreadable, so ownership is unknown.
         TreeSet<String> owned = readOwned(gateway, errors);
         if (owned == null && active.isEmpty()) {
-            owned = recover(device, gateway, errors);
+            if (allowRelease) {
+                owned = recover(device, gateway, errors);
+            }
         } else if (owned == null || !active.isEmpty() || !owned.isEmpty()) {
-            owned = enforce(settings, active, device, owned, gateway, errors);
+            owned = enforce(settings, active, device, owned, gateway, allowRelease, errors);
         }
         Optional<Instant> next = settings.schedule() == null
                 ? Optional.empty()
@@ -261,6 +274,7 @@ public final class ScheduleSuspension {
             Device device,
             TreeSet<String> owned,
             Gateway gateway,
+            boolean allowRelease,
             List<String> errors
     ) {
         TreeSet<String> record = owned == null ? new TreeSet<>() : new TreeSet<>(owned);
@@ -278,15 +292,16 @@ public final class ScheduleSuspension {
             target.addAll(record);
             target.removeAll(exempt(settings, device));
         }
-        if (owned != null) {
+        if (owned != null && allowRelease) {
             // Release what is no longer a target, unless another step holds it.
+            // Without network verification the ownership record stays for retry.
             for (String packageName : owned) {
                 if (!target.contains(packageName)
                         && (device.heldByOthers().contains(packageName) || release(packageName, gateway, errors))) {
                     record.remove(packageName);
                 }
             }
-        } else if (!inventoried) {
+        } else if (owned == null && !inventoried) {
             return null;
         }
         record.addAll(target);

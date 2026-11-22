@@ -133,7 +133,7 @@ internal fun pendingRowState(
 }
 
 /**
- * The system packages to write to `AllowedAppsStore.setAdminSelectedSystemPackages`.
+ * The system packages to opt into management when saving the app selection.
  *
  * A system package is only put under allow/block control when the administrator
  * has actually engaged with it: it is opted in, and — for an unclassified OEM

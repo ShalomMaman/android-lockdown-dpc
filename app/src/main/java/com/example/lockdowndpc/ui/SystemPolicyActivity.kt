@@ -219,7 +219,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         if (!requireSession()) {
             return
         }
-        SystemPolicyStore.setRequested(context, change.control, change.requested)
+        if (!SystemPolicyStore.setRequested(context, change.control, change.requested)) {
+            message = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
+            return
+        }
         // The previous verdict describes a policy that is no longer the one being
         // asked for, so it stops being evidence the instant the choice changes.
         SystemPolicyStore.invalidateVerification(context, change.control)

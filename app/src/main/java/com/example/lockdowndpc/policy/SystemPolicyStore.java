@@ -3,6 +3,8 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.example.lockdowndpc.security.DurablePreferences;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -69,7 +71,7 @@ public final class SystemPolicyStore {
     }
 
     /** Only the controls an administrator has explicitly set. */
-    public static Map<SystemPolicyControl, Boolean> explicitChoices(Context context) {
+    public static synchronized Map<SystemPolicyControl, Boolean> explicitChoices(Context context) {
         SharedPreferences preferences = prefs(context);
         LinkedHashMap<SystemPolicyControl, Boolean> choices = new LinkedHashMap<>();
         for (SystemPolicyControl control : SystemPolicyControl.values()) {
@@ -114,23 +116,30 @@ public final class SystemPolicyStore {
         );
     }
 
-    public static boolean hasExplicitChoice(Context context, SystemPolicyControl control) {
+    public static synchronized boolean hasExplicitChoice(Context context, SystemPolicyControl control) {
         return prefs(context).contains(KEY_CHOICE_PREFIX + control.storageKey());
     }
 
     /**
      * Records an administrator's decision. The caller owns authentication and
-     * confirmation; this only writes what it is told.
+     * confirmation. Returns false on disk failure.
      */
-    public static void setRequested(
+    public static boolean setRequested(
             Context context,
             SystemPolicyControl control,
             boolean requested
     ) {
-        prefs(context).edit()
-                .putBoolean(KEY_CHOICE_PREFIX + control.storageKey(), requested)
-                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
-                .commit();
+        return setRequested(prefs(context), control, requested);
+    }
+
+    static synchronized boolean setRequested(
+            SharedPreferences preferences, SystemPolicyControl control, boolean requested
+    ) {
+        String choice = KEY_CHOICE_PREFIX + control.storageKey();
+        SharedPreferences.Editor editor = preferences.edit()
+                .putBoolean(choice, requested)
+                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION);
+        return DurablePreferences.commit(preferences, editor, choice, KEY_SCHEMA_VERSION);
     }
 
     /**
