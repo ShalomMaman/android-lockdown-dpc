@@ -36,6 +36,7 @@
     <string name="action_close">Close</string>
     <string name="action_back">Back</string>
     <string name="error_unknown">Unknown error</string>
+    <string name="policy_settings_save_failed">The policy change could not be saved. Try again.</string>
 
     <!-- Status card -->
     <string name="status_headline_active">Protection is active and verified</string>

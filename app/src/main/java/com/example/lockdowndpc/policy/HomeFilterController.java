@@ -161,18 +161,18 @@ public final class HomeFilterController {
      * (turn off, or CA removal) never finishes while a Chrome approval is saved
      * or Chrome is not observed contained: the filter is kept on with its CA,
      * the request stays pending, and the pass reports why. Boot and retry
-     * passes come through here too. The same settled value went to the pass's
-     * system policy and package steps.
+     * passes come through here too. System policy and package steps use the
+     * same settled value.
      */
-    static void reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
-                          List<String> errors, BuiltInBlockExemptions.PassFilter pass) {
+    static boolean reconcile(Context context, DevicePolicyManager dpm, ComponentName admin,
+                             List<String> errors, BuiltInBlockExemptions.PassFilter pass) {
         HomeFilterPolicy.Settings settings = pass.stored();
         if (settings == null) {
             errors.add(CORRUPT_CONFIGURATION);
-            return;
+            return false;
         }
         if (!settings.configured()) {
-            return;
+            return true;
         }
         boolean held = pass.held();
         HomeFilterPolicy.Settings enforced = pass.effective();
@@ -181,21 +181,10 @@ public final class HomeFilterController {
         }
         HomeFilterPolicy.Report report = HomeFilterPolicy.reconcile(enforced, Build.VERSION.SDK_INT,
                 new AndroidGateway(context, dpm, admin));
+        boolean verified = verifyReadback(enforced, report, errors);
         if (held) {
-            if (!report.androidSettingsConfirmed(enforced)) {
-                errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
-                        + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
-                        + ",private-dns=" + report.privateDns());
-            }
             HomeFilterStore.saveReadback(context, report);
-            return;
-        }
-        boolean verified = settings.enabled()
-                ? report.androidSettingsConfirmed(settings) : report.removed();
-        if (!verified) {
-            errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
-                    + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
-                    + ",private-dns=" + report.privateDns());
+            return verified;
         }
         HomeFilterPolicy.Settings remaining = settings.afterReadback(report);
         if (!remaining.equals(settings)) {
@@ -204,6 +193,18 @@ public final class HomeFilterController {
         if (remaining.configured()) {
             HomeFilterStore.saveReadback(context, report);
         }
+        return verified;
+    }
+
+    static boolean verifyReadback(HomeFilterPolicy.Settings enforced, HomeFilterPolicy.Report report,
+                                  List<String> errors) {
+        boolean verified = enforced.enabled() ? report.androidSettingsConfirmed(enforced) : report.removed();
+        if (!verified) {
+            errors.add("home-filter:vpn=" + report.vpn() + ",proxy=" + report.proxy()
+                    + ",ca=" + report.ca() + ",restrictions=" + report.restrictions()
+                    + ",private-dns=" + report.privateDns());
+        }
+        return verified;
     }
 
     /**

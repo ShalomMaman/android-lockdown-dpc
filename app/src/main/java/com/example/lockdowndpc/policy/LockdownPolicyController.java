@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 
 public final class LockdownPolicyController {
     private static final String TAG = "LockdownPolicy";
@@ -92,15 +94,11 @@ public final class LockdownPolicyController {
 
             @Override
             public void containWebViewProvider(List<String> containErrors) {
-                // The same routine the pass runs later, unchanged: a
-                // browser-backed provider is suspended before protection starts.
-                suspendBrowserBackedWebViewIfNeeded(context, dpm, admin,
-                        homeFilter != null ? homeFilter : HomeFilterPolicy.Settings.OFF, containErrors);
+                suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, containErrors);
             }
 
             @Override
             public void recordEarlyReadback(List<String> readbackErrors) {
-                readbackErrors.add(HomeFilterController.CORRUPT_CONFIGURATION);
                 recordExemptionReadback(context, dpm, admin, exemptions,
                         chromeInScope ? ChromeFilterExemption.Decision.FILTER_DISABLED : chromeUnavailable,
                         readbackErrors);
@@ -138,13 +136,13 @@ public final class LockdownPolicyController {
             }
         }, errors);
         if (start.stop() == ExemptionPassStart.Stop.CORRUPT_HOME_FILTER) {
-            ArrayList<String> corrupt = new ArrayList<>(List.of(HomeFilterController.CORRUPT_CONFIGURATION));
+            errors.add(0, HomeFilterController.CORRUPT_CONFIGURATION);
             if (deviceOwner) {
                 // Night and work hours do not depend on the home filter: they
                 // are still enforced, and the pass still reports the filter.
-                reconcileScheduleWithoutFilter(context, dpm, admin, social, chromeInScope, corrupt);
+                reconcileScheduleWithoutFilter(context, dpm, admin, social, chromeInScope, errors);
             }
-            return new PolicyResult(false, false, 0, 0, corrupt);
+            return new PolicyResult(deviceOwner, false, 0, 0, errors);
         }
         if (start.stop() == ExemptionPassStart.Stop.NOT_DEVICE_OWNER) {
             String error = "device-owner-required";
@@ -187,20 +185,27 @@ public final class LockdownPolicyController {
             routeLinks(context, dpm, admin, false, errors);
         }
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
-        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
-                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold, errors);
-        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, enforcedFilter, errors);
         // The credentials lock first, so the CA check that follows cannot be
         // undone from Android Settings before Chrome is released on it.
         boolean lockConfirmed = reconcileCredentialsLock(context, dpm, admin, errors);
-        int errorsBeforeFilter = errors.size();
-        HomeFilterController.reconcile(context, dpm, admin, errors, passFilter);
-        boolean filterConfirmed = homeFilter.enabled() && errors.size() == errorsBeforeFilter;
+        boolean networkVerified = false;
+        try {
+            networkVerified = HomeFilterController.reconcile(context, dpm, admin, errors, passFilter);
+        } catch (RuntimeException exception) {
+            errors.add("home-filter:reconcile:" + exception.getClass().getSimpleName());
+        }
+        // No release is attempted before verification, so a failed filter
+        // reconciliation can never leave a package newly unhidden.
+        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
+                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold,
+                networkVerified, errors);
+        suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
         if (chromeInScope) {
             // Chrome is released only now, on evidence taken after the lock:
             // the home filter's own reconciliation reported no error. Links
             // follow the final, verified result rather than the earlier decision.
-            filterConfirmed = filterConfirmed && lockConfirmed;
+            boolean filterConfirmed = homeFilter.enabled()
+                    && !passFilter.held() && networkVerified && lockConfirmed;
             boolean routedAway = !chrome.shown();
             BuiltInBlockExemptions.Observed beforeRelease = ChromeFilterExemption.observe(chromeGateway);
             // Inside a window that targets Chrome, the release suspends it
@@ -239,7 +244,7 @@ public final class LockdownPolicyController {
         // Last of the package steps, so a package an earlier step made visible
         // in this pass (Chrome's release included) is covered by an active window.
         reconcileSchedule(context, dpm, admin, schedule, scheduleNow, scheduleHold, scheduleGateway,
-                chromeInScope, chrome, social, errors);
+                chromeInScope, chrome, social, networkVerified, errors);
         recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
         boolean verified = errors.isEmpty();
         recordScheduleOutcome(context, schedule, scheduleNow, verified);
@@ -910,6 +915,7 @@ public final class LockdownPolicyController {
             SocialPass social,
             boolean chromeInScope,
             ScheduleSuspension.Hold scheduleHold,
+            boolean networkVerified,
             List<String> errors
     ) {
         PackageManager pm = context.getPackageManager();
@@ -1098,14 +1104,9 @@ public final class LockdownPolicyController {
             }
 
             try {
-                boolean wasHidden = dpm.isApplicationHidden(admin, packageName);
-                boolean updated = dpm.setApplicationHidden(admin, packageName, shouldBlock);
-                boolean hidden = dpm.isApplicationHidden(admin, packageName);
-                if (!updated && wasHidden != shouldBlock) {
-                    errors.add("package-policy-update-rejected:" + packageName);
-                } else if (hidden != shouldBlock) {
-                    errors.add("package-policy-state-mismatch:" + packageName);
-                }
+                boolean hidden = reconcilePackageVisibility(packageName, shouldBlock, networkVerified,
+                        () -> dpm.isApplicationHidden(admin, packageName),
+                        hide -> dpm.setApplicationHidden(admin, packageName, hide), errors);
                 if (hidden) {
                     blockedCount++;
                 } else {
@@ -1117,7 +1118,7 @@ public final class LockdownPolicyController {
                 errors.add("package-policy:" + packageName + ":"
                         + exception.getClass().getSimpleName());
             }
-            if (exempted && !scheduleHold.targets(packageName)) {
+            if (networkVerified && exempted && !scheduleHold.targets(packageName)) {
                 // An approved package may have been suspended by an earlier
                 // containment fallback; an approval releases that too. Inside
                 // a window that targets it, the suspension stays: the schedule
@@ -1130,6 +1131,24 @@ public final class LockdownPolicyController {
             KioskConfigStore.setEscapeSurfaceHidingApplied(context, kioskActive);
         }
         return new int[]{blockedCount, allowedCount};
+    }
+
+    static boolean reconcilePackageVisibility(
+            String packageName, boolean shouldBlock, boolean networkVerified,
+            BooleanSupplier isHidden, Predicate<Boolean> setHidden, List<String> errors
+    ) {
+        boolean wasHidden = isHidden.getAsBoolean();
+        if (!shouldBlock && !networkVerified) {
+            return wasHidden;
+        }
+        boolean updated = setHidden.test(shouldBlock);
+        boolean hidden = isHidden.getAsBoolean();
+        if (!updated && wasHidden != shouldBlock) {
+            errors.add("package-policy-update-rejected:" + packageName);
+        } else if (hidden != shouldBlock) {
+            errors.add("package-policy-state-mismatch:" + packageName);
+        }
+        return hidden;
     }
 
     /** The validated single-app kiosk target while kiosk contains the device, else empty. */
@@ -1227,7 +1246,8 @@ public final class LockdownPolicyController {
      * The schedule step of a pass that stops early on a corrupt home filter
      * configuration. Chrome stays contained by that pass, and the filter's VPN
      * is unknown, so the live always-on VPN and the default one are kept
-     * available. The pass is never verified, so a retry is scheduled.
+     * out of the suspension targets. Releases wait for verification, so a
+     * retry is scheduled.
      */
     private static void reconcileScheduleWithoutFilter(
             Context context,
@@ -1252,7 +1272,7 @@ public final class LockdownPolicyController {
         }
         ScheduleSuspension.Hold hold = scheduleHold(context, dpm, schedule, now, passCore, social, gateway);
         reconcileSchedule(context, dpm, admin, schedule, now, hold, gateway, chromeInScope,
-                ChromeFilterExemption.Decision.FILTER_DISABLED, social, errors);
+                ChromeFilterExemption.Decision.FILTER_DISABLED, social, false, errors);
         recordScheduleOutcome(context, schedule, now, false);
     }
 
@@ -1279,6 +1299,7 @@ public final class LockdownPolicyController {
             boolean chromeInScope,
             ChromeFilterExemption.Decision chrome,
             SocialPass social,
+            boolean networkVerified,
             List<String> errors
     ) {
         if (schedule.enforcing() && !ScheduleClock.lock(context, dpm, admin)) {
@@ -1296,7 +1317,7 @@ public final class LockdownPolicyController {
             heldByOthers.add(webViewProvider);
         }
         ScheduleSuspension.Result result = ScheduleSuspension.reconcile(schedule, now,
-                new ScheduleSuspension.Device(hold.exempt(), heldByOthers), gateway, errors);
+                new ScheduleSuspension.Device(hold.exempt(), heldByOthers), gateway, networkVerified, errors);
         if (!result.activeWindows().isEmpty()) {
             Log.i(TAG, "Schedule windows active: " + result.activeWindows()
                     + ", suspended=" + result.suspended().size());
@@ -1388,19 +1409,18 @@ public final class LockdownPolicyController {
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
-            HomeFilterPolicy.Settings homeFilter,
             List<String> errors
     ) {
         String provider = resolveWebViewProvider(context.getPackageManager());
         if (provider == null || !LockdownPackages.ALWAYS_BLOCKED.contains(provider)) {
             return;
         }
-        boolean suspend = !homeFilter.keepsVpnVisible(provider);
+        // Built-in blocked browsers cannot inherit the VPN exemption.
         try {
-            String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, suspend);
+            String[] failed = dpm.setPackagesSuspended(admin, new String[]{provider}, true);
             if (failed.length > 0) {
                 errors.add("browser-suspension-failed");
-            } else if (dpm.isPackageSuspended(admin, provider) != suspend) {
+            } else if (!dpm.isPackageSuspended(admin, provider)) {
                 errors.add("browser-suspension-unverified");
             }
         } catch (PackageManager.NameNotFoundException exception) {

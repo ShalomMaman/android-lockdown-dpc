@@ -2,11 +2,13 @@ package com.example.lockdowndpc.policy;
 
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static com.example.lockdowndpc.policy.HomeFilterPolicy.State.CONFIRMED;
 import static com.example.lockdowndpc.policy.HomeFilterPolicy.State.HIDDEN_VPN;
@@ -297,6 +299,34 @@ public class HomeFilterPolicyTest {
         report = HomeFilterPolicy.reconcile(REQUEST, 36, device);
         assertEquals(UNCONFIRMED, report.vpn());
         assertFalse(report.androidSettingsConfirmed(REQUEST));
+    }
+
+    @Test
+    public void allowedAppStaysHiddenWhenVpnLockdownCannotBeVerified() {
+        FakeGateway device = new FakeGateway();
+        device.refuseVpn = true;
+        List<String> errors = new ArrayList<>();
+        boolean networkVerified = HomeFilterController.verifyReadback(
+                REQUEST, HomeFilterPolicy.reconcile(REQUEST, 36, device), errors);
+        assertFalse(networkVerified);
+        assertTrue(errors.get(0).startsWith("home-filter:vpn=REFUSED"));
+
+        AtomicBoolean hidden = new AtomicBoolean(true);
+        assertTrue(LockdownPolicyController.reconcilePackageVisibility(
+                "com.example.allowed", false, networkVerified, hidden::get, hide -> {
+                    hidden.set(hide);
+                    assertTrue("An unverified pass must never attempt to show the app", hide);
+                    return true;
+                }, errors));
+        assertTrue(hidden.get());
+
+        hidden.set(false);
+        assertTrue(LockdownPolicyController.reconcilePackageVisibility(
+                "com.example.blocked", true, networkVerified, hidden::get, hide -> {
+                    hidden.set(hide);
+                    return true;
+                }, errors));
+        assertTrue(hidden.get());
     }
 
     @Test

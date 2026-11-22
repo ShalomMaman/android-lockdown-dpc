@@ -53,6 +53,7 @@
     <string name="action_close">סגירה</string>
     <string name="action_back">חזרה</string>
     <string name="error_unknown">שגיאה לא ידועה</string>
+    <string name="policy_settings_save_failed">לא ניתן היה לשמור את השינוי בהגדרות ההגנה. אפשר לנסות שוב.</string>
 
     <!-- Status card -->
     <string name="status_headline_active">ההגנה פעילה ומאומתת</string>

@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.example.lockdowndpc.security.AppLabelSanitizer;
+import com.example.lockdowndpc.security.DurablePreferences;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -43,12 +44,12 @@ public final class AllowedAppsStore {
      * reversible: neither list is touched, and the one belonging to the chosen
      * method comes back exactly as it was left.
      */
-    public static Set<String> getAllowedPackages(Context context) {
+    public static synchronized Set<String> getAllowedPackages(Context context) {
         SharedPreferences preferences = prefs(context);
         ProtectionMode mode = currentMode(preferences);
-        migrateLegacySelection(preferences, mode);
         Set<String> stored =
-                preferences.getStringSet(allowedKey(mode), Collections.emptySet());
+                preferences.getStringSet(usesLegacySelection(preferences, mode)
+                        ? KEY_ALLOWED : allowedKey(mode), Collections.emptySet());
         HashSet<String> result = new HashSet<>(stored);
         result.add(context.getPackageName());
         result.addAll(LockdownPackages.managementPackageNames());
@@ -72,34 +73,9 @@ public final class AllowedAppsStore {
         }
     }
 
-    /**
-     * Moves the older single selection onto the method it was saved under.
-     *
-     * <p>Runs before every read and write of the per-method entries, and only
-     * while the legacy entry is still present, so an upgrade keeps the list an
-     * administrator already curated instead of asking them to rebuild it.
-     * {@code commit} rather than {@code apply}: the very next statement of the
-     * caller reads the keys this writes.
-     */
-    private static void migrateLegacySelection(
-            SharedPreferences preferences,
-            ProtectionMode mode
-    ) {
-        if (!preferences.contains(KEY_ALLOWED) && !preferences.contains(KEY_ALLOWLIST_CONFIGURED)) {
-            return;
-        }
-        SharedPreferences.Editor editor = preferences.edit();
-        if (!preferences.contains(allowedKey(mode))) {
-            editor.putStringSet(
-                    allowedKey(mode),
-                    new HashSet<>(preferences.getStringSet(KEY_ALLOWED, Collections.emptySet()))
-            );
-            editor.putBoolean(
-                    configuredKey(mode),
-                    preferences.getBoolean(KEY_ALLOWLIST_CONFIGURED, false)
-            );
-        }
-        editor.remove(KEY_ALLOWED).remove(KEY_ALLOWLIST_CONFIGURED).commit();
+    private static boolean usesLegacySelection(SharedPreferences preferences, ProtectionMode mode) {
+        return !preferences.contains(allowedKey(mode))
+                && (preferences.contains(KEY_ALLOWED) || preferences.contains(KEY_ALLOWLIST_CONFIGURED));
     }
 
     /**
@@ -115,7 +91,7 @@ public final class AllowedAppsStore {
         );
     }
 
-    public static void setAdminSelectedSystemPackages(Context context, Set<String> packages) {
+    public static synchronized void setAdminSelectedSystemPackages(Context context, Set<String> packages) {
         HashSet<String> selected = new HashSet<>(packages);
         // Protected packages can never be opted in; this guard belongs here so
         // no caller can turn an app store or kiosk escape surface into an
@@ -157,7 +133,8 @@ public final class AllowedAppsStore {
      * package in separately, which keeps this a pure audit record rather than a
      * privilege grant on its own.
      */
-    public static void recordSystemRiskAcceptance(Context context, SystemAppRiskAcceptance acceptance) {
+    public static synchronized void recordSystemRiskAcceptance(
+            Context context, SystemAppRiskAcceptance acceptance) {
         String packageName = acceptance.packageName();
         prefs(context).edit()
                 .putString(KEY_SYSTEM_RISK_SIGNER_PREFIX + packageName, acceptance.signerDigest())
@@ -188,7 +165,7 @@ public final class AllowedAppsStore {
         return pins;
     }
 
-    public static void setManagementCertificatePins(
+    public static synchronized void setManagementCertificatePins(
             Context context,
             String packageName,
             Set<String> digests
@@ -208,23 +185,30 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    /** Saves the selection against the blocking method it was made under. */
-    public static void setAllowedPackages(
+    /** Saves the selection against the active blocking method. Returns false on disk failure. */
+    public static boolean setAllowedPackages(
             Context context,
             Set<String> packages,
             Set<String> managedPackages
     ) {
-        SharedPreferences preferences = prefs(context);
+        return setAllowedPackages(prefs(context), packages, managedPackages);
+    }
+
+    static synchronized boolean setAllowedPackages(
+            SharedPreferences preferences, Set<String> packages, Set<String> managedPackages
+    ) {
         ProtectionMode mode = currentMode(preferences);
-        migrateLegacySelection(preferences, mode);
-        preferences.edit()
+        SharedPreferences.Editor editor = preferences.edit()
                 .putStringSet(allowedKey(mode), new HashSet<>(packages))
                 .putStringSet(KEY_MANAGED_PACKAGES, new HashSet<>(managedPackages))
                 .putBoolean(configuredKey(mode), true)
-                .apply();
+                .remove(KEY_ALLOWED)
+                .remove(KEY_ALLOWLIST_CONFIGURED);
+        return DurablePreferences.commit(preferences, editor, allowedKey(mode), KEY_MANAGED_PACKAGES,
+                configuredKey(mode), KEY_ALLOWED, KEY_ALLOWLIST_CONFIGURED);
     }
 
-    public static Set<String> getManagedPackages(Context context) {
+    public static synchronized Set<String> getManagedPackages(Context context) {
         return new HashSet<>(prefs(context).getStringSet(KEY_MANAGED_PACKAGES, Collections.emptySet()));
     }
 
@@ -232,7 +216,7 @@ public final class AllowedAppsStore {
         rememberManagedPackage(context, packageName, null);
     }
 
-    public static void rememberManagedPackage(
+    public static synchronized void rememberManagedPackage(
             Context context,
             String packageName,
             String label
@@ -260,7 +244,7 @@ public final class AllowedAppsStore {
      * had merely scrolled past. Membership stays the deliberate, separately
      * guarded {@link #setAdminSelectedSystemPackages} decision.
      */
-    public static void rememberPackageLabel(Context context, String packageName, String label) {
+    public static synchronized void rememberPackageLabel(Context context, String packageName, String label) {
         String sanitizedLabel = AppLabelSanitizer.sanitize(label);
         if (sanitizedLabel == null || sanitizedLabel.isBlank()) {
             return;
@@ -274,28 +258,41 @@ public final class AllowedAppsStore {
     }
 
     /** Whether the method currently in force has a saved selection of its own. */
-    public static boolean isAllowlistConfigured(Context context) {
+    public static synchronized boolean isAllowlistConfigured(Context context) {
         SharedPreferences preferences = prefs(context);
         ProtectionMode mode = currentMode(preferences);
-        migrateLegacySelection(preferences, mode);
-        return preferences.getBoolean(configuredKey(mode), false);
+        return preferences.getBoolean(usesLegacySelection(preferences, mode)
+                ? KEY_ALLOWLIST_CONFIGURED : configuredKey(mode), false);
     }
 
-    public static ProtectionMode getProtectionMode(Context context) {
+    public static synchronized ProtectionMode getProtectionMode(Context context) {
         return currentMode(prefs(context));
     }
 
     /**
      * Records the blocking method. Non-destructive: the selection saved under the
      * method being left stays exactly where it is, and the one saved under the
-     * method being entered comes back untouched.
+     * method being entered comes back untouched. Returns false on disk failure.
      */
-    public static void setProtectionMode(Context context, ProtectionMode mode) {
-        SharedPreferences preferences = prefs(context);
-        // Bind a legacy single selection to the method it was saved under before
-        // the current method moves off it.
-        migrateLegacySelection(preferences, currentMode(preferences));
-        preferences.edit().putString(KEY_MODE, mode.name()).apply();
+    public static boolean setProtectionMode(Context context, ProtectionMode mode) {
+        return setProtectionMode(prefs(context), mode);
+    }
+
+    static synchronized boolean setProtectionMode(SharedPreferences preferences, ProtectionMode mode) {
+        ProtectionMode previous = currentMode(preferences);
+        SharedPreferences.Editor editor = preferences.edit()
+                .putString(KEY_MODE, mode.name())
+                .remove(KEY_ALLOWED)
+                .remove(KEY_ALLOWLIST_CONFIGURED);
+        // Bind a legacy selection to its original method in the same write.
+        if (usesLegacySelection(preferences, previous)) {
+            editor.putStringSet(allowedKey(previous),
+                    preferences.getStringSet(KEY_ALLOWED, Collections.emptySet()));
+            editor.putBoolean(configuredKey(previous),
+                    preferences.getBoolean(KEY_ALLOWLIST_CONFIGURED, false));
+        }
+        return DurablePreferences.commit(preferences, editor, KEY_MODE, KEY_ALLOWED,
+                KEY_ALLOWLIST_CONFIGURED, allowedKey(previous), configuredKey(previous));
     }
 
     public static boolean isProtectionEnabled(Context context) {
@@ -330,7 +327,7 @@ public final class AllowedAppsStore {
         return prefs(context).getString(KEY_POLICY_ERROR, "");
     }
 
-    public static void markApplyStarted(Context context) {
+    public static synchronized void markApplyStarted(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, true)
                 .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
@@ -338,7 +335,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static void markApplySucceeded(Context context) {
+    public static synchronized void markApplySucceeded(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, true)
                 .putString(KEY_POLICY_STATE, PolicyState.ACTIVE.name())
@@ -363,7 +360,7 @@ public final class AllowedAppsStore {
         markApplyFailed(context, error, true);
     }
 
-    static void markApplyFailed(Context context, String error, boolean protectionEnabled) {
+    static synchronized void markApplyFailed(Context context, String error, boolean protectionEnabled) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, protectionEnabled)
                 .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())
@@ -371,7 +368,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static void markPauseStarted(Context context) {
+    public static synchronized void markPauseStarted(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.APPLYING.name())
@@ -379,7 +376,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static void markPauseSucceeded(Context context) {
+    public static synchronized void markPauseSucceeded(Context context) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.INACTIVE.name())
@@ -387,7 +384,7 @@ public final class AllowedAppsStore {
                 .commit();
     }
 
-    public static void markPauseFailed(Context context, String error) {
+    public static synchronized void markPauseFailed(Context context, String error) {
         prefs(context).edit()
                 .putBoolean(KEY_ENABLED, false)
                 .putString(KEY_POLICY_STATE, PolicyState.FAILED.name())

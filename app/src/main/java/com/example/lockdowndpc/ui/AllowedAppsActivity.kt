@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -156,7 +157,7 @@ class AllowedAppsActivity : AppCompatActivity() {
      * Persists both halves of the decision and hands application to the policy
      * engine.
      *
-     * The guarded system-package store is written first and separately: it is the
+     * The guarded system-package store is written after the selection: it is the
      * only gate that puts a system package under allow/block control, and it
      * strips the protected catalogues again on write, so a defect in this screen
      * still cannot make an essential package blockable.
@@ -173,8 +174,11 @@ class AllowedAppsActivity : AppCompatActivity() {
         val hadSystemSelection = AllowedAppsStore
             .getAdminSelectedSystemPackages(this).isNotEmpty() || adminSelectedSystem.isNotEmpty()
 
+        if (!AllowedAppsStore.setAllowedPackages(this, selection, managed)) {
+            Toast.makeText(this, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
+            return
+        }
         AllowedAppsStore.setAdminSelectedSystemPackages(this, adminSelectedSystem)
-        AllowedAppsStore.setAllowedPackages(this, selection, managed)
         AuditLog.append(this, AuditEvent.POLICY_ALLOWLIST_SAVED, getString(R.string.audit_apps_saved))
         if (hadSystemSelection) {
             AuditLog.append(this, AuditEvent.SYSTEM_SELECTION_SAVED, getString(R.string.sysinv_audit_system_saved))

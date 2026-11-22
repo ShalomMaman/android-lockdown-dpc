@@ -229,6 +229,29 @@ public final class ScheduleSuspensionTest {
     }
 
     @Test
+    public void unverifiedNetworkKeepsScheduleSuspensionsUntilAVerifiedPass() {
+        AndroidState state = new AndroidState();
+        FakeGateway gateway = new FakeGateway(state);
+        List<String> errors = new ArrayList<>();
+
+        ScheduleSuspension.reconcile(enabled(), at(19, 23, 30), DEVICE, gateway, false, errors);
+        assertTrue(state.suspended.contains(GAME));
+        assertTrue(state.owned.contains(GAME));
+        assertEquals(at(20, 6, 0), state.alarm);
+
+        gateway.calls.clear();
+        ScheduleSuspension.reconcile(enabled(), at(20, 7, 0), DEVICE, gateway, false, errors);
+        assertTrue(state.suspended.contains(GAME));
+        assertTrue(state.owned.contains(GAME));
+        assertEquals(List.of(), gateway.suspensionCalls());
+
+        pass(enabled(), at(20, 7, 0), gateway, errors);
+        assertFalse(state.suspended.contains(GAME));
+        assertFalse(state.owned.contains(GAME));
+        assertEquals(List.of(), errors);
+    }
+
+    @Test
     public void theAllowlistKeepsAnAppAvailableInsideTheWindow() {
         AndroidState state = new AndroidState();
         FakeGateway gateway = new FakeGateway(state);

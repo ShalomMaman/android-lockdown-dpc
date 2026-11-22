@@ -103,7 +103,7 @@ public final class AdminPinStore {
         }
     }
 
-    public static String rotateRecoveryCode(Context context) throws SecurityException {
+    public static synchronized String rotateRecoveryCode(Context context) throws SecurityException {
         try {
             SecureRandom random = new SecureRandom();
             StringBuilder code = new StringBuilder(12);
@@ -123,7 +123,7 @@ public final class AdminPinStore {
         }
     }
 
-    public static Verification verify(Context context, String pin) {
+    public static synchronized Verification verify(Context context, String pin) {
         if (!hasPin(context)) {
             return new Verification(Status.NOT_CONFIGURED, 0L, false);
         }
@@ -157,13 +157,7 @@ public final class AdminPinStore {
             String normalizedRecovery = pin == null ? "" : pin.replace("-", "").replace(" ", "");
             if (recoverySalt != null && recoveryVerifier != null
                     && matches(normalizedRecovery, recoverySalt, recoveryVerifier, hmacKey)) {
-                putLockout(
-                        prefs.edit()
-                                .remove(KEY_RECOVERY_SALT)
-                                .remove(KEY_RECOVERY_VERIFIER),
-                        PinLockoutPolicy.LockoutState.CLEARED
-                ).commit();
-                return new Verification(Status.SUCCESS, 0L, true);
+                return consumeMatchedRecoveryCode(prefs);
             }
         } catch (Exception exception) {
             return new Verification(Status.ERROR, 0L, false);
@@ -178,6 +172,18 @@ public final class AdminPinStore {
         putLockout(prefs.edit(), next).commit();
         long delay = next.penaltyMillis();
         return new Verification(delay == 0 ? Status.INVALID : Status.LOCKED, delay, false);
+    }
+
+    /** A verified recovery code is usable only once its removal is durable. */
+    static Verification consumeMatchedRecoveryCode(SharedPreferences prefs) {
+        SharedPreferences.Editor editor = putLockout(
+                prefs.edit().remove(KEY_RECOVERY_SALT).remove(KEY_RECOVERY_VERIFIER),
+                PinLockoutPolicy.LockoutState.CLEARED);
+        boolean consumed = DurablePreferences.commit(prefs, editor,
+                KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER, KEY_FAILURES, KEY_LOCKOUT_BOOT_KIND,
+                KEY_LOCKOUT_BOOT_VALUE, KEY_LOCKOUT_ELAPSED_UNTIL, KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL);
+        return consumed ? new Verification(Status.SUCCESS, 0L, true)
+                : new Verification(Status.ERROR, 0L, false);
     }
 
     public static boolean isValidPin(String pin) {
