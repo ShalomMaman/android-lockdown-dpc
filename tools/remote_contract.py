@@ -213,7 +213,7 @@ def ticket_bytes(value: str) -> bytes:
 
 
 def write_private_bundle(output: Path, files: dict[str, bytes]) -> None:
-    """Publish a complete owner-only directory without updating an existing bundle."""
+    """Publish owner-only files in a new directory and clean up on failure."""
     if output.exists():
         raise FileExistsError("bundle output directory already exists")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -226,4 +226,15 @@ def write_private_bundle(output: Path, files: dict[str, bytes]) -> None:
                 file.flush()
                 os.fchmod(file.fileno(), 0o600)
                 os.fsync(file.fileno())
-        directory.rename(output)
+        os.mkdir(output, 0o700)
+        published = []
+        try:
+            for name in files:
+                destination = output / name
+                os.link(directory / name, destination)
+                published.append(destination)
+        except BaseException:
+            for destination in reversed(published):
+                destination.unlink()
+            output.rmdir()
+            raise

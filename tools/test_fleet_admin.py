@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import android_attestation as attestation
 import fleet_admin
@@ -344,6 +345,16 @@ class FleetAdminTest(unittest.TestCase):
         os.utime(revocations, (future, future))
         self.assertIn("future modification time", self.run_cli(*args, status=2).stderr)
 
+    def test_revocation_list_allows_up_to_five_minutes_of_clock_skew(self):
+        revocations = self.write_json("revocations.json", {"entries": {"007b": {"status": "REVOKED"}}})
+        now = int(time.time())
+        with patch.object(fleet_admin.time, "time", return_value=now):
+            os.utime(revocations, (now, now + 300))
+            self.assertEqual(fleet_admin.load_revocations(revocations, 7), {"7b"})
+            os.utime(revocations, (now, now + 301))
+            with self.assertRaisesRegex(fleet_admin.FleetError, "future modification time"):
+                fleet_admin.load_revocations(revocations, 7)
+
     def test_android_attestation_rejects_software_unlocked_unverified_or_wrong_signer(self):
         for changes, error in (({"locked": False}, "locked bootloader"),
                                ({"boot_state": 1}, "verified boot"),
@@ -463,12 +474,13 @@ class FleetAdminTest(unittest.TestCase):
         # The hash must use the exact accepted bytes, even for noncanonical JSON.
         policy_payload = b"\n" + canonical({**DOCS["policy-6"], "fleetId": "test-fleet",
                                              "deviceIds": [device_id]}) + b"\n"
-        policy = self.write_json("issued-policy.json", {
+        policy_envelope = {
             "format": "dg-signed/1",
             "keyId": b64url(hashlib.sha256(self.policy_key[2]).digest()),
             "payload": b64url(policy_payload),
             "signature": b64url(openssl("dgst", "-sha256", "-sign", self.policy_key[0], data=policy_payload)),
-        })
+        }
+        policy = self.write_json("issued-policy.json", policy_envelope)
         args = ["reanchor", *self.signing_args(self.root_key, output),
                 "--device-id", device_id, "--nonce", reference["nonce"],
                 "--root-fingerprint", root_id,
@@ -484,11 +496,33 @@ class FleetAdminTest(unittest.TestCase):
         self.assertEqual(document["nonce"], reference["nonce"])
         self.assertEqual(document["rootFingerprint"], root_id)
         self.assertEqual(document["rootSpki"], b64url(self.root_key[2]))
+        self.assertIn("--policy-envelope requires --keyset-envelope", self.run_cli(
+            *args, "--force", "--policy-envelope", policy, status=2,
+        ).stderr)
+        keyset_args = ["--keyset-envelope", self.keyset_file]
         self.assertIn("expected a fleet-policy document", self.run_cli(
-            *args, "--force", "--policy-envelope", self.keyset_file, status=2,
+            *args, "--force", *keyset_args, "--policy-envelope", self.keyset_file, status=2,
         ).stderr)
         self.assertIn("must match the re-anchor fleet and floor version", self.run_cli(
-            *args, "--force", "--policy-floor", 7, "--policy-envelope", policy, status=2,
+            *args, "--force", *keyset_args, "--policy-floor", 7, "--policy-envelope", policy, status=2,
+        ).stderr)
+
+        keyset_envelope = parse_wire(self.keyset_file.read_bytes())
+        wrong_signature = b64url(openssl("dgst", "-sha256", "-sign", self.server_key[0], data=keyset_payload))
+        wrong_keyset = self.write_json("wrong-keyset.json", {**keyset_envelope, "signature": wrong_signature})
+        self.assertIn("keyset envelope signature is invalid", self.run_cli(
+            *args, "--force", "--keyset-envelope", wrong_keyset, status=2,
+        ).stderr)
+        wrong_signature = b64url(openssl("dgst", "-sha256", "-sign", self.server_key[0], data=policy_payload))
+        wrong_policy = self.write_json("wrong-policy.json", {**policy_envelope, "signature": wrong_signature})
+        self.assertIn("fleet-policy envelope signature is invalid", self.run_cli(
+            *args, "--force", *keyset_args, "--policy-envelope", wrong_policy, status=2,
+        ).stderr)
+        wrong_policy = self.write_json("wrong-policy.json", {
+            **policy_envelope, "signature": wrong_signature, "keyId": fleet_admin.key_id(self.server_key[2]),
+        })
+        self.assertIn("fleet-policy envelope signer is not trusted", self.run_cli(
+            *args, "--force", *keyset_args, "--policy-envelope", wrong_policy, status=2,
         ).stderr)
         self.assertEqual(self.assert_envelope(output, self.root_key), document)
         args[args.index("--root-fingerprint") + 1] = device_id

@@ -123,9 +123,10 @@ records, credentials and signed outputs outside the checkout.
   [Google revocation list](https://android.googleapis.com/attestation/status)
   directly and preserve its local modification time if you copy it. The
   offline tool uses that time to enforce `--revocation-max-age-days` (default
-  7, a positive whole number). Refresh older copies from Google. Use the
-  approved application ID and APK signing certificate digest. Verification
-  checks the chain signatures, attestation challenge and revocation status.
+  7, a positive whole number) and tolerates timestamps up to five minutes ahead.
+  Refresh older copies from Google. Use the approved application ID and APK
+  signing certificate digest. Verification checks the chain signatures,
+  attestation challenge and revocation status.
   Expired factory attestation certificates can pass these checks.
 - `policy` signs a schema-validated `--body` for the listed `--device-id`
   targets. Supply each downloaded `--enrolment-record` and the same trust
@@ -148,9 +149,12 @@ records, credentials and signed outputs outside the checkout.
   the path to the code file. Import the code into the operator's vault.
 - `reanchor` takes the current binding root fingerprint, the displayed nonce
   and the four latest issued floors. For a same-version resend, supply the
-  original issued document with `--keyset-envelope` and/or `--policy-envelope`.
-  Each envelope must match the fleet and its floor version. The tool hashes
-  the exact decoded payload bytes.
+  original issued key set with `--keyset-envelope`. To also resend a policy at
+  its floor, add the original issued policy with `--policy-envelope`.
+  The tool verifies the key set against the current root and the policy
+  against an approved policy key from that key set. Each envelope must match
+  the fleet and its floor version. The tool hashes the exact decoded payload
+  bytes.
   See the [re-anchor contract](../docs/remote-contract/README.md#console-re-anchor).
 
 The offline enrolment record uses `fleetId`, `deviceId`, `ticketSha256`
