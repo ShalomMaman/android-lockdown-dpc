@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
+import com.example.lockdowndpc.security.DurablePreferences;
 
 /**
  * Persistent kiosk configuration and state.
@@ -28,7 +29,7 @@ public final class KioskConfigStore {
 
     public record Settings(KioskState state, KioskConfig config, String faultReason) {}
 
-    public static Settings read(Context context) {
+    public static synchronized Settings read(Context context) {
         SharedPreferences prefs = prefs(context);
         KioskMode mode = KioskMode.fromStoredName(prefs.getString(KEY_MODE, null));
         KioskState state = KioskState.fromStoredName(prefs.getString(KEY_STATE, null));
@@ -71,30 +72,37 @@ public final class KioskConfigStore {
         return state == KioskState.ACTIVE || state == KioskState.FAULT;
     }
 
-    /** Stores a validated configuration. The caller owns authorization. */
-    public static void writeConfig(Context context, KioskConfig config, String normalizedSiteUrl) {
-        prefs(context).edit()
+    static synchronized boolean writeConfig(Context context, KioskConfig config,
+                                            String normalizedSiteUrl, KioskState state) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString(KEY_MODE, config.mode().name())
                 .putString(KEY_TARGET_PACKAGE, config.targetPackage())
                 .putString(KEY_SITE_URL, normalizedSiteUrl == null ? "" : normalizedSiteUrl)
-                .commit();
-    }
-
-    public static void writeState(Context context, KioskState state, String faultReason) {
-        prefs(context).edit()
                 .putString(KEY_STATE, state.name())
-                .putString(KEY_FAULT_REASON, faultReason == null ? "" : faultReason)
-                .commit();
+                .putString(KEY_FAULT_REASON, "");
+        return DurablePreferences.commit(prefs, editor,
+                KEY_MODE, KEY_TARGET_PACKAGE, KEY_SITE_URL, KEY_STATE, KEY_FAULT_REASON);
     }
 
-    public static void clear(Context context) {
-        prefs(context).edit()
+    static synchronized boolean writeState(Context context, KioskState state, String faultReason) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor editor = prefs.edit()
+                .putString(KEY_STATE, state.name())
+                .putString(KEY_FAULT_REASON, faultReason == null ? "" : faultReason);
+        return DurablePreferences.commit(prefs, editor, KEY_STATE, KEY_FAULT_REASON);
+    }
+
+    static synchronized boolean clear(Context context) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor editor = prefs.edit()
                 .putString(KEY_MODE, KioskMode.OFF.name())
                 .putString(KEY_STATE, KioskState.OFF.name())
                 .remove(KEY_TARGET_PACKAGE)
                 .remove(KEY_SITE_URL)
-                .remove(KEY_FAULT_REASON)
-                .commit();
+                .remove(KEY_FAULT_REASON);
+        return DurablePreferences.commit(prefs, editor,
+                KEY_MODE, KEY_TARGET_PACKAGE, KEY_SITE_URL, KEY_STATE, KEY_FAULT_REASON);
     }
 
     /**
@@ -102,12 +110,14 @@ public final class KioskConfigStore {
      * revoke exactly what kiosk added instead of clearing every persistent
      * preferred activity unconditionally.
      */
-    public static boolean isHomeRegistered(Context context) {
+    public static synchronized boolean isHomeRegistered(Context context) {
         return prefs(context).getBoolean(KEY_HOME_REGISTERED, false);
     }
 
-    public static void setHomeRegistered(Context context, boolean registered) {
-        prefs(context).edit().putBoolean(KEY_HOME_REGISTERED, registered).commit();
+    static synchronized boolean setHomeRegistered(Context context, boolean registered) {
+        SharedPreferences prefs = prefs(context);
+        return DurablePreferences.commit(prefs,
+                prefs.edit().putBoolean(KEY_HOME_REGISTERED, registered), KEY_HOME_REGISTERED);
     }
 
     /**
@@ -121,8 +131,10 @@ public final class KioskConfigStore {
         return prefs(context).getBoolean(KEY_ESCAPE_SURFACES_HIDDEN, false);
     }
 
-    public static void setEscapeSurfaceHidingApplied(Context context, boolean applied) {
-        prefs(context).edit().putBoolean(KEY_ESCAPE_SURFACES_HIDDEN, applied).commit();
+    static synchronized boolean setEscapeSurfaceHidingApplied(Context context, boolean applied) {
+        SharedPreferences prefs = prefs(context);
+        return DurablePreferences.commit(prefs,
+                prefs.edit().putBoolean(KEY_ESCAPE_SURFACES_HIDDEN, applied), KEY_ESCAPE_SURFACES_HIDDEN);
     }
 
     private static SharedPreferences prefs(Context context) {

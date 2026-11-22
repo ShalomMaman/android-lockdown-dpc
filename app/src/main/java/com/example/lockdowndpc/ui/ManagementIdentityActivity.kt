@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
+import com.example.lockdowndpc.policy.AuthorizedPolicyWriter
+import com.example.lockdowndpc.policy.AdminAuthority
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
@@ -717,8 +719,14 @@ private fun writeManagementPins(
     packageName: String,
     pins: Set<String>,
 ): WriteOutcome = try {
-    AllowedAppsStore.setManagementCertificatePins(context, packageName, pins)
-    WriteOutcome(readManagementIdentityRows(context), "")
+    if (AuthorizedPolicyWriter.setManagementCertificatePins(
+            context, AdminAuthority.localSession(context), packageName, pins,
+        )
+    ) {
+        WriteOutcome(readManagementIdentityRows(context), "")
+    } else {
+        WriteOutcome(null, context.getString(R.string.policy_settings_save_failed))
+    }
 } catch (exception: RuntimeException) {
     WriteOutcome(null, exception.javaClass.simpleName)
 }

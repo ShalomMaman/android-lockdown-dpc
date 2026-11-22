@@ -6,6 +6,7 @@ import android.content.Intent;
 
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.ScheduleAlarm;
 import com.example.lockdowndpc.updates.UpdateScheduler;
@@ -29,6 +30,11 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
         boolean supportedAction = Intent.ACTION_BOOT_COMPLETED.equals(action)
                 || Intent.ACTION_MY_PACKAGE_REPLACED.equals(action);
         if (!supportedAction) {
+            return;
+        }
+        if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+            PolicyReconciliationCoordinator.restoreKioskAsync(context, action);
+            reconcile(context, action);
             return;
         }
         UpdateScheduler.schedule(context.getApplicationContext());
@@ -56,7 +62,8 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
         PendingResult pendingResult = goAsync();
         boolean dispatched = false;
         try {
-            if (AllowedAppsStore.isProtectionEnabled(context)) {
+            if (!ManagementModeStore.read(context).usesLocalPolicy()
+                    || AllowedAppsStore.isProtectionEnabled(context)) {
                 PolicyReconciliationCoordinator.reconcileAsync(
                         context,
                         action,
@@ -95,9 +102,14 @@ public final class PolicyRefreshReceiver extends BroadcastReceiver {
     }
 
     private void reconcileForSchedule(Context context, String action) {
-        if (!AllowedAppsStore.isProtectionEnabled(context)) {
+        if (ManagementModeStore.read(context).usesLocalPolicy()
+                && !AllowedAppsStore.isProtectionEnabled(context)) {
             return;
         }
+        reconcile(context, action);
+    }
+
+    private void reconcile(Context context, String action) {
         PendingResult pendingResult = goAsync();
         boolean dispatched = false;
         try {

@@ -156,6 +156,10 @@ public final class ScheduleAlarm {
     public static boolean catchUp(Context context, String trigger, Runnable completion) {
         Context app = context.getApplicationContext();
         try {
+            if (!ManagementModeStore.read(app).usesLocalPolicy()) {
+                PolicyReconciliationCoordinator.reconcileAsync(app, "schedule-catch-up:" + trigger, completion);
+                return true;
+            }
             if (AllowedAppsStore.isProtectionEnabled(app)
                     && ScheduleCatchUp.due(ScheduleStore.read(app), ScheduleStore.catchUpState(app), Instant.now())) {
                 PolicyReconciliationCoordinator.reconcileAsync(app, "schedule-catch-up:" + trigger, completion);

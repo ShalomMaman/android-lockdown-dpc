@@ -38,6 +38,10 @@ public final class ScheduleController {
     public static Result update(Context context, UnaryOperator<ScheduleSettings> change) {
         Context app = context.getApplicationContext();
         return PolicyReconciliationCoordinator.callOnPolicyThread(() -> {
+            if (ManagementModeStore.read(app) != ManagementMode.LOCAL_PIN) {
+                return new Result(new ScheduleChange.Outcome(
+                        ScheduleChange.Status.NOT_SAVED, SchedulePolicy.Change.UNCHANGED), null);
+            }
             ScheduleSettings next = change.apply(ScheduleStore.read(app));
             ScheduleChange.Outcome outcome = ScheduleChange.apply(next, new ScheduleChange.Gateway() {
                 @Override
@@ -47,7 +51,7 @@ public final class ScheduleController {
 
                 @Override
                 public boolean sessionUnlocked() {
-                    return AdminSession.isUnlocked();
+                    return AdminAuthority.localSession(app) != null;
                 }
 
                 @Override
@@ -58,7 +62,8 @@ public final class ScheduleController {
 
                 @Override
                 public boolean commit(ScheduleSettings settings) {
-                    return ScheduleStore.write(app, settings);
+                    return AuthorizedPolicyWriter.setSchedule(
+                            app, AdminAuthority.localSession(app), settings);
                 }
 
                 @Override

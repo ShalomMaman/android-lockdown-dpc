@@ -5,6 +5,8 @@ import android.content.SharedPreferences;
 
 import com.example.lockdowndpc.security.DurablePreferences;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -124,7 +126,7 @@ public final class SystemPolicyStore {
      * Records an administrator's decision. The caller owns authentication and
      * confirmation. Returns false on disk failure.
      */
-    public static boolean setRequested(
+    static boolean setRequested(
             Context context,
             SystemPolicyControl control,
             boolean requested
@@ -136,10 +138,14 @@ public final class SystemPolicyStore {
             SharedPreferences preferences, SystemPolicyControl control, boolean requested
     ) {
         String choice = KEY_CHOICE_PREFIX + control.storageKey();
+        String outcome = KEY_OUTCOME_PREFIX + control.storageKey();
+        String detail = KEY_DETAIL_PREFIX + control.storageKey();
         SharedPreferences.Editor editor = preferences.edit()
                 .putBoolean(choice, requested)
-                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION);
-        return DurablePreferences.commit(preferences, editor, choice, KEY_SCHEMA_VERSION);
+                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
+                .remove(outcome)
+                .remove(detail);
+        return DurablePreferences.commit(preferences, editor, choice, KEY_SCHEMA_VERSION, outcome, detail);
     }
 
     /**
@@ -194,14 +200,20 @@ public final class SystemPolicyStore {
      * {@code APPLIED} on screen and the console would keep asserting an
      * enforcement that is no longer even requested.
      */
-    public static synchronized void invalidateVerification(
-            Context context,
-            SystemPolicyControl control
+    static synchronized boolean invalidateVerification(
+            Context context, Collection<SystemPolicyControl> controls
     ) {
-        prefs(context).edit()
-                .remove(KEY_OUTCOME_PREFIX + control.storageKey())
-                .remove(KEY_DETAIL_PREFIX + control.storageKey())
-                .commit();
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.Editor editor = preferences.edit();
+        ArrayList<String> keys = new ArrayList<>();
+        for (SystemPolicyControl control : controls) {
+            String outcome = KEY_OUTCOME_PREFIX + control.storageKey();
+            String detail = KEY_DETAIL_PREFIX + control.storageKey();
+            editor.remove(outcome).remove(detail);
+            keys.add(outcome);
+            keys.add(detail);
+        }
+        return DurablePreferences.commit(preferences, editor, keys.toArray(new String[0]));
     }
 
     /** When the last verification ran, or 0 when none has. */

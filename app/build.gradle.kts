@@ -23,6 +23,7 @@ android {
         // signed update channel can perform an in-place, replay-safe update.
         versionCode = 14
         versionName = "0.5.4"
+        buildConfigField("boolean", "REMOTE_ENROLMENT_ENABLED", "false")
         // Update channels are an explicit build choice. Ordinary builds never
         // consume ambient properties or environment variables.
         buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())

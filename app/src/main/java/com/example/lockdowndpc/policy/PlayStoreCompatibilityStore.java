@@ -3,6 +3,8 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.example.lockdowndpc.security.DurablePreferences;
+
 /**
  * The administrator's stored decision about Google Play Store compatibility.
  *
@@ -34,7 +36,7 @@ public final class PlayStoreCompatibilityStore {
     private PlayStoreCompatibilityStore() {}
 
     /** Whether the administrator has opted in. Strict mode is the default. */
-    public static boolean isEnabled(Context context) {
+    public static synchronized boolean isEnabled(Context context) {
         return prefs(context).getBoolean(KEY_ENABLED, false);
     }
 
@@ -47,19 +49,20 @@ public final class PlayStoreCompatibilityStore {
      * yesterday's {@code APPLIED} for a control whose requested value has just
      * moved. The caller still owns authentication and confirmation.
      */
-    public static synchronized void setEnabled(Context context, boolean enabled) {
-        prefs(context).edit()
+    static synchronized boolean setEnabled(Context context, boolean enabled) {
+        SharedPreferences preferences = prefs(context);
+        SharedPreferences.Editor editor = preferences.edit()
                 .putBoolean(KEY_ENABLED, enabled)
                 .putLong(KEY_CHANGED_AT, System.currentTimeMillis())
-                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
-                .commit();
-        for (SystemPolicyControl control : PlayStoreCompatibility.REQUIRED_INSTALL_CONTROLS) {
-            SystemPolicyStore.invalidateVerification(context, control);
+                .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION);
+        if (!SystemPolicyStore.invalidateVerification(context, PlayStoreCompatibility.REQUIRED_INSTALL_CONTROLS)) {
+            return false;
         }
+        return DurablePreferences.commit(preferences, editor, KEY_ENABLED, KEY_CHANGED_AT, KEY_SCHEMA_VERSION);
     }
 
     /** When the decision was last changed, or 0 when it never has been. */
-    public static long changedAt(Context context) {
+    public static synchronized long changedAt(Context context) {
         return prefs(context).getLong(KEY_CHANGED_AT, 0L);
     }
 

@@ -5,8 +5,11 @@ import android.app.admin.DevicePolicyManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.util.Log;
 
 import com.example.lockdowndpc.R;
+import com.example.lockdowndpc.policy.ManagementModeStore;
+import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
 
 public final class LockdownAdminReceiver extends DeviceAdminReceiver {
     public static ComponentName componentName(Context context) {
@@ -21,8 +24,13 @@ public final class LockdownAdminReceiver extends DeviceAdminReceiver {
     @Override
     public void onProfileProvisioningComplete(Context context, Intent intent) {
         super.onProfileProvisioningComplete(context, intent);
+        if (!RemoteEnrolmentGate.permitsLocalProvisioning(intent)) {
+            Log.w("LockdownAdminReceiver", "remote-enrolment-disabled");
+            return;
+        }
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
-        if (dpm != null && dpm.isDeviceOwnerApp(context.getPackageName())) {
+        if (dpm != null && dpm.isDeviceOwnerApp(context.getPackageName())
+                && ManagementModeStore.selectLocal(context)) {
             dpm.setProfileName(componentName(context), context.getString(R.string.admin_profile_name));
         }
     }

@@ -9,8 +9,8 @@ import android.os.Bundle;
 
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
-import com.example.lockdowndpc.policy.AuditEvent;
-import com.example.lockdowndpc.policy.AuditLog;
+import com.example.lockdowndpc.policy.ManagementModeStore;
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 /** Receives authoritative asynchronous policy results on Android 14 and newer. */
 @TargetApi(34)
@@ -47,6 +47,7 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
             PolicyUpdateResult result
     ) {
         if (result.getResultCode() == PolicyUpdateResult.RESULT_POLICY_SET
+                || !ManagementModeStore.read(context).usesLocalPolicy()
                 || !AllowedAppsStore.isProtectionEnabled(context)) {
             return;
         }
@@ -59,7 +60,6 @@ public final class PolicyUpdateAuditReceiver extends PolicyUpdateReceiver {
                 context.getString(eventResource),
                 target,
                 result.getResultCode());
-        AllowedAppsStore.markApplyFailed(context, error);
-        AuditLog.append(context, AuditEvent.POLICY_RESULT_FAILED, error);
+        PolicyReconciliationCoordinator.recordPlatformFailure(context, error);
     }
 }

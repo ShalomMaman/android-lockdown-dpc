@@ -209,6 +209,15 @@ public final class PinLockoutPolicy {
         return new Evaluation(0L, state, false);
     }
 
+    /** Arms the configured penalty when an unreadable counter has no active penalty. */
+    static Evaluation lockUnreadableCounter(
+            LockoutState state, BootId boot, long elapsedRealtime, long wallMillis
+    ) {
+        int failures = Math.max(state.failures(), FIRST_PENALTY_FAILURE);
+        LockoutState counted = new LockoutState(failures, BootId.UNKNOWN, 0L, 0L, 0L);
+        return arm(counted, boot, elapsedRealtime, wallMillis, penaltyMillis(failures));
+    }
+
     /**
      * Records a failed verification and arms the next progressive penalty.
      *

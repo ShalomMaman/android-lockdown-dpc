@@ -19,7 +19,8 @@ import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.BuiltInExemptionsController;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
-import com.example.lockdowndpc.security.AdminSession;
+import com.example.lockdowndpc.policy.AdminAuthority;
+import com.example.lockdowndpc.policy.AuthorizedPolicyWriter;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -82,6 +83,7 @@ public final class KioskController {
     public static synchronized Result requestConfigure(
             Context context,
             KioskConfig config,
+            AdminAuthority authority,
             Consumer<Boolean> onPolicyReconciled
     ) {
         Context app = context.getApplicationContext();
@@ -91,7 +93,7 @@ public final class KioskController {
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
                 from,
                 KioskAction.CONFIGURE,
-                AdminSession.isUnlocked(),
+                AdminAuthority.permitsLocal(app, authority),
                 validation.valid()
         ));
         if (!outcome.allowed()) {
@@ -100,60 +102,51 @@ public final class KioskController {
                     onPolicyReconciled
             );
         }
-        KioskConfigStore.writeConfig(app, config, validation.normalizedSiteUrl());
-        KioskConfigStore.writeState(app, outcome.state(), "");
+        if (!AuthorizedPolicyWriter.commitKioskChange(app, authority,
+                () -> KioskConfigStore.writeConfig(app, config, validation.normalizedSiteUrl(), outcome.state()))) {
+            return settle(Result.denied(from, "kiosk-save-failed"), onPolicyReconciled);
+        }
         auditConfigured(app, config, validation);
         return applyNow(app, outcome.state(), outcome.reason(), onPolicyReconciled);
-    }
-
-    public static Result requestConfigure(Context context, KioskConfig config) {
-        return requestConfigure(context, config, null);
     }
 
     /** Enters lock task. Requires an unlocked admin session and a valid config. */
     public static synchronized Result requestEnter(
             Context context,
+            AdminAuthority authority,
             Consumer<Boolean> onPolicyReconciled
     ) {
-        return requestTransition(context, KioskAction.ENTER, onPolicyReconciled);
-    }
-
-    public static Result requestEnter(Context context) {
-        return requestEnter(context, null);
+        return requestTransition(context, KioskAction.ENTER, authority, onPolicyReconciled);
     }
 
     /** Leaves lock task. Requires an unlocked admin session. */
     public static synchronized Result requestExit(
             Context context,
+            AdminAuthority authority,
             Consumer<Boolean> onPolicyReconciled
     ) {
-        return requestTransition(context, KioskAction.EXIT, onPolicyReconciled);
-    }
-
-    public static Result requestExit(Context context) {
-        return requestExit(context, null);
+        return requestTransition(context, KioskAction.EXIT, authority, onPolicyReconciled);
     }
 
     /** Drops the kiosk configuration and returns to managed filtering only. */
     public static synchronized Result requestClear(
             Context context,
+            AdminAuthority authority,
             Consumer<Boolean> onPolicyReconciled
     ) {
         Context app = context.getApplicationContext();
         KioskState from = KioskConfigStore.readState(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
-                from, KioskAction.CLEAR, AdminSession.isUnlocked(), true
+                from, KioskAction.CLEAR, AdminAuthority.permitsLocal(app, authority), true
         ));
         if (!outcome.allowed()) {
             return settle(Result.denied(from, outcome.reason()), onPolicyReconciled);
         }
-        KioskConfigStore.clear(app);
+        if (!AuthorizedPolicyWriter.commitKioskChange(app, authority, () -> KioskConfigStore.clear(app))) {
+            return settle(Result.denied(from, "kiosk-save-failed"), onPolicyReconciled);
+        }
         AuditLog.append(app, AuditEvent.KIOSK_CLEARED, app.getString(R.string.audit_kiosk_cleared));
         return applyNow(app, KioskState.OFF, outcome.reason(), onPolicyReconciled);
-    }
-
-    public static Result requestClear(Context context) {
-        return requestClear(context, null);
     }
 
     /**
@@ -217,7 +210,9 @@ public final class KioskController {
         } else {
             AuditLog.append(app, AuditEvent.KIOSK_RESTORED, app.getString(R.string.audit_kiosk_restored));
         }
-        KioskConfigStore.writeState(app, outcome.state(), faultReason(validation));
+        if (!KioskConfigStore.writeState(app, outcome.state(), faultReason(validation))) {
+            return Result.denied(settings.state(), "kiosk-save-failed");
+        }
         return applyNow(app, outcome.state(), outcome.reason(), null);
     }
 
@@ -234,7 +229,9 @@ public final class KioskController {
         if (!outcome.allowed() || from == KioskState.FAULT) {
             return Result.denied(from, outcome.reason());
         }
-        KioskConfigStore.writeState(app, KioskState.FAULT, reason);
+        if (!KioskConfigStore.writeState(app, KioskState.FAULT, reason)) {
+            return Result.denied(from, "kiosk-save-failed");
+        }
         AuditLog.append(app, AuditEvent.KIOSK_FAULTED, app.getString(R.string.audit_kiosk_fault, reason));
         return new Result(true, KioskState.FAULT, outcome.reason(), List.of());
     }
@@ -242,13 +239,14 @@ public final class KioskController {
     private static Result requestTransition(
             Context context,
             KioskAction action,
+            AdminAuthority authority,
             Consumer<Boolean> onPolicyReconciled
     ) {
         Context app = context.getApplicationContext();
         KioskConfigValidator.Validation validation = validate(app);
         KioskState from = KioskConfigStore.readState(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
-                from, action, AdminSession.isUnlocked(), validation.valid()
+                from, action, AdminAuthority.permitsLocal(app, authority), validation.valid()
         ));
         if (!outcome.allowed()) {
             // A refused activation is the interesting audit event: it is what an
@@ -263,7 +261,10 @@ public final class KioskController {
                     onPolicyReconciled
             );
         }
-        KioskConfigStore.writeState(app, outcome.state(), "");
+        if (!AuthorizedPolicyWriter.commitKioskChange(app, authority,
+                () -> KioskConfigStore.writeState(app, outcome.state(), ""))) {
+            return settle(Result.denied(from, "kiosk-save-failed"), onPolicyReconciled);
+        }
         if (action == KioskAction.ENTER) {
             AuditLog.append(app, AuditEvent.KIOSK_STARTED, app.getString(R.string.audit_kiosk_activated));
         }
@@ -441,6 +442,11 @@ public final class KioskController {
         return false;
     }
 
+    /** Records the last visibility pass for later kiosk cleanup. */
+    public static boolean recordEscapeSurfaceState(Context context, boolean hidden) {
+        return KioskConfigStore.setEscapeSurfaceHidingApplied(context, hidden);
+    }
+
     private static boolean disableKiosk(
             Context context,
             DevicePolicyManager dpm,
@@ -464,7 +470,9 @@ public final class KioskController {
                 // Persistent preferred activities can only be cleared per package,
                 // so the caller re-registers the managed-filtering link handlers.
                 dpm.clearPackagePersistentPreferredActivities(admin, context.getPackageName());
-                KioskConfigStore.setHomeRegistered(context, false);
+                if (!KioskConfigStore.setHomeRegistered(context, false)) {
+                    errors.add("kiosk-home-state-save-failed");
+                }
                 cleared = true;
             } catch (RuntimeException exception) {
                 errors.add("kiosk-home-clear:" + exception.getClass().getSimpleName());
@@ -580,7 +588,10 @@ public final class KioskController {
             filter.addCategory(Intent.CATEGORY_HOME);
             filter.addCategory(Intent.CATEGORY_DEFAULT);
             dpm.addPersistentPreferredActivity(admin, filter, host);
-            KioskConfigStore.setHomeRegistered(context, true);
+            if (!KioskConfigStore.setHomeRegistered(context, true)) {
+                errors.add("kiosk-home-state-save-failed");
+                return false;
+            }
             return true;
         } catch (RuntimeException exception) {
             errors.add("kiosk-home-register:" + exception.getClass().getSimpleName());

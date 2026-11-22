@@ -50,6 +50,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -81,6 +82,9 @@ import com.example.lockdowndpc.kiosk.KioskConfig
 import com.example.lockdowndpc.kiosk.KioskController
 import com.example.lockdowndpc.kiosk.KioskLabels
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
+import com.example.lockdowndpc.policy.AuthorizedPolicyWriter
+import com.example.lockdowndpc.policy.AdminAuthority
+import com.example.lockdowndpc.policy.ManagementModeStore
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditEvent
 import com.example.lockdowndpc.policy.AuditLog
@@ -186,8 +190,9 @@ class MainActivity : AppCompatActivity() {
  *                        console left open on a kiosk configuration screen
  *                        cannot be picked up later by whoever finds the device
  */
-private enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
+internal enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
     ENROLLMENT(false),
+    REMOTE_STATUS(false),
     PIN_SETUP(true),
     LOCKED(true),
     ADMIN(false, requiresSession = true),
@@ -230,7 +235,11 @@ private fun readStatus(context: Context) = ConsoleStatus(
     mode = AllowedAppsStore.getProtectionMode(context),
 )
 
-private fun initialScreen(context: Context): ConsoleScreen {
+internal fun initialScreen(context: Context): ConsoleScreen {
+    if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+        AdminSession.lock()
+        return ConsoleScreen.REMOTE_STATUS
+    }
     if (!isDeviceOwner(context)) {
         return ConsoleScreen.ENROLLMENT
     }
@@ -272,6 +281,14 @@ private fun AdminConsole(
     val context = LocalContext.current
     val resources = LocalResources.current
     var screen by remember { mutableStateOf(initialScreen(context)) }
+    if (screen == ConsoleScreen.REMOTE_STATUS) {
+        SideEffect { onSecureScreen(false) }
+        LockdownScreen(
+            title = stringResource(R.string.app_name),
+            subtitle = stringResource(R.string.remote_policy_unavailable),
+        ) {}
+        return
+    }
     var replacingPin by remember { mutableStateOf(false) }
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
@@ -318,8 +335,16 @@ private fun AdminConsole(
         screen = ConsoleScreen.LOCKED
     }
 
+    fun enterRemoteStatusIfNeeded(): Boolean {
+        if (ManagementModeStore.read(context).usesLocalPolicy()) return false
+        AdminSession.lock()
+        screen = ConsoleScreen.REMOTE_STATUS
+        return true
+    }
+
     fun requireSession(): Boolean {
-        if (AdminSession.isUnlocked()) {
+        if (enterRemoteStatusIfNeeded()) return false
+        if (AdminAuthority.localSession(context) != null) {
             return true
         }
         showLocked()
@@ -349,6 +374,7 @@ private fun AdminConsole(
     }
 
     fun savePin(first: String, second: String) {
+        if (enterRemoteStatusIfNeeded()) return
         if (replacingPin && !requireSession()) {
             return
         }
@@ -387,7 +413,9 @@ private fun AdminConsole(
     }
 
     fun unlockWith(pin: String) {
+        if (enterRemoteStatusIfNeeded()) return
         val result = AdminPinStore.verify(context, pin)
+        if (enterRemoteStatusIfNeeded()) return
         when (result.status()) {
             AdminPinStore.Status.SUCCESS -> {
                 AdminSession.unlock()
@@ -537,19 +565,17 @@ private fun AdminConsole(
     /**
      * Runs one kiosk transition and reports what the device actually did.
      *
-     * Authorization is not decided here. [KioskController] reads `AdminSession`
-     * itself, so this session check is a UI courtesy that avoids a pointless
-     * round trip — a stale session is still refused by the controller and lands
-     * the console back on the PIN screen.
+     * [KioskController] checks the authority again when executing the request.
      */
     fun runKioskAction(
         successMessage: Int,
-        request: (Context, Consumer<Boolean>) -> KioskController.Result,
+        request: (Context, AdminAuthority, Consumer<Boolean>) -> KioskController.Result,
     ) {
         if (kioskOperationInProgress || !requireSession()) {
             return
         }
         AdminSession.extend()
+        val authority = AdminAuthority.localSession(context) ?: return
         kioskOperationInProgress = true
         message = null
         coroutineScope.launch {
@@ -558,7 +584,7 @@ private fun AdminConsole(
                 awaitKioskAction(
                     KIOSK_POLICY_PASS_TIMEOUT_SECONDS,
                     TimeUnit.SECONDS,
-                ) { done -> request(app, done) }
+                ) { done -> request(app, authority, done) }
             }
             val result = attempt.result
             kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
@@ -623,6 +649,7 @@ private fun AdminConsole(
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (enterRemoteStatusIfNeeded()) return@LifecycleEventEffect
         when {
             // Every session-bound screen, including the kiosk configuration
             // flow, drops to the PIN screen the moment the session is gone.
@@ -649,6 +676,7 @@ private fun AdminConsole(
 
     when (screen) {
         ConsoleScreen.ENROLLMENT -> EnrollmentScreen()
+        ConsoleScreen.REMOTE_STATUS -> Unit
 
         ConsoleScreen.PIN_SETUP -> PinSetupScreen(
             replacing = replacingPin,
@@ -750,8 +778,8 @@ private fun AdminConsole(
                 }
             },
             onClear = {
-                runKioskAction(R.string.kiosk_cleared) { appContext, done ->
-                    KioskController.requestClear(appContext, done)
+                runKioskAction(R.string.kiosk_cleared) { appContext, authority, done ->
+                    KioskController.requestClear(appContext, authority, done)
                 }
             },
             onActivate = {
@@ -762,8 +790,8 @@ private fun AdminConsole(
                 }
             },
             onExit = {
-                runKioskAction(R.string.kiosk_exited) { appContext, done ->
-                    KioskController.requestExit(appContext, done)
+                runKioskAction(R.string.kiosk_exited) { appContext, authority, done ->
+                    KioskController.requestExit(appContext, authority, done)
                 }
             },
             onBack = { if (requireSession()) showAdmin() },
@@ -776,9 +804,9 @@ private fun AdminConsole(
                 // package against the device and re-runs the same eligibility
                 // rule the picker filtered with, so a target that was uninstalled
                 // between listing and tapping is refused rather than stored.
-                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                runKioskAction(R.string.kiosk_saved) { appContext, authority, done ->
                     KioskController.requestConfigure(
-                        appContext, KioskConfig.singleApp(packageName), done
+                        appContext, KioskConfig.singleApp(packageName), authority, done
                     )
                 }
             },
@@ -790,9 +818,9 @@ private fun AdminConsole(
             busy = kioskOperationInProgress,
             message = message,
             onSave = { url ->
-                runKioskAction(R.string.kiosk_saved) { appContext, done ->
+                runKioskAction(R.string.kiosk_saved) { appContext, authority, done ->
                     KioskController.requestConfigure(
-                        appContext, KioskConfig.singleSite(url), done
+                        appContext, KioskConfig.singleSite(url), authority, done
                     )
                 }
             },
@@ -804,8 +832,8 @@ private fun AdminConsole(
             busy = kioskOperationInProgress,
             message = message,
             onConfirm = {
-                runKioskAction(R.string.kiosk_activated) { appContext, done ->
-                    KioskController.requestEnter(appContext, done)
+                runKioskAction(R.string.kiosk_activated) { appContext, authority, done ->
+                    KioskController.requestEnter(appContext, authority, done)
                 }
             },
             onCancel = { if (requireSession()) screen = ConsoleScreen.KIOSK },
@@ -825,7 +853,10 @@ private fun AdminConsole(
                 // minutes later — and the write commits before `showAdmin` drops
                 // back to the PIN screen.
                 if (!requireSession()) return@ModePickerDialog
-                if (!AllowedAppsStore.setProtectionMode(context, chosen)) {
+                if (!AuthorizedPolicyWriter.setProtectionMode(
+                        context, AdminAuthority.localSession(context), chosen,
+                    )
+                ) {
                     message = UiMessage(
                         resources.getString(R.string.policy_settings_save_failed),
                         isError = true,

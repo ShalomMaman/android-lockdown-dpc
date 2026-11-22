@@ -19,6 +19,8 @@ import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.HomeFilterController;
 import com.example.lockdowndpc.policy.HomeFilterPolicy;
+import com.example.lockdowndpc.policy.ManagementMode;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway;
@@ -108,6 +110,19 @@ public final class MaintenanceGuard {
         if (coordinator == null) {
             return null;
         }
+        if (!ManagementModeStore.read(appContext).usesLocalPolicy()) {
+            MaintenanceWindow stored = MaintenanceStore.readWindow(appContext);
+            if (stored == null && !MaintenanceStore.restorePending(appContext)) {
+                return null;
+            }
+            MaintenanceOutcome outcome = record(appContext,
+                    coordinator.restore(stored, CloseReason.MANAGEMENT_MODE));
+            if (!lastRecordDurable) {
+                MaintenanceStore.markRestorePending(appContext);
+                arm(appContext, null);
+            }
+            return outcome;
+        }
         if (!AllowedAppsStore.isProtectionEnabled(appContext)) {
             // Protection is paused, so every restriction is already withdrawn and
             // there is nothing for a window to be an exception to. Restoring the
@@ -143,6 +158,9 @@ public final class MaintenanceGuard {
             OpenRequest request
     ) {
         Context appContext = context.getApplicationContext();
+        if (ManagementModeStore.read(appContext) != ManagementMode.LOCAL_PIN) {
+            return MaintenanceCoordinator.refusedForMode();
+        }
         // The settled filter state, not the stored switch: a turn-off the
         // teardown guard is holding is still on for every policy writer.
         if (HomeFilterController.enforcedEnabled(appContext)
@@ -257,6 +275,9 @@ public final class MaintenanceGuard {
             MaintenanceCoordinator coordinator,
             MaintenanceWindow current
     ) {
+        if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+            return MaintenanceCoordinator.refusedForMode();
+        }
         return record(context.getApplicationContext(), coordinator.cancel(current));
     }
 
@@ -322,6 +343,9 @@ public final class MaintenanceGuard {
             Context context,
             MaintenanceOutcome outcome
     ) {
+        if (!ManagementModeStore.read(context).usesLocalPolicy()) {
+            return;
+        }
         boolean opened = outcome.phase() == MaintenanceCoordinator.Phase.OPEN
                 && outcome.status() == MaintenanceCoordinator.MaintenanceStatus.APPLIED;
         boolean closed = outcome.closeReason() != null;
@@ -453,7 +477,8 @@ public final class MaintenanceGuard {
                         dpm,
                         LockdownAdminReceiver.componentName(context),
                         context.getPackageManager()),
-                MaintenanceStore.deviceClock());
+                MaintenanceStore.deviceClock(),
+                () -> ManagementModeStore.read(context) == ManagementMode.LOCAL_PIN);
     }
 
     /**

@@ -10,6 +10,7 @@ import java.util.Map;
 public final class MemoryPreferences {
     private final Map<String, Object> memory;
     public boolean failCommit = true;
+    public boolean throwBeforeCommit;
 
     public MemoryPreferences(Map<String, ?> initial) {
         memory = new HashMap<>(initial);
@@ -37,6 +38,9 @@ public final class MemoryPreferences {
                                 changes.put((String) args[0], args[1]);
                         case "remove" -> changes.put((String) args[0], null);
                         case "commit" -> {
+                            if (throwBeforeCommit) {
+                                throw new IllegalStateException("Cannot update preferences");
+                            }
                             changes.forEach((key, value) -> {
                                 if (value == null) {
                                     memory.remove(key);
