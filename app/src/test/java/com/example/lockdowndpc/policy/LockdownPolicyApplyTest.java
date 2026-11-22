@@ -270,13 +270,53 @@ public class LockdownPolicyApplyTest {
         private final Set<String> caCertificates = new HashSet<>();
         boolean refuseVpn;
         Runnable beforeVpnWrite = () -> {};
+        boolean refuseProxyChange;
+        boolean refuseCaInstall;
+        boolean refuseUninstallUnblock;
+        boolean refuseManagedConfigChange;
+
+        @Implementation
+        protected void setUninstallBlocked(ComponentName admin, String packageName, boolean blocked) {
+            if (!blocked && refuseUninstallUnblock) {
+                return;
+            }
+            super.setUninstallBlocked(admin, packageName, blocked);
+        }
+
+        @Implementation
+        protected void setApplicationRestrictions(ComponentName admin, String packageName,
+                                                  android.os.Bundle restrictions) {
+            if (refuseManagedConfigChange) {
+                throw new SecurityException("Managed configuration refused");
+            }
+            super.setApplicationRestrictions(admin, packageName, restrictions);
+        }
+        /** Packages Android refuses to make visible. */
+        final Set<String> refuseUnhide = new HashSet<>();
+        /** Runs after a package became visible, to fail or stop a pass between two releases. */
+        java.util.function.Consumer<String> afterUnhide = packageName -> {};
+
+        @Implementation
+        protected boolean setApplicationHidden(ComponentName admin, String packageName, boolean hidden) {
+            if (!hidden && refuseUnhide.contains(packageName)) {
+                return false;
+            }
+            boolean wasHidden = isApplicationHidden(admin, packageName);
+            boolean changed = super.setApplicationHidden(admin, packageName, hidden);
+            if (!hidden && wasHidden) {
+                afterUnhide.accept(packageName);
+            }
+            return changed;
+        }
 
         @Implementation
         protected void setAlwaysOnVpnPackage(ComponentName admin, String packageName, boolean lockdown,
                                              Set<String> exemptions) throws PackageManager.NameNotFoundException {
             beforeVpnWrite.run();
-            assertFalse(isApplicationHidden(admin, packageName));
-            assertFalse(isPackageSuspended(admin, packageName));
+            if (packageName != null) {
+                assertFalse(isApplicationHidden(admin, packageName));
+                assertFalse(isPackageSuspended(admin, packageName));
+            }
             if (refuseVpn) {
                 throw new SecurityException("VPN refused");
             }
@@ -319,6 +359,9 @@ public class LockdownPolicyApplyTest {
 
         @Implementation
         protected void setRecommendedGlobalProxy(ComponentName admin, ProxyInfo proxy) {
+            if (refuseProxyChange) {
+                throw new SecurityException("Proxy refused");
+            }
             ConnectivityManager cm = RuntimeEnvironment.getApplication().getSystemService(ConnectivityManager.class);
             Network network = cm.getActiveNetwork();
             cm.bindProcessToNetwork(network);
@@ -328,6 +371,9 @@ public class LockdownPolicyApplyTest {
 
         @Implementation
         protected boolean installCaCert(ComponentName admin, byte[] certificate) {
+            if (refuseCaInstall) {
+                return false;
+            }
             return caCertificates.add(HexFormat.of().formatHex(certificate));
         }
 

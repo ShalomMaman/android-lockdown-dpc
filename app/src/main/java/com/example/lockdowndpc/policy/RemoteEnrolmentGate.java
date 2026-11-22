@@ -11,8 +11,15 @@ import com.example.lockdowndpc.BuildConfig;
 public final class RemoteEnrolmentGate {
     private RemoteEnrolmentGate() {}
 
+    /**
+     * Nothing in this application writes this field, so in a shipped build the
+     * gate is the build constant alone. The JVM tests set it by reflection, from
+     * the test tree, to run the gated code. A source test keeps it that way.
+     */
+    private static boolean openedByTest;
+
     public static boolean permits() {
-        return BuildConfig.REMOTE_ENROLMENT_ENABLED;
+        return BuildConfig.REMOTE_ENROLMENT_ENABLED || openedByTest;
     }
 
     /** Only local provisioning is implemented. Unreadable extras are refused. */

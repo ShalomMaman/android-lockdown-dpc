@@ -2,6 +2,7 @@ package com.example.lockdowndpc.policy;
 
 import android.content.Context;
 
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -93,6 +94,52 @@ public final class AuthorizedPolicyWriter {
         }
         HomeFilterStore.write(context, settings);
         return true;
+    }
+
+    static boolean projectSelection(Context context, AdminAuthority authority,
+                                    AllowedAppsStore.ProtectionMode mode, Set<String> packages) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && AllowedAppsStore.projectSelection(context, mode, packages);
+    }
+
+    static boolean projectSystemSelection(Context context, AdminAuthority authority, Set<String> packages) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && AllowedAppsStore.projectSystemSelection(context, packages);
+    }
+
+    static boolean projectSystemAcceptance(Context context, AdminAuthority authority,
+                                           SystemAppRiskAcceptance acceptance) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && AllowedAppsStore.recordSystemRiskAcceptance(context, acceptance);
+    }
+
+    static boolean projectPlayCompatibility(Context context, AdminAuthority authority, boolean enabled) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && PlayStoreCompatibilityStore.projectRemote(context, enabled);
+    }
+
+    static boolean projectControls(Context context, AdminAuthority authority, Map<String, Boolean> choices) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && SystemPolicyStore.projectControls(context, choices);
+    }
+
+    static boolean projectManagementPins(Context context, AdminAuthority authority, Map<String, Set<String>> pins) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && AllowedAppsStore.projectManagementPins(context, pins);
+    }
+
+    static boolean projectFilter(Context context, AdminAuthority authority, HomeFilterPolicy.Settings settings) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority)
+                && HomeFilterStore.projectRemote(context, settings);
+    }
+
+    public static boolean commitRemoteKioskChange(Context context, AdminAuthority authority,
+                                                  BooleanSupplier commit) {
+        return AdminAuthority.CommittedPolicy.permits(context, authority) && commit.getAsBoolean();
+    }
+
+    static boolean finishRemoteFilterReadback(Context context) {
+        return HomeFilterStore.finishRemote(context);
     }
 
     /** A policy pass can only settle an existing filter request against its read-back. */

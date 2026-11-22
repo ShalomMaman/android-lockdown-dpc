@@ -61,6 +61,13 @@ public final class PlayStoreCompatibilityStore {
         return DurablePreferences.commit(preferences, editor, KEY_ENABLED, KEY_CHANGED_AT, KEY_SCHEMA_VERSION);
     }
 
+    static synchronized boolean projectRemote(Context context, boolean enabled) {
+        SharedPreferences prefs = prefs(context);
+        return DurablePreferences.commit(prefs, prefs.edit()
+                        .putBoolean(KEY_ENABLED, enabled).putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION),
+                KEY_ENABLED, KEY_SCHEMA_VERSION);
+    }
+
     /** When the decision was last changed, or 0 when it never has been. */
     public static synchronized long changedAt(Context context) {
         return prefs(context).getLong(KEY_CHANGED_AT, 0L);

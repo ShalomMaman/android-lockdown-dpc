@@ -11,10 +11,11 @@ final class RemotePolicyApplier {
     private RemotePolicyApplier() {}
 
     static boolean reconcile(Context context, String reason) {
-        // Journal projection and baseline recovery land in PRs 5 and 6.
-        // Until then, enforce the existing policy with protection on and no maintenance.
-        return PolicyReconciliationCoordinator.recordResult(
-                context, reason, LockdownPolicyController.applyRemoteContainment(context));
+        // Keep the pre-journal containment path for a marker seen on a gated build.
+        var result = RemoteEnrolmentGate.permits()
+                ? RemotePolicyRuntime.reconcile(context)
+                : LockdownPolicyController.applyRemoteContainment(context);
+        return PolicyReconciliationCoordinator.recordResult(context, reason, result);
     }
 
     static LockdownPolicyController.PolicyResult refusedLegacyPass() {

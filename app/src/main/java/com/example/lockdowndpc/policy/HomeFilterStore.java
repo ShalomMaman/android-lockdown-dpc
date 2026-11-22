@@ -5,7 +5,12 @@ import android.content.SharedPreferences;
 
 import com.example.lockdowndpc.security.DurablePreferences;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+
 import java.util.Base64;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.function.Supplier;
 
 final class HomeFilterStore {
@@ -15,6 +20,8 @@ final class HomeFilterStore {
     private static final String ENABLED = "enabled";
     private static final String CA = "ca";
     private static final String REMOVE_CA = "remove_ca";
+    private static final String RETIRED_FILTER = "remote_retired_filter";
+    private static final String RETIRED_CA = "remote_retired_ca";
     private static final String READBACK = "last_readback";
     private static final String SIGNER_PIN = "signer_pin";
     private static final String TAILNET_ID = "tailnet_id";
@@ -117,6 +124,74 @@ final class HomeFilterStore {
             editor.clear();
         }
         return editor;
+    }
+
+    static final int MAX_RETIRED = 16;
+
+    private static final String[] REMOTE_KEYS = {PACKAGE, PAC, ENABLED, CA, REMOVE_CA, READBACK,
+            SIGNER_PIN, TAILNET_ID, LOGIN_URL, EXIT_NODE_ID, ORGANIZATION, CANARY_URL, CANARY_BODY, RETIRED_CA, RETIRED_FILTER};
+
+    static synchronized boolean projectRemote(Context context, HomeFilterPolicy.Settings target) {
+        SharedPreferences prefs = prefs(context);
+        HomeFilterPolicy.Settings previous = read(prefs);
+        Set<String> retired = new HashSet<>(retiredCas(context));
+        if (previous.ca() != null) retired.add(previous.ca());
+        if (target.ca() != null) retired.remove(target.ca());
+        Set<String> retiredFilters = new HashSet<>(prefs.getStringSet(RETIRED_FILTER, Set.of()));
+        if (previous.configured() && !previous.config().equals(target.config())) {
+            retiredFilters.add(encodeConfig(previous.config()));
+        }
+        if (target.configured()) retiredFilters.remove(encodeConfig(target.config()));
+        // Each entry is a cleanup this device still owes, so none is dropped. A
+        // fleet that keeps replacing an unverified filter is stopped here instead.
+        // Turning the filter off is never stopped: that is the way out, and the
+        // recovery path, and its one extra entry is cleared by the same teardown.
+        if (target.enabled() && (retired.size() > MAX_RETIRED || retiredFilters.size() > MAX_RETIRED)) {
+            return false;
+        }
+        // Keep the configuration that could still be live across projection and process failures.
+        HomeFilterPolicy.Settings settings = !target.enabled() && previous.configured()
+                ? new HomeFilterPolicy.Settings(previous.config(), false, null, false) : target;
+        return DurablePreferences.commit(prefs, edit(prefs, settings).putStringSet(RETIRED_CA, retired)
+                .putStringSet(RETIRED_FILTER, retiredFilters), REMOTE_KEYS);
+    }
+
+    static synchronized Set<String> retiredCas(Context context) {
+        return new HashSet<>(prefs(context).getStringSet(RETIRED_CA, Set.of()));
+    }
+
+    static synchronized Set<HomeFilterPolicy.Config> retiredFilters(Context context) {
+        Set<HomeFilterPolicy.Config> filters = new HashSet<>();
+        for (String encoded : prefs(context).getStringSet(RETIRED_FILTER, Set.of())) {
+            try {
+                JSONArray values = new JSONArray(encoded);
+                HomeFilterPolicy.Routing routing = values.length() == 2 ? null : new HomeFilterPolicy.Routing(
+                        values.getString(2), values.getString(3), values.getString(4), values.getString(5));
+                filters.add(new HomeFilterPolicy.Config(values.getString(0), values.getString(1), "", routing, null));
+            } catch (JSONException corrupt) {
+                throw new IllegalArgumentException("Invalid retired filter configuration", corrupt);
+            }
+        }
+        return filters;
+    }
+
+    private static String encodeConfig(HomeFilterPolicy.Config config) {
+        JSONArray values = new JSONArray().put(config.vpnPackage()).put(config.pacUrl());
+        var routing = config.routing();
+        if (routing != null) {
+            values.put(routing.tailnetId()).put(routing.loginUrl()).put(routing.exitNodeId())
+                    .put(routing.organizationName());
+        }
+        return values.toString();
+    }
+
+    static synchronized boolean finishRemote(Context context) {
+        SharedPreferences prefs = prefs(context);
+        HomeFilterPolicy.Settings settings = read(prefs);
+        if (retiredCas(context).isEmpty() && retiredFilters(context).isEmpty()
+                && (settings.enabled() || !settings.configured())) return true;
+        return DurablePreferences.commit(prefs, edit(prefs, settings.enabled() ? settings : HomeFilterPolicy.Settings.OFF)
+                .remove(RETIRED_CA).remove(RETIRED_FILTER), REMOTE_KEYS);
     }
 
     static void saveReadback(Context context, HomeFilterPolicy.Report report) {

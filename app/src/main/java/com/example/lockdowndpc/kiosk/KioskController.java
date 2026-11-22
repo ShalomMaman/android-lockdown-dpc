@@ -18,6 +18,7 @@ import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.BuiltInExemptionsController;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.AdminAuthority;
 import com.example.lockdowndpc.policy.AuthorizedPolicyWriter;
@@ -196,6 +197,12 @@ public final class KioskController {
         KioskConfigStore.Settings settings = KioskConfigStore.read(app);
         if (settings.state() == KioskState.OFF) {
             return Result.denied(KioskState.OFF, "kiosk-off");
+        }
+        if (ManagementModeStore.hasCommittedRemoteIntent(app)) {
+            // A remote-managed device has no kiosk: a fleet policy cannot start
+            // one, so a stored one is not fleet intent. It is not entered again
+            // here, ahead of the journal pass that turns it off.
+            return Result.denied(settings.state(), "remote-kiosk-unsupported");
         }
         KioskConfigValidator.Validation validation = validate(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(
@@ -440,6 +447,39 @@ public final class KioskController {
                 errors
         );
         return false;
+    }
+
+    /**
+     * The remote pass keeps kiosk off and proves it.
+     *
+     * <p>A kiosk needs a local way out, and the remote console has none yet, so a
+     * fleet policy cannot turn one on: the projection refuses it before the journal
+     * commit. A stored kiosk in a remote mode is therefore not fleet intent, and
+     * this pass reports it instead of entering lock task on it.
+     *
+     * @return {@code true} when persistent preferred activities were cleared, so
+     *         the caller can re-register the managed-filtering link handlers
+     */
+    public static boolean reconcileRemote(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                          List<String> errors) {
+        KioskConfigStore.Settings settings = KioskConfigStore.read(context);
+        if (settings.config().mode() != KioskMode.OFF
+                || KioskConfigStore.isContainmentState(settings.state())) {
+            errors.add("remote-kiosk-unsupported");
+            return false;
+        }
+        boolean cleared = reconcile(context, dpm, admin, errors);
+        String[] lockTask = dpm.getLockTaskPackages(admin);
+        if (lockTask != null && lockTask.length != 0) {
+            errors.add("kiosk-lock-task-packages-unverified");
+        }
+        return cleared;
+    }
+
+    /** Stores the only kiosk state a fleet policy can carry: off. */
+    public static boolean projectRemote(Context context, AdminAuthority authority) {
+        return AuthorizedPolicyWriter.commitRemoteKioskChange(context, authority,
+                () -> KioskConfigStore.writeConfig(context, KioskConfig.OFF, "", KioskState.OFF));
     }
 
     /** Records the last visibility pass for later kiosk cleanup. */

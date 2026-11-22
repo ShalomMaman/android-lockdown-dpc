@@ -1,0 +1,693 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Device Guard v1 signed payload",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/keyset"
+    },
+    {
+      "$ref": "#/$defs/fleet-policy"
+    },
+    {
+      "$ref": "#/$defs/recovery"
+    },
+    {
+      "$ref": "#/$defs/command"
+    }
+  ],
+  "$defs": {
+    "base64url": {
+      "type": "string",
+      "pattern": "^([A-Za-z0-9_-]{4})*([A-Za-z0-9_-][AQgw]|[A-Za-z0-9_-]{2}[AEIMQUYcgkosw048])?(?![\\s\\S])",
+      "minLength": 2
+    },
+    "base64url32": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048](?![\\s\\S])"
+    },
+    "base64url16": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{21}[AQgw](?![\\s\\S])"
+    },
+    "p256Spki": {
+      "type": "string",
+      "pattern": "^MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE[A-Za-z0-9_-]{85}[AQgw](?![\\s\\S])"
+    },
+    "sha256Hex": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "packageName": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*(?![\\s\\S])"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "pattern": "^https://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?|\\[[0-9A-Fa-f:.]+\\])(:[1-9][0-9]{0,4})?(/[^\\s?#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(\\?[^\\s#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(?![\\s\\S])"
+    },
+    "serverUrl": {
+      "type": "string",
+      "pattern": "^https://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?|\\[[0-9A-Fa-f:.]+\\])(:[1-9][0-9]{0,4})?(/[^\\s?#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(?![\\s\\S])"
+    },
+    "pacUrl": {
+      "type": "string",
+      "pattern": "^https?://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?|\\[[0-9A-Fa-f:.]+\\])(:[1-9][0-9]{0,4})?(/[^\\s?#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(\\?[^\\s#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(?![\\s\\S])"
+    },
+    "kioskUrl": {
+      "type": "string",
+      "pattern": "^https://([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.?|\\[[0-9A-Fa-f:.]+\\])(:[1-9][0-9]{0,4})?(/[^\\s?#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(\\?[^\\s#\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(#[^\\s\\\\\\x00-\\x1f\\x7f-\\x9f]*)?(?![\\s\\S])",
+      "maxLength": 2000
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "const": "dg-signed/1"
+        },
+        "keyId": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "payload": {
+          "$ref": "#/$defs/base64url"
+        },
+        "signature": {
+          "$ref": "#/$defs/base64url"
+        }
+      },
+      "required": [
+        "format",
+        "keyId",
+        "payload",
+        "signature"
+      ]
+    },
+    "systemApp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "package": {
+          "$ref": "#/$defs/packageName"
+        },
+        "signerSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "versionCode": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "package",
+        "signerSha256",
+        "versionCode"
+      ]
+    },
+    "apps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "ALLOW_SELECTED",
+            "BLOCK_SELECTED"
+          ]
+        },
+        "allowed": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/packageName"
+          },
+          "uniqueItems": true
+        },
+        "systemSelection": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/systemApp"
+          },
+          "uniqueItems": true,
+          "default": []
+        },
+        "playCompatibility": {
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "required": [
+        "mode",
+        "allowed"
+      ]
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tailnetId": {
+          "type": "string",
+          "pattern": "^T[A-Za-z0-9]+(?![\\s\\S])"
+        },
+        "loginUrl": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "exitNodeId": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])"
+        },
+        "organizationName": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      },
+      "required": [
+        "tailnetId",
+        "loginUrl",
+        "exitNodeId",
+        "organizationName"
+      ]
+    },
+    "canary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "$ref": "#/$defs/httpsUrl"
+        },
+        "expectedBody": {
+          "type": "string",
+          "pattern": "\\S",
+          "maxLength": 1024
+        }
+      },
+      "required": [
+        "url",
+        "expectedBody"
+      ]
+    },
+    "homeFilter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "vpnPackage": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+(?![\\s\\S])"
+        },
+        "vpnSignerSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "routing": {
+          "$ref": "#/$defs/routing"
+        },
+        "pacUrl": {
+          "$ref": "#/$defs/pacUrl"
+        },
+        "caCertificate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?(?![\\s\\S])",
+              "minLength": 4
+            }
+          ]
+        },
+        "canary": {
+          "$ref": "#/$defs/canary"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "enabled": {
+              "const": false
+            }
+          },
+          "maxProperties": 1
+        },
+        {
+          "properties": {
+            "enabled": {
+              "const": true
+            }
+          },
+          "required": [
+            "vpnPackage",
+            "pacUrl"
+          ]
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "managementMode": {
+          "const": "REMOTE"
+        },
+        "protection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "const": "ON"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        "apps": {
+          "$ref": "#/$defs/apps"
+        },
+        "systemControls": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "developer_options_and_adb": {
+              "type": "boolean"
+            },
+            "usb_file_transfer": {
+              "type": "boolean"
+            },
+            "unknown_source_installs": {
+              "type": "boolean"
+            },
+            "app_stores_and_installers": {
+              "type": "boolean"
+            },
+            "account_modification": {
+              "type": "boolean"
+            },
+            "vpn_configuration": {
+              "type": "boolean"
+            },
+            "network_reset": {
+              "type": "boolean"
+            },
+            "tethering": {
+              "type": "boolean"
+            },
+            "wifi_configuration": {
+              "type": "boolean"
+            },
+            "private_dns": {
+              "type": "boolean"
+            },
+            "date_and_time": {
+              "type": "boolean"
+            },
+            "safe_boot": {
+              "type": "boolean"
+            },
+            "factory_reset": {
+              "type": "boolean"
+            },
+            "user_and_profile_creation": {
+              "type": "boolean"
+            },
+            "app_uninstall": {
+              "type": "boolean"
+            },
+            "app_control_settings": {
+              "type": "boolean"
+            }
+          }
+        },
+        "homeFilter": {
+          "$ref": "#/$defs/homeFilter",
+          "default": {
+            "enabled": false
+          }
+        },
+        "managementPins": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "com.tailscale.ipn": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/sha256Hex"
+              },
+              "uniqueItems": true
+            }
+          }
+        },
+        "kiosk": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "enum": [
+                "OFF",
+                "SINGLE_APP",
+                "SINGLE_SITE"
+              ]
+            },
+            "targetPackage": {
+              "$ref": "#/$defs/packageName"
+            },
+            "siteUrl": {
+              "$ref": "#/$defs/kioskUrl"
+            }
+          },
+          "required": [
+            "mode"
+          ],
+          "default": {
+            "mode": "OFF"
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "mode": {
+                  "const": "OFF"
+                }
+              },
+              "maxProperties": 1
+            },
+            {
+              "properties": {
+                "mode": {
+                  "const": "SINGLE_APP"
+                }
+              },
+              "required": [
+                "targetPackage"
+              ],
+              "maxProperties": 2
+            },
+            {
+              "properties": {
+                "mode": {
+                  "const": "SINGLE_SITE"
+                }
+              },
+              "required": [
+                "siteUrl"
+              ],
+              "maxProperties": 2
+            }
+          ]
+        },
+        "sync": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pullMinutes": {
+              "type": "integer",
+              "minimum": 15,
+              "maximum": 240,
+              "default": 15
+            }
+          }
+        },
+        "locale": {
+          "enum": [
+            "en",
+            "he",
+            "iw"
+          ]
+        }
+      },
+      "required": [
+        "managementMode",
+        "protection",
+        "apps"
+      ]
+    },
+    "keyset": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "keyset"
+        },
+        "fleetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keySetVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "fleetPolicyKeys": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/p256Spki"
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "serverKey": {
+          "$ref": "#/$defs/p256Spki"
+        },
+        "serverUrl": {
+          "$ref": "#/$defs/serverUrl"
+        },
+        "successorRoot": {
+          "$ref": "#/$defs/p256Spki"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "fleetId",
+        "keySetVersion",
+        "fleetPolicyKeys",
+        "serverKey",
+        "serverUrl"
+      ]
+    },
+    "fleet-policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "fleet-policy"
+        },
+        "fleetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keySetVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "fleetPolicyVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "deviceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/base64url32"
+          },
+          "uniqueItems": true,
+          "minItems": 1,
+          "maxItems": 256
+        },
+        "policy": {
+          "$ref": "#/$defs/policy"
+        },
+        "auditNote": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "fleetId",
+        "keySetVersion",
+        "fleetPolicyVersion",
+        "deviceIds",
+        "policy"
+      ]
+    },
+    "recovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "recovery"
+        },
+        "fleetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keySetVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "recoveryVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "deviceId": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "salt": {
+          "$ref": "#/$defs/base64url16"
+        },
+        "verifier": {
+          "$ref": "#/$defs/base64url32"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "fleetId",
+        "keySetVersion",
+        "recoveryVersion",
+        "deviceId",
+        "salt",
+        "verifier"
+      ]
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "command"
+        },
+        "fleetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "keySetVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "deviceId": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "nonce": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "kind": {
+          "enum": [
+            "lock_now",
+            "reapply"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "fleetId",
+        "keySetVersion",
+        "sequence",
+        "deviceId",
+        "nonce",
+        "kind"
+      ]
+    },
+    "overrides": {
+      "type": "array",
+      "enum": [
+        [],
+        ["commands-off"],
+        ["network-off"],
+        ["commands-off", "network-off"]
+      ]
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fleetPolicyVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "const": "baseline"
+            }
+          ]
+        },
+        "committedSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "overrides": {
+          "$ref": "#/$defs/overrides"
+        },
+        "generationSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        }
+      },
+      "required": [
+        "fleetPolicyVersion",
+        "committedSha256",
+        "overrides",
+        "generationSha256"
+      ]
+    },
+    "verifiedGeneration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fleetPolicyVersion": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "const": "baseline"
+            }
+          ]
+        },
+        "committedSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "overrides": {
+          "$ref": "#/$defs/overrides"
+        },
+        "verifiedSha256": {
+          "$ref": "#/$defs/sha256Hex"
+        }
+      },
+      "required": [
+        "fleetPolicyVersion",
+        "committedSha256",
+        "overrides",
+        "verifiedSha256"
+      ]
+    }
+  }
+}

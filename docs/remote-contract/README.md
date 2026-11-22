@@ -22,6 +22,11 @@ closed schemas and replay the state transitions in an in-memory model.
 Release builds and `fleet_admin` must refuse every fixture key ID, whether
 presented as a signer or derived from SPKI in a key role.
 
+The app validates documents against its own packaged copy of the schema,
+`app/src/main/assets/v1.schema.json`. It must stay byte-identical to
+`v1.schema.json` here. `RemoteContractTest` fails when the two differ, and
+when a vector file or section is added without a Kotlin test that replays it.
+
 | Fixture key | Key ID |
 | --- | --- |
 | `root` | `wqxIfMAeuyha6pKbj8Ob-aoDUU9-ZGwnbb-EgRBEaZU` |
@@ -143,6 +148,63 @@ presented as a signer or derived from SPKI in a key role.
   After restart the flag is gone and a stranded `DISPATCHING` entry has an
   unknown outcome. Only a successful commit of a newer fleet policy clears
   the active overrides. The command sequence floor survives recovery.
+
+## What the device adds to the contract
+
+The schema says which documents are well formed. The device also refuses, with
+`doc-field-invalid` and before the journal commit, a policy it could store but
+never verify or safely leave:
+
+- an enabled `homeFilter` without `routing`, because the VPN read-back needs
+  the routing settings;
+- a `homeFilter.vpnPackage` or `apps.systemSelection` entry that names a
+  built-in blocked or protected package;
+- any `kiosk.mode` other than `OFF`. A kiosk needs a local way out, and the
+  remote console has no recovery entry yet. Remote kiosk comes back with that
+  console;
+- a `locale` or kiosk mode this build does not know. Nothing unknown is read as
+  the default;
+- any `locale` on Android 10–12. Only Android 13 and later keep the application
+  language where a pass can read it back, so the admin tool must not set
+  `locale` for older devices.
+
+Other device rules:
+
+- **Android 10 or later.** `bindFleet` answers `enrolment-sdk-unsupported`
+  below API 29, where the default controls cannot all be enforced.
+- **No local extras.** The strict remote pass applies only what the fleet
+  policy carries. It does not apply night or work schedules, built-in block
+  exemptions, the Chrome exemption or the credentials lock
+  (`DISALLOW_CONFIG_CREDENTIALS`) that belongs to it. A fleet that needs the
+  credentials lock has no field for it in v1.
+- **Filter changes.** The device is never left with less than it had. A new
+  filter is brought up and read back before anything older is removed. If any
+  part fails after the VPN lockdown or the proxy already moved, the previous
+  lockdown and proxy are put back and read back, and a certificate that the
+  attempt added is withdrawn. The application behind the VPN in force is not
+  hidden until the replacement is verified. A teardown removes the PAC proxy
+  and the certificates, then the uninstall block, the routing settings and the
+  profile restrictions, each read back, and releases the VPN lockdown as its
+  last Android call. The cleanup list is capped at 16 superseded filters. The
+  cap refuses another replacement and never refuses turning the filter off.
+- **Releases.** A pass records in the journal which hidden packages it is about
+  to show, including a hidden filter application it needs for the VPN
+  read-back. If that pass does not end verified, they are hidden again, at once
+  or at the next start, before any command is handled. The application behind
+  the VPN lockdown in force is the one exception: it stays visible, and
+  recorded, until a pass verifies.
+- **Kiosk.** A kiosk left in the store of a device with remote intent is not
+  restored at boot, and its HOME screen neither locks the task nor starts the
+  target. The journal pass turns it off.
+- **Lost journal.** A second file records that this device writes a journal. It
+  is stored before the first journal write and never taken back, and nothing
+  is written to the journal until it is stored. An enrolled device whose
+  journal reads back empty or damaged answers `journal-lost` everywhere, runs
+  no pass and accepts nothing. It keeps the restrictions of its last pass until
+  it is provisioned again. The same answer follows a first journal write that
+  fails after the marker was stored: the device fails closed.
+- **Command history.** The journal keeps the sequence floor and the last 16
+  finished commands for the next report. Replay protection needs only the floor.
 
 ## Fixture layout
 

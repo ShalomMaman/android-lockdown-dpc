@@ -52,7 +52,7 @@ public final class LockdownPolicyController {
         if (!ManagementModeStore.read(context).usesLocalPolicy()) {
             return RemotePolicyApplier.refusedLegacyPass();
         }
-        return applyProtectionOn(context, true, new ArrayList<>());
+        return applyProtectionOn(context, true, new ArrayList<>(), null, null);
     }
 
     /** Temporary enforcement while remote policy projection is unavailable. */
@@ -70,10 +70,86 @@ public final class LockdownPolicyController {
         } catch (RuntimeException exception) {
             errors.add("maintenance-restore:" + exception.getClass().getSimpleName());
         }
-        return applyProtectionOn(context, false, errors);
+        return applyProtectionOn(context, false, errors, null, null);
     }
 
-    private static PolicyResult applyProtectionOn(Context context, boolean local, ArrayList<String> errors) {
+    /**
+     * The pass for the journal's committed generation.
+     *
+     * @param recordReleases stores, before the first such write, the hidden packages
+     *                       this pass is about to make visible
+     */
+    static synchronized PolicyResult applyRemoteProjection(Context context, AdminAuthority authority,
+                                                           BooleanSupplier stillCurrent, boolean localeVerified,
+                                                           Predicate<Set<String>> recordReleases) {
+        if (!AdminAuthority.CommittedPolicy.permits(context, authority) || !stillCurrent.getAsBoolean()) {
+            return RemotePolicyApplier.refusedLegacyPass();
+        }
+        ArrayList<String> errors = new ArrayList<>();
+        if (!localeVerified) errors.add("remote-locale-unverified");
+        return applyProtectionOn(context, false, errors, stillCurrent, recordReleases);
+    }
+
+    /**
+     * Hides again the packages an unverified remote pass made visible.
+     *
+     * @return the packages that could not be proven hidden
+     */
+    static synchronized Set<String> revokeRemoteReleases(Context context, Set<String> packages) {
+        DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
+        if (dpm == null || !dpm.isDeviceOwnerApp(context.getPackageName())) {
+            return new LinkedHashSet<>(packages);
+        }
+        ComponentName admin = LockdownAdminReceiver.componentName(context);
+        Set<String> exposed = new LinkedHashSet<>();
+        String liveVpn;
+        try {
+            liveVpn = dpm.getAlwaysOnVpnPackage(admin);
+        } catch (RuntimeException unreadable) {
+            return new LinkedHashSet<>(packages);
+        }
+        for (String packageName : packages) {
+            try {
+                if (!isInstalled(context.getPackageManager(), packageName)) {
+                    continue;
+                }
+                if (packageName.equals(liveVpn)) {
+                    // The application behind the VPN lockdown that is in force. Hiding it
+                    // would take the filter down, so it stays visible and stays recorded
+                    // until a pass verifies or another VPN takes over.
+                    exposed.add(packageName);
+                    continue;
+                }
+                if (!dpm.isApplicationHidden(admin, packageName)) {
+                    dpm.setApplicationHidden(admin, packageName, true);
+                }
+                if (!dpm.isApplicationHidden(admin, packageName)) {
+                    exposed.add(packageName);
+                }
+            } catch (RuntimeException exception) {
+                exposed.add(packageName);
+            }
+        }
+        return exposed;
+    }
+
+    /** What the remote package sweep leaves for the end of the pass. */
+    private static final class RemoteSweep {
+        /** Packages the policy shows. A hidden one is released only by a verified pass. */
+        final Set<String> releases = new LinkedHashSet<>();
+        /** The filter VPN that is live now. It is hidden only once its replacement or its removal is verified. */
+        final Set<String> liveFilterVpn;
+        final Set<String> deferredHides = new LinkedHashSet<>();
+
+        RemoteSweep(Set<String> liveFilterVpn) {
+            this.liveFilterVpn = liveFilterVpn;
+        }
+    }
+
+    private static PolicyResult applyProtectionOn(Context context, boolean local, ArrayList<String> errors,
+                                                  BooleanSupplier stillCurrent,
+                                                  Predicate<Set<String>> recordReleases) {
+        boolean strictRemote = stillCurrent != null;
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         boolean deviceOwner = dpm != null && dpm.isDeviceOwnerApp(context.getPackageName());
@@ -81,9 +157,10 @@ public final class LockdownPolicyController {
         boolean filterReadable = homeFilter != null;
         boolean filterEnabled = filterReadable && homeFilter.enabled();
         String pacUrl = filterReadable && homeFilter.configured() ? homeFilter.config().pacUrl() : null;
-        BuiltInBlockExemptions.Settings exemptions = BuiltInBlockExemptionsStore.read(context);
+        BuiltInBlockExemptions.Settings exemptions = strictRemote
+                ? BuiltInBlockExemptions.Settings.NONE : BuiltInBlockExemptionsStore.read(context);
         SocialPass social = new SocialPass(context, exemptions, activeAdminPackages(dpm));
-        boolean chromeInScope = ChromeFilterExemption.inScope(
+        boolean chromeInScope = !strictRemote && ChromeFilterExemption.inScope(
                 Build.VERSION.SDK_INT, resolveWebViewProvider(context.getPackageManager()));
         ChromeFilterExemption.Decision chromeUnavailable = ChromeFilterExemption.unavailableReason(
                 Build.VERSION.SDK_INT, currentWebViewProvider());
@@ -105,7 +182,8 @@ public final class LockdownPolicyController {
 
             @Override
             public BuiltInBlockExemptions.PassFilter settleFilter() {
-                return HomeFilterController.settledFilter(context, homeFilter);
+                return strictRemote ? new BuiltInBlockExemptions.PassFilter(homeFilter, homeFilter, null)
+                        : HomeFilterController.settledFilter(context, homeFilter);
             }
 
             @Override
@@ -125,9 +203,11 @@ public final class LockdownPolicyController {
 
             @Override
             public void recordEarlyReadback(List<String> readbackErrors) {
-                recordExemptionReadback(context, dpm, admin, exemptions,
-                        chromeInScope ? ChromeFilterExemption.Decision.FILTER_DISABLED : chromeUnavailable,
-                        readbackErrors);
+                if (!strictRemote) {
+                    recordExemptionReadback(context, dpm, admin, exemptions,
+                            chromeInScope ? ChromeFilterExemption.Decision.FILTER_DISABLED : chromeUnavailable,
+                            readbackErrors);
+                }
             }
 
             @Override
@@ -185,7 +265,9 @@ public final class LockdownPolicyController {
         BuiltInBlockExemptions.PassFilter passFilter = start.filter();
         HomeFilterPolicy.Settings enforcedFilter = passFilter.effective();
         SystemPolicyPass systemPolicy = applySystemPolicy(
-                context, dpm, admin, enforcedFilter.enabled(), errors);
+                context, dpm, admin, enforcedFilter.enabled(), strictRemote, errors);
+        if (strictRemote) verifyRemoteControls(systemPolicy.report(),
+                SystemPolicyStore.explicitChoices(context).keySet(), Build.VERSION.SDK_INT, errors);
         // Resolved from this pass's read-back evidence, never from the stored
         // switch: a compatibility mode whose install lock the device did not
         // confirm leaves the Store hidden and the pass unverified.
@@ -199,12 +281,12 @@ public final class LockdownPolicyController {
         Set<String> trustedManagement = resolveTrustedManagementPackages(context, errors);
         // Night and work hours are evaluated once per pass from the clock; no
         // stored "in window" flag is trusted.
-        ScheduleSettings schedule = ScheduleStore.read(context);
+        ScheduleSettings schedule = strictRemote ? ScheduleSettings.OFF : ScheduleStore.read(context);
         Instant scheduleNow = Instant.now();
         // Kiosk reconciles before the link handlers: turning kiosk off clears
         // every persistent preferred activity of this package, and
         // routeLinks below re-registers the managed-filtering ones.
-        KioskController.reconcile(context, dpm, admin, errors);
+        if (!strictRemote) KioskController.reconcile(context, dpm, admin, errors);
         // Settled once, after kiosk (whose target stays available) and before
         // every package step: while a window is active, no step lifts a
         // suspension on a window target, whatever the ownership record says.
@@ -218,17 +300,45 @@ public final class LockdownPolicyController {
         protectManagementApps(context, dpm, admin, trustedManagement, errors);
         // The credentials lock first, so the CA check that follows cannot be
         // undone from Android Settings before Chrome is released on it.
-        boolean lockConfirmed = reconcileCredentialsLock(context, dpm, admin, errors);
+        boolean lockConfirmed = strictRemote || reconcileCredentialsLock(context, dpm, admin, errors);
+        if (strictRemote && KioskConfigStore.requiresContainment(context)
+                && !KioskConfigStore.wasEscapeSurfaceHidingApplied(context)
+                && !KioskController.recordEscapeSurfaceState(context, true)) {
+            errors.add("journal-write-failed");
+            return new PolicyResult(true, false, 0, 0, errors);
+        }
+        RemoteSweep remoteSweep = strictRemote
+                ? new RemoteSweep(HomeFilterController.liveFilterVpnPackages(context, dpm, admin)) : null;
+        int[] packageCounts = strictRemote
+                ? applyPackagePolicy(context, dpm, admin, trustedManagement, playCompatibility, enforcedFilter,
+                        social, chromeInScope, scheduleHold, false, true, remoteSweep, errors)
+                : null;
         boolean networkVerified = false;
         try {
-            networkVerified = HomeFilterController.reconcile(context, dpm, admin, errors, passFilter);
+            networkVerified = strictRemote
+                    ? HomeFilterController.reconcileRemote(context, dpm, admin, enforcedFilter, recordReleases, errors)
+                    : HomeFilterController.reconcile(context, dpm, admin, errors, passFilter);
         } catch (RuntimeException exception) {
             errors.add("home-filter:reconcile:" + exception.getClass().getSimpleName());
         }
-        // The package sweep only releases apps after network verification.
-        int[] packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement,
-                playCompatibility, enforcedFilter, social, chromeInScope, scheduleHold,
-                networkVerified, !local, errors);
+        if (strictRemote && networkVerified && errors.isEmpty() && stillCurrent.getAsBoolean()) {
+            try {
+                if (KioskController.reconcileRemote(context, dpm, admin, errors)) {
+                    // Leaving kiosk cleared this package's link handlers, which were
+                    // registered above. A verified pass must end with them in place.
+                    routeLinks(context, dpm, admin, false, errors);
+                }
+            } catch (RuntimeException refused) {
+                errors.add("kiosk-readback-unavailable");
+            }
+        }
+        if (strictRemote) {
+            finishRemoteVisibility(context, dpm, admin, remoteSweep, packageCounts,
+                    networkVerified, stillCurrent, recordReleases, errors);
+        } else {
+            packageCounts = applyPackagePolicy(context, dpm, admin, trustedManagement, playCompatibility,
+                    enforcedFilter, social, chromeInScope, scheduleHold, networkVerified, !local, null, errors);
+        }
         suspendBrowserBackedWebViewIfNeeded(context, dpm, admin, errors);
         if (chromeInScope) {
             // Chrome is released only now, on evidence taken after the lock:
@@ -273,11 +383,14 @@ public final class LockdownPolicyController {
         }
         // Last of the package steps, so a package an earlier step made visible
         // in this pass (Chrome's release included) is covered by an active window.
-        reconcileSchedule(context, dpm, admin, schedule, scheduleNow, scheduleHold, scheduleGateway,
-                chromeInScope, chrome, social, networkVerified, errors);
-        recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
+        if (!strictRemote) {
+            reconcileSchedule(context, dpm, admin, schedule, scheduleNow, scheduleHold, scheduleGateway,
+                    chromeInScope, chrome, social, networkVerified, errors);
+        }
+        if (!strictRemote) recordExemptionReadback(context, dpm, admin, exemptions, chrome, errors);
+        if (strictRemote && !stillCurrent.getAsBoolean()) errors.add("remote-policy-target-changed");
         boolean verified = errors.isEmpty();
-        recordScheduleOutcome(context, schedule, scheduleNow, verified);
+        if (!strictRemote) recordScheduleOutcome(context, schedule, scheduleNow, verified);
         if (verified) {
             if (enforcedFilter.enabled() && conflictsWithHomeFilter(liveMaintenanceWindow(context))) {
                 clearMaintenanceWindow(context, "home-filter");
@@ -287,7 +400,7 @@ public final class LockdownPolicyController {
             }
             // The next pass may keep an allowed Chrome as it is only while it
             // continues this one: same boot, same home filter settings.
-            BuiltInBlockExemptionsStore.recordVerifiedPass(context, homeFilter);
+            if (!strictRemote) BuiltInBlockExemptionsStore.recordVerifiedPass(context, homeFilter);
             Log.i(TAG, "Policy apply verified; blocked=" + packageCounts[0]
                     + ", allowed=" + packageCounts[1]);
         } else {
@@ -450,6 +563,7 @@ public final class LockdownPolicyController {
             DevicePolicyManager dpm,
             ComponentName admin,
             boolean homeFilterEnabled,
+            boolean strictRemote,
             List<String> errors
     ) {
         SystemPolicyProfile profile = SystemPolicyStore.effectiveProfile(context);
@@ -463,11 +577,28 @@ public final class LockdownPolicyController {
                 choices,
                 new SystemPolicyDeviceGateway(dpm, admin)
         );
-        recordSystemPolicy(context, report);
+        if (!recordSystemPolicy(context, report, strictRemote)) errors.add("journal-write-failed");
         for (SystemPolicyControlStatus fault : report.faults()) {
             errors.add("system-policy:" + fault.summary());
         }
         return new SystemPolicyPass(report, plan == null ? Set.of() : plan.relaxed());
+    }
+
+    static void verifyRemoteControls(SystemPolicyReport report, Set<SystemPolicyControl> explicit,
+                                     int sdk, List<String> errors) {
+        for (SystemPolicyControlStatus status : report.statuses()) {
+            // A value the device already satisfies by not restricting is enforced.
+            // A control that is on must be in force, in full when the fleet named it.
+            if (status.failed()
+                    || (status.requested() && status.outcome() != SystemPolicyOutcome.APPLIED)
+                    || (status.requested() && explicit.contains(status.control())
+                        && !status.control().unsupportedRestrictions(sdk).isEmpty())) {
+                errors.add("remote-system-policy:" + status.summary());
+            }
+        }
+        for (SystemPolicyControl control : explicit) {
+            if (report.statusOf(control) == null) errors.add("remote-system-policy:" + control.storageKey());
+        }
     }
 
     /**
@@ -576,7 +707,7 @@ public final class LockdownPolicyController {
                 new SystemPolicyDeviceGateway(dpm, admin),
                 HomeFilterController.enforcedEnabled(context) ? HomeFilterPolicy.REQUIRED_CONTROLS : Set.of()
         );
-        recordSystemPolicy(context, report);
+        recordSystemPolicy(context, report, false);
         for (SystemPolicyControlStatus failure : report.failures()) {
             errors.add("system-policy-release:" + failure.summary());
         }
@@ -590,7 +721,7 @@ public final class LockdownPolicyController {
      * change; appending a line per control per pass would evict the
      * administrator actions the 50-entry log exists to keep.
      */
-    private static void recordSystemPolicy(Context context, SystemPolicyReport report) {
+    private static boolean recordSystemPolicy(Context context, SystemPolicyReport report, boolean strictRemote) {
         for (SystemPolicyControlStatus status : report.statuses()) {
             boolean problem = status.failed()
                     || (status.requested()
@@ -606,7 +737,11 @@ public final class LockdownPolicyController {
                     context.getString(R.string.audit_system_policy_unverified, status.summary())
             );
         }
+        if (strictRemote) {
+            return SystemPolicyStore.saveReportDurably(context, report);
+        }
         SystemPolicyStore.saveReport(context, report);
+        return true;
     }
 
     /**
@@ -896,7 +1031,8 @@ public final class LockdownPolicyController {
      * protection on every firmware update would strand a fleet for something an
      * administrator resolves in the console. The drop is audited so it is visible.
      */
-    private static Set<String> revalidatedSystemSelection(Context context, PackageManager pm) {
+    private static Set<String> revalidatedSystemSelection(Context context, PackageManager pm,
+                                                           boolean strictRemote, List<String> errors) {
         Set<String> selected = AllowedAppsStore.getAdminSelectedSystemPackages(context);
         if (selected.isEmpty()) {
             return selected;
@@ -911,11 +1047,12 @@ public final class LockdownPolicyController {
             if (acceptance != null) {
                 acceptances.put(packageName, acceptance);
             }
-            installed.put(packageName, observedIdentity(context, pm, packageName));
+            installed.put(packageName, observedIdentity(context, pm, packageName, strictRemote));
         }
         SystemAppSelection.Revalidation revalidation =
                 SystemAppSelection.revalidate(selected, acceptances, installed);
         if (revalidation.anyRevoked()) {
+            if (strictRemote) errors.add("remote-system-selection-unverified");
             Log.e(TAG, "System selections no longer match their acceptance: "
                     + revalidation.revokedSummary());
             AuditLog.append(
@@ -930,7 +1067,8 @@ public final class LockdownPolicyController {
     private static SystemAppSelection.InstalledIdentity observedIdentity(
             Context context,
             PackageManager pm,
-            String packageName
+            String packageName,
+            boolean strictRemote
     ) {
         try {
             if (!isInstalled(pm, packageName)) {
@@ -940,6 +1078,15 @@ public final class LockdownPolicyController {
             // console records the acceptance with. Computing either here in a
             // second format is how every acceptance once became unsatisfiable
             // and every opted-in package was silently revoked on each pass.
+            if (strictRemote) {
+                // A package this owner hid is still installed. Without the
+                // hidden-aware flag its signer and version read as missing, and a
+                // fleet could never hide an accepted system package and verify.
+                return new SystemAppSelection.InstalledIdentity(
+                        PackageIdentity.currentSignerSha256IncludingHidden(pm, packageName),
+                        Long.toString(PackageIdentity.versionCode(
+                                getPackageInfo(pm, packageName, PackageManager.MATCH_UNINSTALLED_PACKAGES))));
+            }
             return new SystemAppSelection.InstalledIdentity(
                     PackageIdentity.currentSignerSha256(pm, packageName),
                     PackageIdentity.versionText(getPackageInfo(pm, packageName, 0)));
@@ -960,8 +1107,10 @@ public final class LockdownPolicyController {
             ScheduleSuspension.Hold scheduleHold,
             boolean networkVerified,
             boolean containWithoutSelection,
+            RemoteSweep remoteSweep,
             List<String> errors
     ) {
+        Set<String> remoteReleases = remoteSweep == null ? null : remoteSweep.releases;
         PackageManager pm = context.getPackageManager();
         Set<String> allowed = AllowedAppsStore.getAllowedPackages(context);
         Set<String> managed = AllowedAppsStore.getManagedPackages(context);
@@ -969,7 +1118,7 @@ public final class LockdownPolicyController {
         // from storage: an OEM update can replace the binary behind an accepted
         // package name, and acting on the old acceptance would hide a component
         // nobody reviewed during an automatic reconciliation pass.
-        Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm);
+        Set<String> adminSelectedSystem = revalidatedSystemSelection(context, pm, remoteReleases != null, errors);
         MaintenanceWindow window = liveMaintenanceWindow(context);
         boolean appStoreMaintenanceOpen = MaintenanceAppPolicy.opensApplicationStores(window)
                 && !(homeFilter.enabled() && conflictsWithHomeFilter(window));
@@ -1011,6 +1160,7 @@ public final class LockdownPolicyController {
         packageNames.addAll(LockdownPackages.KNOWN_BROWSER_AND_SOCIAL);
         packageNames.addAll(managed);
         packageNames.addAll(allowed);
+        if (remoteReleases != null) packageNames.addAll(adminSelectedSystem);
         packageNames.addAll(LockdownPackages.managementPackageNames());
         // Escape surfaces are touched only once kiosk has actually been used, so a
         // device that never enables kiosk behaves exactly as it did in 0.4. The
@@ -1132,6 +1282,7 @@ public final class LockdownPolicyController {
             boolean criticalPackage = shouldBlock
                     || homeFilterVpn
                     || managed.contains(packageName)
+                    || (remoteReleases != null && adminSelectedSystem.contains(packageName))
                     || allowed.contains(packageName)
                     || packageName.equals(kioskTarget)
                     || (reconcileEscapeSurfaces
@@ -1149,6 +1300,16 @@ public final class LockdownPolicyController {
                 continue;
             }
 
+            if (remoteReleases != null && !shouldBlock) {
+                remoteReleases.add(packageName);
+                continue;
+            }
+            if (remoteSweep != null && remoteSweep.liveFilterVpn.contains(packageName)) {
+                // Hiding the application behind the live VPN lockdown would take the
+                // filter down before this pass has proven what replaces it.
+                remoteSweep.deferredHides.add(packageName);
+                continue;
+            }
             try {
                 boolean hidden = reconcilePackageVisibility(packageName, shouldBlock, networkVerified,
                         () -> dpm.isApplicationHidden(admin, packageName),
@@ -1159,7 +1320,8 @@ public final class LockdownPolicyController {
                     allowedCount++;
                 }
             } catch (IllegalArgumentException ignored) {
-                // A known package is not installed on this device.
+                // Local inventory tolerates packages disappearing during a pass.
+                if (remoteReleases != null) errors.add("package-policy-unreadable:" + packageName);
             } catch (RuntimeException exception) {
                 errors.add("package-policy:" + packageName + ":"
                         + exception.getClass().getSimpleName());
@@ -1172,12 +1334,64 @@ public final class LockdownPolicyController {
                 releaseSuspension(dpm, admin, packageName, errors);
             }
         }
-        // Only drop the restore obligation after a pass that actually completed.
-        if (reconcileEscapeSurfaces && (kioskActive || errors.isEmpty())
+        // Local reconciliation updates its escape-surface cleanup debt in this pass.
+        if (remoteReleases == null && reconcileEscapeSurfaces && (kioskActive || errors.isEmpty())
                 && !KioskController.recordEscapeSurfaceState(context, kioskActive)) {
             errors.add("kiosk-escape-surface-state-save-failed");
         }
         return new int[]{blockedCount, allowedCount};
+    }
+
+    private static void finishRemoteVisibility(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                              RemoteSweep sweep, int[] counts, boolean protectionsVerified,
+                                              BooleanSupplier stillCurrent, Predicate<Set<String>> recordReleases,
+                                              List<String> errors) {
+        boolean verified = protectionsVerified && errors.isEmpty() && stillCurrent.getAsBoolean();
+        for (String packageName : sweep.deferredHides) {
+            // The old filter application goes only now that the new state is proven.
+            try {
+                boolean hidden = verified
+                        ? reconcilePackageVisibility(packageName, true, true,
+                                () -> dpm.isApplicationHidden(admin, packageName),
+                                hide -> dpm.setApplicationHidden(admin, packageName, hide), errors)
+                        : dpm.isApplicationHidden(admin, packageName);
+                counts[hidden ? 0 : 1]++;
+            } catch (RuntimeException exception) {
+                errors.add("package-policy-unreadable:" + packageName);
+            }
+        }
+        // The journal learns what is about to become visible before any of it does,
+        // so a refusal, a crash or a failed final write can be undone by the next pass.
+        Set<String> hiddenNow = new LinkedHashSet<>();
+        for (String packageName : sweep.releases) {
+            try {
+                if (dpm.isApplicationHidden(admin, packageName)) {
+                    hiddenNow.add(packageName);
+                }
+            } catch (RuntimeException exception) {
+                errors.add("package-policy-unreadable:" + packageName);
+            }
+        }
+        if (verified && errors.isEmpty() && !hiddenNow.isEmpty() && !recordReleases.test(hiddenNow)) {
+            errors.add("journal-write-failed");
+        }
+        for (String packageName : sweep.releases) {
+            try {
+                boolean mayRelease = protectionsVerified && errors.isEmpty() && stillCurrent.getAsBoolean();
+                boolean hidden = reconcilePackageVisibility(packageName, false, mayRelease,
+                        () -> dpm.isApplicationHidden(admin, packageName),
+                        hide -> dpm.setApplicationHidden(admin, packageName, hide), errors);
+                counts[hidden ? 0 : 1]++;
+            } catch (RuntimeException exception) {
+                errors.add("package-policy-unreadable:" + packageName);
+            }
+        }
+        boolean kioskActive = KioskConfigStore.requiresContainment(context);
+        if (!kioskActive && KioskConfigStore.wasEscapeSurfaceHidingApplied(context)
+                && stillCurrent.getAsBoolean() && errors.isEmpty()
+                && !KioskController.recordEscapeSurfaceState(context, false)) {
+            errors.add("kiosk-escape-surface-state-save-failed");
+        }
     }
 
     static boolean reconcilePackageVisibility(

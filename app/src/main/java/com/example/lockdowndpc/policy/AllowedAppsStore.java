@@ -91,7 +91,7 @@ public final class AllowedAppsStore {
         );
     }
 
-    private static Set<String> guardedSystemSelection(Set<String> packages) {
+    static Set<String> guardedSystemSelection(Set<String> packages) {
         HashSet<String> selected = new HashSet<>(packages);
         // Protected packages can never be opted in; this guard belongs here so
         // no caller can turn an app store or kiosk escape surface into an
@@ -187,6 +187,49 @@ public final class AllowedAppsStore {
         SharedPreferences preferences = prefs(context);
         String key = KEY_MANAGEMENT_PIN_PREFIX + packageName;
         return DurablePreferences.commit(preferences, preferences.edit().putStringSet(key, normalized), key);
+    }
+
+    static synchronized boolean projectSelection(Context context, ProtectionMode mode, Set<String> packages) {
+        SharedPreferences prefs = prefs(context);
+        ProtectionMode other = mode == ProtectionMode.ALLOW_SELECTED
+                ? ProtectionMode.BLOCK_SELECTED : ProtectionMode.ALLOW_SELECTED;
+        return DurablePreferences.commit(prefs, prefs.edit()
+                        .putString(KEY_MODE, mode.name()).putBoolean(KEY_ENABLED, true)
+                        .putStringSet(allowedKey(mode), new HashSet<>(packages))
+                        .putBoolean(configuredKey(mode), true)
+                        .remove(allowedKey(other)).remove(configuredKey(other))
+                        .remove(KEY_ALLOWED).remove(KEY_ALLOWLIST_CONFIGURED),
+                KEY_MODE, KEY_ENABLED, allowedKey(mode), configuredKey(mode),
+                allowedKey(other), configuredKey(other), KEY_ALLOWED, KEY_ALLOWLIST_CONFIGURED);
+    }
+
+    static synchronized boolean projectSystemSelection(Context context, Set<String> packages) {
+        SharedPreferences prefs = prefs(context);
+        Set<String> keys = new HashSet<>();
+        keys.add(KEY_ADMIN_SELECTED_SYSTEM);
+        SharedPreferences.Editor edit = prefs.edit()
+                .putStringSet(KEY_ADMIN_SELECTED_SYSTEM, guardedSystemSelection(packages));
+        for (String key : prefs.getAll().keySet()) {
+            if (key.startsWith(KEY_SYSTEM_RISK_SIGNER_PREFIX) || key.startsWith(KEY_SYSTEM_RISK_VERSION_PREFIX)
+                    || key.startsWith(KEY_SYSTEM_RISK_PRIOR_STATE_PREFIX)
+                    || key.startsWith(KEY_SYSTEM_RISK_FIRMWARE_PREFIX) || key.startsWith(KEY_SYSTEM_RISK_AT_PREFIX)) {
+                keys.add(key);
+                edit.remove(key);
+            }
+        }
+        return DurablePreferences.commit(prefs, edit, keys.toArray(new String[0]));
+    }
+
+    static synchronized boolean projectManagementPins(Context context, Map<String, Set<String>> pins) {
+        SharedPreferences prefs = prefs(context);
+        SharedPreferences.Editor edit = prefs.edit();
+        Set<String> keys = new HashSet<>();
+        for (String name : LockdownPackages.managementPackageNames()) {
+            String key = KEY_MANAGEMENT_PIN_PREFIX + name;
+            keys.add(key);
+            edit.putStringSet(key, new HashSet<>(pins.getOrDefault(name, Set.of())));
+        }
+        return DurablePreferences.commit(prefs, edit, keys.toArray(new String[0]));
     }
 
     /** Saves both parts of the selection together. Returns false on disk failure. */

@@ -18,6 +18,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 
 public final class HomeFilterController {
@@ -184,7 +186,7 @@ public final class HomeFilterController {
         }
         AndroidGateway gateway = new AndroidGateway(context, dpm, admin);
         try {
-            gateway.restoreVpnAvailability(enforced);
+            gateway.restoreVpnAvailability(enforced, null);
         } catch (RuntimeException exception) {
             errors.add("home-filter:vpn-availability:" + exception.getClass().getSimpleName());
             return false;
@@ -201,6 +203,178 @@ public final class HomeFilterController {
             HomeFilterStore.saveReadback(context, report);
         }
         return verified;
+    }
+
+    static boolean reconcileRemote(Context context, DevicePolicyManager dpm, ComponentName admin,
+                                   HomeFilterPolicy.Settings settings, Predicate<Set<String>> recordReleases,
+                                   List<String> errors) {
+        AndroidGateway gateway = new AndroidGateway(context, dpm, admin);
+        try {
+            // A filter application the previous policy hid has to be visible before
+            // Android can verify its VPN. The journal learns of that release first,
+            // so a pass that does not end verified hides the application again.
+            gateway.restoreVpnAvailability(settings, recordReleases);
+        } catch (RuntimeException exception) {
+            errors.add("home-filter:vpn-availability:" + exception.getClass().getSimpleName());
+            return false;
+        }
+        return reconcileRemote(settings, Build.VERSION.SDK_INT, gateway, HomeFilterStore.retiredCas(context),
+                HomeFilterStore.retiredFilters(context),
+                () -> AuthorizedPolicyWriter.finishRemoteFilterReadback(context), errors);
+    }
+
+    /**
+     * The remote pass never leaves the device with less than it had.
+     *
+     * <p>An enabled filter is brought up and read back before anything older is
+     * removed. If any part of it fails after the VPN lockdown or the proxy
+     * already moved, the lockdown and proxy that were in force are put back and
+     * read back. A teardown removes the PAC proxy and the certificates, then the
+     * uninstall block, the routing settings and the profile restrictions, each
+     * read back, and releases the VPN lockdown as its last Android call.
+     */
+    static boolean reconcileRemote(HomeFilterPolicy.Settings settings, int sdk, HomeFilterPolicy.Gateway gateway,
+                                   Set<String> retiredCas, Set<HomeFilterPolicy.Config> retiredFilters,
+                                   BooleanSupplier finish, List<String> errors) {
+        HomeFilterPolicy.Config active = settings.enabled() ? settings.config() : null;
+        Set<HomeFilterPolicy.Config> previous = new java.util.LinkedHashSet<>(retiredFilters);
+        if (active == null && settings.configured()) {
+            previous.add(settings.config());
+        }
+        boolean verified = true;
+        if (active != null) {
+            LiveFilter before = LiveFilter.read(gateway, settings.ca());
+            if (before == null) {
+                // Nothing is changed that could not be put back afterwards.
+                errors.add("home-filter:live-state-unreadable");
+                return false;
+            }
+            verified = verifyReadback(settings, HomeFilterPolicy.reconcile(settings, sdk, gateway), errors);
+            if (!verified && !before.restore(gateway, settings.ca())) {
+                errors.add("home-filter:previous-protection-restore-unverified");
+            }
+        }
+        if (verified) {
+            for (HomeFilterPolicy.Config retired : previous) {
+                if (!HomeFilterPolicy.retireProxy(retired, active, gateway)) {
+                    errors.add("home-filter:previous-config-removal-unverified");
+                    verified = false;
+                }
+            }
+        }
+        if (verified) {
+            for (String certificate : retiredCas) {
+                try {
+                    if (gateway.hasCa(certificate)) gateway.setCa(certificate, false);
+                    if (!gateway.hasCa(certificate)) continue;
+                } catch (RuntimeException ignored) {
+                    // No positive read-back that the retired CA is gone.
+                }
+                errors.add("home-filter:previous-ca-removal-unverified");
+                verified = false;
+            }
+        }
+        if (verified) {
+            for (HomeFilterPolicy.Config retired : previous) {
+                if (!HomeFilterPolicy.releaseVpnSettings(retired, active, gateway)) {
+                    errors.add("home-filter:previous-config-removal-unverified");
+                    verified = false;
+                }
+            }
+        }
+        if (verified && active == null && !previous.isEmpty()
+                && !HomeFilterPolicy.releaseProfileRestrictions(gateway)) {
+            errors.add("home-filter:previous-config-removal-unverified");
+            verified = false;
+        }
+        if (verified) {
+            // Everything else is proven gone. Only now does the old VPN lockdown go.
+            for (HomeFilterPolicy.Config retired : previous) {
+                if (!HomeFilterPolicy.clearVpnLockdown(retired, active, gateway)) {
+                    errors.add("home-filter:previous-config-removal-unverified");
+                    verified = false;
+                }
+            }
+        }
+        if (verified && active == null && settings.configured()) {
+            // Read the whole teardown back.
+            verified = verifyReadback(settings, HomeFilterPolicy.reconcile(settings, sdk, gateway), errors);
+        }
+        if (verified && !finish.getAsBoolean()) {
+            errors.add("journal-write-failed");
+            return false;
+        }
+        return verified;
+    }
+
+    /** The VPN lockdown and proxy in force before a pass, and whether its new certificate was already installed. */
+    private record LiveFilter(String vpnPackage, String pacUrl, boolean newCaInstalled) {
+        static LiveFilter read(HomeFilterPolicy.Gateway gateway, String newCa) {
+            try {
+                return new LiveFilter(gateway.alwaysOnPackage(), pac(gateway),
+                        newCa != null && gateway.hasCa(newCa));
+            } catch (RuntimeException unreadable) {
+                return null;
+            }
+        }
+
+        /**
+         * Puts back what a failed attempt moved, withdraws a certificate it added, and reads all of it back.
+         * A device that had no filter VPN keeps whatever the attempt reached: that is not less than before.
+         */
+        boolean restore(HomeFilterPolicy.Gateway gateway, String newCa) {
+            if (vpnPackage == null) {
+                return true;
+            }
+            try {
+                if (!vpnPackage.equals(gateway.alwaysOnPackage())) {
+                    gateway.setVpn(vpnPackage);
+                }
+                if (!pacUrl.equals(pac(gateway))) {
+                    gateway.setProxy(pacUrl.isEmpty() ? null : pacUrl);
+                }
+                if (newCa != null && !newCaInstalled && gateway.hasCa(newCa)) {
+                    gateway.setCa(newCa, false);
+                }
+                HomeFilterPolicy.VpnState vpn = gateway.vpnState();
+                return vpnPackage.equals(vpn.packageName()) && vpn.lockdown() && pacUrl.equals(pac(gateway))
+                        && (newCa == null || newCaInstalled || !gateway.hasCa(newCa));
+            } catch (RuntimeException refused) {
+                return false;
+            }
+        }
+
+        private static String pac(HomeFilterPolicy.Gateway gateway) {
+            String url = gateway.proxyPacUrl();
+            return url == null ? "" : url;
+        }
+    }
+
+    /**
+     * The applications behind a filter VPN that may be in force right now: the
+     * always-on package Android reports, and every filter this store still owes
+     * a cleanup for. A built-in blocked package never qualifies.
+     */
+    static Set<String> liveFilterVpnPackages(Context context, DevicePolicyManager dpm, ComponentName admin) {
+        Set<String> packages = new java.util.LinkedHashSet<>();
+        try {
+            String alwaysOn = dpm.getAlwaysOnVpnPackage(admin);
+            if (alwaysOn != null) packages.add(alwaysOn);
+        } catch (RuntimeException unreadable) {
+            // The stored filters below still name what this owner configured.
+        }
+        try {
+            for (HomeFilterPolicy.Config retired : HomeFilterStore.retiredFilters(context)) {
+                packages.add(retired.vpnPackage());
+            }
+            HomeFilterPolicy.Settings stored = HomeFilterStore.read(context);
+            if (stored.configured()) packages.add(stored.config().vpnPackage());
+        } catch (RuntimeException corrupt) {
+            // A corrupt store stops the pass elsewhere.
+        }
+        packages.removeIf(BuiltInBlockExemptions::isBuiltInBlocked);
+        packages.remove(context.getPackageName());
+        return packages;
     }
 
     static boolean verifyReadback(HomeFilterPolicy.Settings enforced, HomeFilterPolicy.Report report,
@@ -303,7 +477,8 @@ public final class HomeFilterController {
                 PackageManager.MATCH_UNINSTALLED_PACKAGES | PackageManager.MATCH_DISABLED_COMPONENTS;
 
         /** The filter itself must be launchable before Android can verify its VPN policy. */
-        private void restoreVpnAvailability(HomeFilterPolicy.Settings settings) {
+        private void restoreVpnAvailability(HomeFilterPolicy.Settings settings,
+                                            Predicate<Set<String>> recordRelease) {
             if (!settings.enabled() || !HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)) {
                 return;
             }
@@ -322,6 +497,9 @@ public final class HomeFilterController {
                     return;
                 }
                 if (hidden) {
+                    if (recordRelease != null && !recordRelease.test(Set.of(packageName))) {
+                        throw new IllegalStateException("The release could not be recorded");
+                    }
                     dpm.setApplicationHidden(admin, packageName, false);
                 }
                 if (!dpm.isApplicationHidden(admin, packageName)
