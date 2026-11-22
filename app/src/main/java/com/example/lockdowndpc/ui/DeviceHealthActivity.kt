@@ -30,6 +30,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
@@ -101,6 +102,7 @@ class DeviceHealthActivity : AppCompatActivity() {
 @Composable
 private fun DeviceHealthScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
 
     var snapshot by remember { mutableStateOf<DeviceHealthSnapshot?>(null) }
@@ -119,7 +121,7 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
             read,
             null,
             System.currentTimeMillis(),
-            { id, args -> context.getString(id, *args) },
+            { id, args -> resources.getString(id, *args) },
             { millis -> formatTimestamp(context, millis) },
         )
     }
@@ -181,11 +183,11 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
                             AuditLog.append(
                                 context,
                                 AuditEvent.HEALTH_EXPORTED,
-                                context.getString(R.string.health_audit_exported),
+                                resources.getString(R.string.health_audit_exported),
                             )
                         }
                         message = UiMessage(
-                            text = context.getString(R.string.health_export_copied),
+                            text = resources.getString(R.string.health_export_copied),
                             isError = false,
                         )
                     },

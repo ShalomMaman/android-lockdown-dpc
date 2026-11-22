@@ -36,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
@@ -179,6 +180,7 @@ private fun playCompatibilityStatusRes(state: PlayStoreCompatibility.State): Int
 @Composable
 private fun SystemPolicyScreen(onBack: () -> Unit) {
     val context = LocalContext.current
+    val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
 
     // Bumped after every write so the rows re-read the store rather than caching
@@ -209,7 +211,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             AdminSession.extend()
             return true
         }
-        message = UiMessage(context.getString(R.string.system_policy_error_auth), isError = true)
+        message = UiMessage(resources.getString(R.string.system_policy_error_auth), isError = true)
         return false
     }
 
@@ -224,14 +226,14 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         AuditLog.append(
             context,
             AuditEvent.SYSTEM_POLICY_CHANGED,
-            context.getString(
+            resources.getString(
                 R.string.audit_system_policy_changed,
                 "${change.control.storageKey()}=${change.requested}".bidiIsolated(),
             ),
         )
         revision++
         message = UiMessage(
-            context.getString(
+            resources.getString(
                 if (protectionEnabled) {
                     R.string.system_policy_pending_note
                 } else {
@@ -257,14 +259,14 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         AuditLog.append(
             context,
             AuditEvent.PLAY_COMPATIBILITY_CHANGED,
-            context.getString(
+            resources.getString(
                 R.string.audit_play_compatibility_changed,
                 "play_store_compatibility=$requested".bidiIsolated(),
             ),
         )
         revision++
         message = UiMessage(
-            context.getString(
+            resources.getString(
                 if (protectionEnabled) {
                     R.string.system_policy_pending_note
                 } else {
@@ -291,7 +293,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             revision++
             message = when {
                 !result.deviceOwner() -> UiMessage(
-                    context.getString(R.string.not_device_owner),
+                    resources.getString(R.string.not_device_owner),
                     isError = true,
                 )
 
@@ -299,9 +301,9 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     // Policy detail mixes prose with Latin restriction keys, so it
                     // is isolated before being embedded in a localized sentence.
                     val detail = result.errors().firstOrNull()
-                        ?: context.getString(R.string.error_unknown)
+                        ?: resources.getString(R.string.error_unknown)
                     UiMessage(
-                        context.getString(
+                        resources.getString(
                             R.string.system_policy_applied_failed,
                             detail.bidiIsolated(),
                         ),
@@ -313,10 +315,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     AuditLog.append(
                         context,
                         AuditEvent.SYSTEM_POLICY_APPLIED,
-                        context.getString(R.string.audit_system_policy_applied),
+                        resources.getString(R.string.audit_system_policy_applied),
                     )
                     UiMessage(
-                        context.getString(R.string.system_policy_applied_ok),
+                        resources.getString(R.string.system_policy_applied_ok),
                         isError = false,
                     )
                 }
@@ -371,53 +373,53 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             val result = changed?.result()
             message = when {
                 outcome.exceptionOrNull() is SecurityException -> UiMessage(
-                    context.getString(R.string.system_policy_error_auth),
+                    resources.getString(R.string.system_policy_error_auth),
                     isError = true,
                 )
                 outcome.isFailure ||
                     changed?.status() == BuiltInExemptionsController.Status.NOT_SAVED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_change_refused),
+                    resources.getString(R.string.system_policy_exempt_change_refused),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.CONTAINMENT_REFUSED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_containment_refused),
+                    resources.getString(R.string.system_policy_exempt_containment_refused),
                     isError = true,
                 )
                 result != null && !result.applied() -> UiMessage(
-                    context.getString(
+                    resources.getString(
                         if (changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED) {
                             R.string.system_policy_exempt_failed_and_audit_not_saved
                         } else {
                             R.string.system_policy_applied_failed
                         },
                         (result.errors().firstOrNull()
-                            ?: context.getString(R.string.error_unknown)).bidiIsolated(),
+                            ?: resources.getString(R.string.error_unknown)).bidiIsolated(),
                     ),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.FILTER_NOT_READY -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_filter_not_ready),
+                    resources.getString(R.string.system_policy_exempt_filter_not_ready),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.AUDIT_NOT_SAVED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_audit_not_saved),
+                    resources.getString(R.string.system_policy_exempt_audit_not_saved),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.PAUSED_REFUSED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_paused_refused),
+                    resources.getString(R.string.system_policy_exempt_paused_refused),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.ACTIVE_ADMIN_REFUSED -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_active_admin_refused),
+                    resources.getString(R.string.system_policy_exempt_active_admin_refused),
                     isError = true,
                 )
                 changed?.status() == BuiltInExemptionsController.Status.ADMINS_UNREADABLE -> UiMessage(
-                    context.getString(R.string.system_policy_exempt_admins_unreadable),
+                    resources.getString(R.string.system_policy_exempt_admins_unreadable),
                     isError = true,
                 )
                 result == null -> null
                 else -> UiMessage(
-                    context.getString(R.string.system_policy_applied_ok),
+                    resources.getString(R.string.system_policy_applied_ok),
                     isError = false,
                 )
             }
@@ -450,10 +452,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 // The stored schedule is re-read on the next render, so the
                 // row shows what is actually in force.
                 message = if (failure is SecurityException) {
-                    UiMessage(context.getString(R.string.system_policy_error_auth), isError = true)
+                    UiMessage(resources.getString(R.string.system_policy_error_auth), isError = true)
                 } else {
                     UiMessage(
-                        context.getString(
+                        resources.getString(
                             R.string.system_policy_applied_failed,
                             failure.javaClass.simpleName.bidiIsolated(),
                         ),
@@ -465,33 +467,33 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             val pass = result.pass()
             message = when (result.outcome().status()) {
                 ScheduleChange.Status.SESSION_REQUIRED -> UiMessage(
-                    context.getString(R.string.system_policy_error_auth),
+                    resources.getString(R.string.system_policy_error_auth),
                     isError = true,
                 )
                 ScheduleChange.Status.NOT_SAVED -> UiMessage(
-                    context.getString(R.string.system_policy_schedule_not_saved),
+                    resources.getString(R.string.system_policy_schedule_not_saved),
                     isError = true,
                 )
                 ScheduleChange.Status.CLOCK_UNLOCKED -> UiMessage(
-                    context.getString(R.string.system_policy_schedule_clock_unconfirmed),
+                    resources.getString(R.string.system_policy_schedule_clock_unconfirmed),
                     isError = true,
                 )
                 ScheduleChange.Status.UNCHANGED -> null
                 else -> when {
                     pass == null -> UiMessage(
-                        context.getString(R.string.system_policy_paused_note),
+                        resources.getString(R.string.system_policy_paused_note),
                         isError = false,
                     )
                     !pass.applied() -> UiMessage(
-                        context.getString(
+                        resources.getString(
                             R.string.system_policy_applied_failed,
                             (pass.errors().firstOrNull()
-                                ?: context.getString(R.string.error_unknown)).bidiIsolated(),
+                                ?: resources.getString(R.string.error_unknown)).bidiIsolated(),
                         ),
                         isError = true,
                     )
                     else -> UiMessage(
-                        context.getString(R.string.system_policy_applied_ok),
+                        resources.getString(R.string.system_policy_applied_ok),
                         isError = false,
                     )
                 }
@@ -507,7 +509,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         )
         if (signer.isEmpty()) {
             message = UiMessage(
-                context.getString(R.string.system_policy_exempt_social_signer_unreadable),
+                resources.getString(R.string.system_policy_exempt_social_signer_unreadable),
                 isError = true,
             )
             return
