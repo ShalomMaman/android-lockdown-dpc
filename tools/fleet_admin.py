@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import os
 import re
 import secrets
 import sys
@@ -44,6 +45,7 @@ FIXTURE_KEY_IDS = frozenset(
 )
 IDENTITY_TYPES = {"serial", "enrollmentSpecificId"}
 MAX_INPUT_BYTES = 4 * 1024 * 1024
+DEFAULT_REVOCATION_MAX_AGE_DAYS = 7
 
 
 def read_bytes(path: Path, limit: int = MAX_INPUT_BYTES) -> bytes:
@@ -136,7 +138,7 @@ def check_output(output: Path, *inputs: Path) -> None:
             raise FleetError("output must not overwrite an input file")
 
 
-def emit(args: argparse.Namespace, document: dict, key: SigningKey) -> None:
+def signed_envelope(document: dict, key: SigningKey) -> bytes:
     check_document(document)
     payload = canonical(document)
     limit = PROTOCOL["envelope"]["maxEncodedBytes"]
@@ -149,7 +151,11 @@ def emit(args: argparse.Namespace, document: dict, key: SigningKey) -> None:
                           "payload": b64url(payload), "signature": b64url(signature)})
     if envelope_error(envelope):
         raise FleetError("signed envelope exceeds the wire limit or is malformed")
-    publish_update.write_atomic(args.output, envelope, args.force)
+    return envelope
+
+
+def emit(args: argparse.Namespace, document: dict, key: SigningKey) -> None:
+    publish_update.write_atomic(args.output, signed_envelope(document, key), args.force)
 
 
 def header(fleet: str, kind: str) -> dict:
@@ -290,7 +296,22 @@ def load_inventory(paths: list[Path]) -> dict[str, dict]:
     return entries
 
 
-def revocation_serials(status: object) -> set[str]:
+def load_revocations(path: Path, max_age_days: int) -> set[str]:
+    if max_age_days <= 0:
+        raise FleetError("--revocation-max-age-days must be positive")
+    with path.expanduser().open("rb") as source:
+        age = time.time() - os.fstat(source.fileno()).st_mtime
+        if age < 0:
+            raise FleetError("Android attestation revocation list has a future modification time")
+        if age > max_age_days * 24 * 3600:
+            raise FleetError(f"Android attestation revocation list is older than {max_age_days} day(s)")
+        raw = source.read(MAX_INPUT_BYTES + 1)
+    if len(raw) > MAX_INPUT_BYTES:
+        raise FleetError("Android attestation revocation list is too large")
+    try:
+        status = parse_wire(raw)
+    except (ValueError, RecursionError):
+        raise FleetError("invalid Android attestation revocation list") from None
     if not isinstance(status, dict) or not isinstance(status.get("entries"), dict):
         raise FleetError("invalid Android attestation revocation list")
     serials = set()
@@ -332,7 +353,7 @@ class EnrolmentVerifier:
                 raise FleetError("expected an array of attestation roots")
         return cls(
             load_inventory(args.inventory), attestation.root_certificates(roots),
-            revocation_serials(read_json(args.revocation_list)), args.expected_package,
+            load_revocations(args.revocation_list, args.revocation_max_age_days), args.expected_package,
             bytes.fromhex(signer),
         )
 
@@ -506,11 +527,12 @@ def policy(args: argparse.Namespace) -> None:
     controls = body.get("systemControls", {})
     if "locale" in body and any(sdk < 33 for _, sdk in verified.values()):
         raise FleetError("a verified target cannot enforce locale before Android 13")
-    if controls.get("developer_options_and_adb") is True:
+    # An omitted control inherits the blocking default on production devices.
+    if controls.get("developer_options_and_adb", True):
         passed = drill_passes(args.drill_evidence)
         if untrusted or any(family not in passed for family, _ in verified.values()):
             raise FleetError("ADB guard: every target needs a verified firmware family with a "
-                             "recorded signed self-update drill PASS")
+                             "locally recorded self-update drill PASS")
     key = policy_signing_key(args)
     emit(args, document, key)
     print(f"Signed fleet policy version {args.version} for {len(args.device_id)} device(s).")
@@ -533,6 +555,10 @@ def policy(args: argparse.Namespace) -> None:
 def recovery(args: argparse.Namespace) -> None:
     if args.device_id in FIXTURE_KEY_IDS:
         raise FleetError("contract fixture keys are refused as device IDs")
+    output = args.output.expanduser()
+    if output.exists() or output.is_symlink():
+        raise FileExistsError("recovery output directory already exists")
+    output = output.resolve()
     key = policy_signing_key(args)
     spec = PROTOCOL["recovery"]
     code = "".join(secrets.choice(spec["codeAlphabet"]) for _ in range(spec["codeCharacters"]))
@@ -544,9 +570,14 @@ def recovery(args: argparse.Namespace) -> None:
         "recoveryVersion": args.version, "deviceId": args.device_id,
         "salt": b64url(salt), "verifier": b64url(verifier),
     }
-    emit(args, document, key)
     size = spec["displayGroupSize"]
-    print("Recovery code: " + " ".join(code[start:start + size] for start in range(0, len(code), size)))
+    grouped_code = " ".join(code[start:start + size] for start in range(0, len(code), size))
+    code_file = "recovery-code.txt"
+    write_private_bundle(output, {
+        "recovery.json": signed_envelope(document, key),
+        code_file: (grouped_code + "\n").encode("ascii"),
+    })
+    print(output / code_file)
 
 
 def reanchor(args: argparse.Namespace) -> None:
@@ -561,21 +592,36 @@ def reanchor(args: argparse.Namespace) -> None:
         **header(args.fleet_id, "re-anchor"), "deviceId": args.device_id, "nonce": args.nonce,
         "rootFingerprint": key.fingerprint, "rootSpki": b64url(key.spki), "floors": floors,
     }
-    hashes = {name: digest for name, digest in (
-        ("keyset", args.keyset_payload_sha256), ("fleet-policy", args.policy_payload_sha256),
-    ) if digest is not None}
+    hashes = {}
+    for kind, path, version_field in (
+        ("keyset", args.keyset_envelope, "keySetVersion"),
+        ("fleet-policy", args.policy_envelope, "fleetPolicyVersion"),
+    ):
+        if path is None:
+            continue
+        check_output(args.output, path)
+        _, raw = read_envelope(path)
+        payload = signed_payload(raw, kind)
+        if payload["fleetId"] != args.fleet_id or payload[version_field] != floors[kind]:
+            raise FleetError(f"{kind} envelope must match the re-anchor fleet and floor version")
+        hashes[kind] = hash_hex(raw)
     if hashes:
         document["floorPayloadSha256"] = hashes
     emit(args, document, key)
     print("Signed the re-anchor document for the supplied console nonce.")
 
 
-def add_signing_options(parser: argparse.ArgumentParser, *, fleet_policy: bool = False) -> None:
+def add_signing_options(parser: argparse.ArgumentParser, *, fleet_policy: bool = False,
+                        bundle_output: bool = False) -> None:
     parser.add_argument("--private-key", required=True, type=Path, help="External PEM private key")
     parser.add_argument("--key-passphrase-env", metavar="NAME", help="Environment variable read by OpenSSL")
     parser.add_argument("--fleet-id", required=True)
-    parser.add_argument("--output", type=Path, required=True, help="Output file outside the checkout")
-    parser.add_argument("--force", action="store_true", help="Atomically replace an existing output file")
+    if bundle_output:
+        parser.add_argument("--output", type=Path, required=True,
+                            help="New private output directory outside the checkout")
+    else:
+        parser.add_argument("--output", type=Path, required=True, help="Output file outside the checkout")
+        parser.add_argument("--force", action="store_true", help="Atomically replace an existing output file")
     if fleet_policy:
         parser.add_argument("--keyset", type=Path, required=True, help="Root-signed key set envelope")
         parser.add_argument("--root-public-key", type=Path, required=True, help="Trusted fleet root PEM public key")
@@ -587,6 +633,8 @@ def add_enrolment_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--inventory", action="append", default=[], type=Path, help="Local issuance inventory JSON")
     parser.add_argument("--attestation-roots", type=Path, help="Offline Google hardware attestation roots")
     parser.add_argument("--revocation-list", type=Path, help="Offline Google attestation status JSON")
+    parser.add_argument("--revocation-max-age-days", type=int, default=DEFAULT_REVOCATION_MAX_AGE_DAYS,
+                        help="Maximum age of the local revocation list by modification time (default: %(default)s)")
     parser.add_argument("--expected-package", help="Expected Device Guard application ID")
     parser.add_argument("--expected-signer-sha256", help="Expected APK signing certificate SHA-256")
 
@@ -621,8 +669,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     add_enrolment_options(policies)
     policies.set_defaults(run=policy)
 
-    recover = subcommands.add_parser("recovery", help="Print one recovery code and sign its verifier")
-    add_signing_options(recover, fleet_policy=True)
+    recover = subcommands.add_parser("recovery", help="Write a private recovery code and signed verifier bundle")
+    add_signing_options(recover, fleet_policy=True, bundle_output=True)
     recover.add_argument("--device-id", required=True)
     recover.set_defaults(run=recovery)
 
@@ -643,8 +691,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     anchor.add_argument("--root-fingerprint", required=True, help="Current root fingerprint from the device binding")
     for kind in ("keyset", "policy", "recovery", "command"):
         anchor.add_argument(f"--{kind}-floor", type=int, required=True)
-    anchor.add_argument("--keyset-payload-sha256")
-    anchor.add_argument("--policy-payload-sha256")
+    anchor.add_argument("--keyset-envelope", type=Path, help="Issued key set envelope at --keyset-floor")
+    anchor.add_argument("--policy-envelope", type=Path, help="Issued policy envelope at --policy-floor")
     anchor.set_defaults(run=reanchor)
     return parser.parse_args(argv)
 

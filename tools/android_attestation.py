@@ -174,7 +174,9 @@ def verify_chain(chain: list[Certificate], roots: list[Certificate], revoked: se
                 continue
             anchor_path.write_text(ssl.DER_cert_to_PEM_cert(anchor.der), encoding="ascii")
             intermediates = chain[1:-1] if chain[-1].der == anchor.der else chain[1:]
-            args = ["verify", "-show_chain", "-trusted", str(anchor_path)]
+            # Factory attestation certificates can expire. The enrolment challenge
+            # and the current revocation status are checked separately.
+            args = ["verify", "-no_check_time", "-show_chain", "-trusted", str(anchor_path)]
             if intermediates:
                 intermediate_path.write_text(
                     "".join(ssl.DER_cert_to_PEM_cert(cert.der) for cert in intermediates),

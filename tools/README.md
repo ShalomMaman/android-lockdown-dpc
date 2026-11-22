@@ -119,9 +119,14 @@ records, credentials and signed outputs outside the checkout.
 - `verify-enrolment` takes a downloaded `--record`, the local `--inventory`
   and the intended `--fleet-id`. Independently obtain the current Google
   hardware attestation roots (PEM bundle or JSON array of PEMs) and status
-  JSON for `--attestation-roots` and `--revocation-list`. Use the approved
-  application ID and APK signing certificate digest. The verification runs
-  offline. It requires a currently valid certificate chain.
+  JSON for `--attestation-roots` and `--revocation-list`. Download the
+  [Google revocation list](https://android.googleapis.com/attestation/status)
+  directly and preserve its local modification time if you copy it. The
+  offline tool uses that time to enforce `--revocation-max-age-days` (default
+  7, a positive whole number). Refresh older copies from Google. Use the
+  approved application ID and APK signing certificate digest. Verification
+  checks the chain signatures, attestation challenge and revocation status.
+  Expired factory attestation certificates can pass these checks.
 - `policy` signs a schema-validated `--body` for the listed `--device-id`
   targets. Supply each downloaded `--enrolment-record` and the same trust
   inputs as `verify-enrolment`. `--allow-untrusted` adds the affected targets
@@ -129,17 +134,23 @@ records, credentials and signed outputs outside the checkout.
   previous envelope for a field comparison, including after key rotation.
   The tool verifies the current key set and checks that the signer is an
   approved policy key before signing.
-- Before signing a policy that disables ADB, supply `--drill-evidence`.
-  This JSON array has one locally recorded entry per firmware family.
+- Before signing a policy that disables ADB or omits
+  `systemControls.developer_options_and_adb`, supply `--drill-evidence`.
+  Production devices block ADB by default when this field is omitted.
+  The evidence is an unsigned local JSON array with one entry per firmware family.
   Each entry has `firmwareFamily`, `offline` (the JSON record from
   `update_drill.py` with verdict `PASS`), `onDevice` (`PASS`),
   and `onDeviceEvidence` (a reference to the recorded hardware observations
   for steps 0–5). The verified target's family must match a passing entry.
-- `recovery` displays the one-time code after writing the signed verifier.
-  Capture the code directly into the operator's vault. `reanchor` takes the
-  current binding root fingerprint, the displayed nonce and the four latest
-  issued floors. For a same-version resend, supply the SHA-256 of the exact
-  decoded key set and/or policy payload with the corresponding hash option.
+- `recovery --output <new-directory>` writes `recovery-code.txt` and the
+  signed verifier `recovery.json` together in a private directory (mode
+  `0700`, files `0600`). It refuses an existing directory and prints only
+  the path to the code file. Import the code into the operator's vault.
+- `reanchor` takes the current binding root fingerprint, the displayed nonce
+  and the four latest issued floors. For a same-version resend, supply the
+  original issued document with `--keyset-envelope` and/or `--policy-envelope`.
+  Each envelope must match the fleet and its floor version. The tool hashes
+  the exact decoded payload bytes.
   See the [re-anchor contract](../docs/remote-contract/README.md#console-re-anchor).
 
 The offline enrolment record uses `fleetId`, `deviceId`, `ticketSha256`

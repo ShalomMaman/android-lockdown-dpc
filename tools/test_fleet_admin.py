@@ -4,7 +4,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import secrets
 import ssl
 import stat
@@ -216,7 +215,7 @@ class FleetAdminTest(unittest.TestCase):
         self.assertIn("168 hours", result.stderr)
         self.assertFalse(output.exists())
 
-    def make_attestation(self, **changes):
+    def make_attestation(self, *, expired_intermediate=False, **changes):
         root = self.directory / "attestation-root.pem"
         root_key = self.make_key("attestation-root")
         openssl("req", "-new", "-x509", "-key", root_key[0], "-days", 2,
@@ -230,8 +229,11 @@ class FleetAdminTest(unittest.TestCase):
                           "keyUsage=critical,keyCertSign,cRLSign\n")
         openssl("req", "-new", "-key", intermediate_key[0], "-subj", "/CN=Synthetic intermediate",
                 "-out", request)
-        openssl("x509", "-req", "-in", request, "-CA", root, "-CAkey", root_key[0],
-                "-set_serial", "123", "-days", 2, "-extfile", config, "-out", intermediate)
+        if expired_intermediate:
+            self.issue_expired_intermediate(root, root_key[0], request, config, intermediate)
+        else:
+            openssl("x509", "-req", "-in", request, "-CA", root, "-CAkey", root_key[0],
+                    "-set_serial", "123", "-days", 2, "-extfile", config, "-out", intermediate)
         device = self.directory / "attested-device.pem"
         request = self.directory / "device.csr"
         config = self.directory / "device.conf"
@@ -244,6 +246,22 @@ class FleetAdminTest(unittest.TestCase):
                 "-set_serial", "42", "-days", 2, "-extfile", config, "-out", device)
         return root, [b64url(ssl.PEM_cert_to_DER_cert(cert.read_text()))
                       for cert in (device, intermediate)], challenge
+
+    def issue_expired_intermediate(self, root, root_key, request, extensions, output):
+        index = self.directory / "ca-index"
+        index.touch()
+        serial = self.directory / "ca-serial"
+        serial.write_text("7B\n")
+        config = self.directory / "ca.conf"
+        config.write_text(
+            f"[ca]\ndefault_ca = issuer\n[issuer]\ndatabase = {index}\n"
+            f"new_certs_dir = {self.directory}\nserial = {serial}\n"
+            "default_md = sha256\npolicy = subject_policy\n"
+            "[subject_policy]\ncommonName = supplied\n"
+        )
+        openssl("ca", "-batch", "-notext", "-config", config, "-cert", root, "-keyfile", root_key,
+                "-in", request, "-startdate", "200101000000Z", "-enddate", "210101000000Z",
+                "-extfile", extensions, "-out", output)
 
     def enrolment(self, *, identity_type="serial", identity="test-serial", **changes):
         bundle, _ = self.issue(identity_type=identity_type, identity=identity)
@@ -304,6 +322,28 @@ class FleetAdminTest(unittest.TestCase):
         path = self.write_json("record.json", record)
         self.run_cli("verify-enrolment", "--fleet-id", "test-fleet", "--record", path, *trust)
 
+    def test_enrolment_accepts_expired_intermediate_unless_revoked(self):
+        record, trust = self.enrolment(expired_intermediate=True)
+        path = self.write_json("record.json", record)
+        args = ["verify-enrolment", "--fleet-id", "test-fleet", "--record", path, *trust]
+        self.assertIn("verified", self.run_cli(*args).stdout)
+        self.write_json("revocations.json", {"entries": {"7b": {"status": "REVOKED"}}})
+        self.assertIn("revoked or suspended", self.run_cli(*args, status=2).stderr)
+
+    def test_enrolment_enforces_revocation_list_age(self):
+        record, trust = self.enrolment()
+        path = self.write_json("record.json", record)
+        args = ["verify-enrolment", "--fleet-id", "test-fleet", "--record", path, *trust]
+        revocations = self.directory / "revocations.json"
+        stale = time.time() - 8 * 24 * 3600
+        os.utime(revocations, (stale, stale))
+        self.assertIn("older than 7 day(s)", self.run_cli(*args, status=2).stderr)
+        self.assertIn("verified", self.run_cli(*args, "--revocation-max-age-days", 9).stdout)
+        self.assertIn("must be positive", self.run_cli(*args, "--revocation-max-age-days", 0, status=2).stderr)
+        future = time.time() + 3600
+        os.utime(revocations, (future, future))
+        self.assertIn("future modification time", self.run_cli(*args, status=2).stderr)
+
     def test_android_attestation_rejects_software_unlocked_unverified_or_wrong_signer(self):
         for changes, error in (({"locked": False}, "locked bootloader"),
                                ({"boot_state": 1}, "verified boot"),
@@ -335,6 +375,15 @@ class FleetAdminTest(unittest.TestCase):
         self.run_cli(*first_args, "--allow-untrusted")
         initial = self.assert_envelope(first, self.policy_key)
         self.assertIn("--allow-untrusted", initial["auditNote"])
+        for controls in (None, {"app_stores_and_installers": False}):
+            with self.subTest(system_controls=controls):
+                inherited_body = {field: value for field, value in body.items() if field != "systemControls"}
+                if controls is not None:
+                    inherited_body["systemControls"] = controls
+                self.write_json("body.json", inherited_body)
+                error = self.run_cli(*second_args, status=2).stderr
+                self.assertIn("ADB guard", error)
+                self.assertIn("locally recorded self-update drill PASS", error)
         body["systemControls"] = {"developer_options_and_adb": True, "app_stores_and_installers": False}
         self.write_json("body.json", body)
         self.assertIn("ADB guard", self.run_cli(*second_args, status=2).stderr)
@@ -362,47 +411,86 @@ class FleetAdminTest(unittest.TestCase):
         result = self.run_cli(*second_args, "--force", status=2)
         self.assertIn("doc-field-unknown at /policy/systemUpdates", result.stderr)
         self.assertEqual(self.assert_envelope(second, self.policy_key), document)
+        self.write_json("record.json", record)
+        del body["systemControls"]["developer_options_and_adb"]
+        self.write_json("body.json", body)
+        self.run_cli(*second_args, "--force", "--drill-evidence", evidence)
+        self.assertEqual(self.assert_envelope(second, self.policy_key)["policy"], body)
 
-    def test_recovery_prints_only_one_code_and_only_after_signed_output(self):
+    def test_recovery_publishes_private_bundle_without_logging_code(self):
         self.run_cli("keyset", *self.keyset_args())
-        output = self.output / "recovery.json"
+        output = self.output / "recovery"
+        code_path = output / "recovery-code.txt"
+        verifier_path = output / "recovery.json"
         device_id = b64url(hashlib.sha256(self.device_key[2]).digest())
         args = ["recovery", *self.signing_args(self.policy_key, output, 1), "--device-id", device_id]
         result = self.run_cli(*args)
-        code, = re.findall(r"^Recovery code: ([A-Z2-7]{4}(?: [A-Z2-7]{4}){4})$",
-                          result.stdout, re.MULTILINE)
-        self.assertEqual(len(result.stdout.splitlines()), 1)
-        document = self.assert_envelope(output, self.policy_key)
+        code_contents = code_path.read_text()
+        code = code_contents.strip()
+        self.assertRegex(code, r"^[A-Z2-7]{4}(?: [A-Z2-7]{4}){4}$")
+        self.assertEqual(result.stdout, f"{code_path.resolve()}\n")
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn(code, result.stdout + result.stderr)
+        self.assertNotIn(code.replace(" ", ""), result.stdout + result.stderr)
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+        for path in (code_path, verifier_path):
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        document = self.assert_envelope(verifier_path, self.policy_key)
         spec = PROTOCOL["recovery"]
         self.assertEqual(decode(document["verifier"]), hashlib.pbkdf2_hmac(
             "sha256", code.replace(" ", "").encode("ascii"), decode(document["salt"]),
             spec["iterations"], dklen=spec["derivedBytes"],
         ))
         self.assertNotIn(code.replace(" ", ""), canonical(document).decode())
-        self.assertEqual(self.run_cli(*args, status=2).stdout, "")
-        wrong = ["recovery", *self.signing_args(self.server_key, output, 1), "--device-id", device_id]
+        original_verifier = verifier_path.read_bytes()
+        existing = self.run_cli(*args, status=2)
+        self.assertEqual(existing.stdout, "")
+        self.assertEqual(existing.stderr, "error: output already exists\n")
+        self.assertEqual(code_path.read_text(), code_contents)
+        self.assertEqual(verifier_path.read_bytes(), original_verifier)
+        wrong_output = self.output / "wrong"
+        wrong = ["recovery", *self.signing_args(self.server_key, wrong_output, 1), "--device-id", device_id]
         self.assertIn("not a fleet policy key", self.run_cli(*wrong, status=2).stderr)
+        self.assertFalse(wrong_output.exists())
 
     def test_reanchor_matches_vector_shape_and_requires_current_root(self):
         reference = parse_wire(decode(vectors("re-anchor")["envelope"]["payload"]))
         device_id = b64url(hashlib.sha256(self.device_key[2]).digest())
         root_id = b64url(hashlib.sha256(self.root_key[2]).digest())
         output = self.output / "anchor.json"
-        digest = hash_hex(canonical(DOCS["policy-6"]))
+        self.run_cli("keyset", *self.keyset_args())
+        keyset_payload = decode(parse_wire(self.keyset_file.read_bytes())["payload"])
+        # The hash must use the exact accepted bytes, even for noncanonical JSON.
+        policy_payload = b"\n" + canonical({**DOCS["policy-6"], "fleetId": "test-fleet",
+                                             "deviceIds": [device_id]}) + b"\n"
+        policy = self.write_json("issued-policy.json", {
+            "format": "dg-signed/1",
+            "keyId": b64url(hashlib.sha256(self.policy_key[2]).digest()),
+            "payload": b64url(policy_payload),
+            "signature": b64url(openssl("dgst", "-sha256", "-sign", self.policy_key[0], data=policy_payload)),
+        })
         args = ["reanchor", *self.signing_args(self.root_key, output),
                 "--device-id", device_id, "--nonce", reference["nonce"],
                 "--root-fingerprint", root_id,
-                "--keyset-floor", 2, "--policy-floor", 6, "--recovery-floor", 2, "--command-floor", 0,
-                "--policy-payload-sha256", digest]
-        self.run_cli(*args)
+                "--keyset-floor", 1, "--policy-floor", 6, "--recovery-floor", 2, "--command-floor", 0]
+        self.run_cli(*args, "--keyset-envelope", self.keyset_file, "--policy-envelope", policy)
         document = self.assert_envelope(output, self.root_key)
         self.assertEqual(set(reference), set(document))
-        self.assertEqual(document["floors"], {"keyset": 2, "fleet-policy": 6, "recovery": 2, "command": 0})
-        self.assertEqual(document["floorPayloadSha256"], {"fleet-policy": digest})
+        self.assertEqual(document["floors"], {"keyset": 1, "fleet-policy": 6, "recovery": 2, "command": 0})
+        self.assertEqual(document["floorPayloadSha256"], {
+            "keyset": hash_hex(keyset_payload), "fleet-policy": hash_hex(policy_payload),
+        })
         self.assertEqual(document["deviceId"], device_id)
         self.assertEqual(document["nonce"], reference["nonce"])
         self.assertEqual(document["rootFingerprint"], root_id)
         self.assertEqual(document["rootSpki"], b64url(self.root_key[2]))
+        self.assertIn("expected a fleet-policy document", self.run_cli(
+            *args, "--force", "--policy-envelope", self.keyset_file, status=2,
+        ).stderr)
+        self.assertIn("must match the re-anchor fleet and floor version", self.run_cli(
+            *args, "--force", "--policy-floor", 7, "--policy-envelope", policy, status=2,
+        ).stderr)
+        self.assertEqual(self.assert_envelope(output, self.root_key), document)
         args[args.index("--root-fingerprint") + 1] = device_id
         self.assertIn("current root fingerprint", self.run_cli(*args, "--force", status=2).stderr)
 
