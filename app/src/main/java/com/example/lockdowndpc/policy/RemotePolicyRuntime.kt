@@ -14,11 +14,15 @@ import com.example.lockdowndpc.remote.RemoteDocument
 import com.example.lockdowndpc.remote.RemoteEngine
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteJournal
+import com.example.lockdowndpc.remote.RemoteJournalGuardFile
 import com.example.lockdowndpc.remote.RemoteOverride
 import com.example.lockdowndpc.remote.RemoteSchema
 import com.example.lockdowndpc.remote.RemoteSync
 import com.example.lockdowndpc.remote.RemoteTime
 import com.example.lockdowndpc.remote.RemoteVerifier
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.security.KeyStore
 import java.security.SecureRandom
 import javax.crypto.KeyGenerator
@@ -41,10 +45,8 @@ internal object RemotePolicyRuntime {
         }
         return try {
             val current = open(context.applicationContext)
-            // A journal that existed and cannot be read names no generation, floor or
-            // trust. No pass runs: Android keeps the restrictions and hidden packages
-            // of the last one, and nothing can be accepted until the device is provisioned again.
-            if (current.engine.lost) return failed(JOURNAL_LOST)
+            // With a storage failure Android keeps the restrictions of the last pass.
+            current.engine.checkStores()?.let { return failed(it) }
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
@@ -66,14 +68,16 @@ internal object RemotePolicyRuntime {
             engine.bindFleet(verifier, binding, pinnedId, rootSpki, Build.VERSION.SDK_INT)
         }
 
-    /** Whether this enrolled device has lost its journal. The status screen says so instead of staying silent. */
-    fun journalLost(context: Context): Boolean = try {
-        val app = context.applicationContext
-        remoteEnabled(app) && RemoteJournal.isLost(
-            app.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
-            app.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE))
-    } catch (_: RuntimeException) {
-        false
+    /** Read status on the writer's thread so an in-progress two-store write is never reported as damage. */
+    fun journalFailure(context: Context): RemoteFailure? = try {
+        PolicyReconciliationCoordinator.callOnPolicyThread {
+            val app = context.applicationContext
+            if (!remoteEnabled(app)) return@callOnPolicyThread null
+            open?.let { return@callOnPolicyThread it.engine.checkStores() }
+            openJournal(app).failure
+        }
+    } catch (_: Exception) {
+        RemoteJournal.JOURNAL_LOST
     }
 
     fun beginExchange(context: Context): RemoteSync.Exchange? = onRemoteThread(context, null) {
@@ -86,6 +90,7 @@ internal object RemotePolicyRuntime {
 
     fun receive(context: Context, exchange: RemoteSync.Exchange, nonce: String, documents: List<RemoteDocument>):
         RemoteSync.Response = onRemoteThread(context, RemoteSync.Response(DISABLED), RemoteSync.Response(WRITE_FAILED)) {
+        engine.failure?.let { return@onRemoteThread RemoteSync.Response(it) }
         val pendingSync = sync ?: return@onRemoteThread RemoteSync.Response(RemoteFailure("sync-response-stale"))
         engine.receive(pendingSync, exchange, nonce, now(context), documents)
     }
@@ -118,6 +123,7 @@ internal object RemotePolicyRuntime {
                 val app = context.applicationContext
                 if (!remoteEnabled(app)) return@callOnPolicyThread blocked
                 val current = open(app)
+                current.engine.checkStores()
                 // Whatever the caller came for, an exposed package is hidden again first.
                 current.engine.revokeReleases()
                 current.work()
@@ -136,19 +142,32 @@ internal object RemotePolicyRuntime {
     )
 
     private val DISABLED = RemoteFailure(RemotePolicyApplier.UNAVAILABLE)
-    private val JOURNAL_LOST = RemoteFailure("journal-lost")
     private val WRITE_FAILED = RemoteFailure("journal-write-failed")
 
     private fun open(context: Context): Open = open ?: run {
         val schema = context.assets.open("v1.schema.json").use { RemoteSchema(it.readBytes()) }
         val projection = RemotePolicyProjection(context)
-        val journal = RemoteJournal(
-            context.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
-            context.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE))
-        val engine = RemoteEngine(journal, schema, projection, ::recoveryMac)
+        val engine = RemoteEngine(openJournal(context), schema, projection, ::recoveryMac)
         // Store writes are authorized only for the generation this journal holds.
-        AdminAuthority.CommittedPolicy.bindJournal { engine.state.generation()?.sha256 }
+        AdminAuthority.CommittedPolicy.bindJournal { if (engine.lost) null else engine.state.generation()?.sha256 }
         Open(projection, engine, RemoteVerifier(schema)).also { open = it }
+    }
+
+    private fun openJournal(context: Context): RemoteJournal {
+        return RemoteJournal(
+            context.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
+            context.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE),
+            RemoteJournalGuardFile(File(context.noBackupFilesDir, JOURNAL_GUARD_FILE)),
+            journalFileAbsent = { preferencesFilesAbsent(context, JOURNAL_PREFS) },
+            markerFileAbsent = { preferencesFilesAbsent(context, JOURNAL_MARKER_PREFS) },
+            remoteCommitted = { ManagementModeStore.read(context) == ManagementMode.REMOTE }
+        )
+    }
+
+    private fun preferencesFilesAbsent(context: Context, name: String): Boolean {
+        val base = File(context.dataDir, "shared_prefs/$name.xml")
+        return Files.notExists(base.toPath(), NOFOLLOW_LINKS) &&
+            Files.notExists(File(base.path + ".bak").toPath(), NOFOLLOW_LINKS)
     }
 
     /** JVM tests build a new application for every test. The opened journal belongs to the previous one. */
@@ -158,6 +177,7 @@ internal object RemotePolicyRuntime {
 
     const val JOURNAL_PREFS = "remote_policy_journal"
     const val JOURNAL_MARKER_PREFS = "remote_policy_journal_marker"
+    const val JOURNAL_GUARD_FILE = "remote-policy-guard"
 
     private fun failed(failure: RemoteFailure) =
         LockdownPolicyController.PolicyResult(false, false, 0, 0, listOf(failure.code))

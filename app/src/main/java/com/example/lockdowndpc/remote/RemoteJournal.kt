@@ -82,42 +82,79 @@ internal data class JournalState(
 
 internal const val MAX_FINISHED_COMMANDS = 16
 
-/**
- * One credential-protected file and one live instance on the policy thread.
- *
- * [marker] is a second file that only ever records that this device writes a
- * journal. It is stored before the first journal write and never taken back,
- * and no journal write is attempted until it is stored. A journal therefore
- * never exists without its marker, so an empty or unreadable journal is told
- * apart from a device that has never had one. The price is paid on the safe
- * side: if the marker is stored and the very first journal write then fails,
- * the device reads as lost and has to be provisioned again.
- */
-internal class RemoteJournal(private val preferences: SharedPreferences, private val marker: SharedPreferences) {
-    /** A journal that existed and cannot be read. Its floors and trust are unknown, so nothing is accepted. */
-    val lost: Boolean
+/** One live instance on the policy thread. Only an agreed record authorizes remote operations. */
+internal class RemoteJournal(
+    private val preferences: SharedPreferences,
+    private val marker: SharedPreferences,
+    private val guardStore: RemoteJournalGuardStore,
+    private val journalFileAbsent: () -> Boolean = { true },
+    private val markerFileAbsent: () -> Boolean = { true },
+    private val remoteCommitted: () -> Boolean = { false }
+) {
+    private var marked: Boolean
+    private var guard: JournalGuard?
+    private var floors: Map<DocumentType, Long>
     var state: JournalState
         private set
-    private var marked: Boolean
+    var failure: RemoteFailure?
+        private set
+    val lost: Boolean get() = failure != null
 
     init {
-        val read = read(preferences, marker)
-        marked = read.marked
-        lost = read.lost
-        state = read.state ?: JournalState()
-        if (read.state != null) mark()
+        val initial = read()
+        marked = initial.marked
+        guard = initial.secondary
+        floors = DocumentType.entries.associateWith(initial::floor)
+        state = initial.state ?: JournalState()
+        failure = initial.failure
+    }
+
+    fun floor(type: DocumentType): Long = floors.getValue(type)
+
+    /** Refresh at runtime entry points, keeping every observed floor and any prior failure. */
+    fun checkStores(): RemoteFailure? {
+        val stored = read()
+        floors = DocumentType.entries.associateWith { maxOf(floor(it), stored.floor(it)) }
+        if (!lost) failure = stored.failure ?: GUARD_MISMATCH.takeIf { stored.secondary != guard }
+        return failure
     }
 
     internal fun save(next: JournalState): Boolean {
-        if (lost || !mark()) return false
-        val bounded = next.bounded()
-        if (!write(STATE, JournalCodec.encode(bounded))) return false
+        if (lost) return false
+        val (bounded, nextGuard, encoded) = try {
+            val bounded = next.bounded()
+            val nextGuard = JournalGuard.from(bounded)
+            val binding = guard?.bindingFingerprint
+            require(binding == null || binding == nextGuard.bindingFingerprint)
+            require(DocumentType.entries.all { nextGuard.floors.getValue(it) >= floor(it) })
+            Triple(bounded, nextGuard, JournalCodec.encode(bounded))
+        } catch (_: Exception) {
+            return false
+        }
+        // Mark first, then write the full journal, then the independent guard.
+        // A failure after the full write leaves different records and blocks all
+        // operations. A failed journal write never advances the guard by itself.
+        if (!mark() || !write(STATE, encoded)) return false
+        floors = nextGuard.floors
+        if (guard != nextGuard) {
+            try {
+                guardStore.write(nextGuard)
+            } catch (_: Exception) {
+                failure = GUARD_WRITE_FAILED
+                return false
+            }
+            guard = nextGuard
+        }
         state = bounded
         return true
     }
 
     fun stamp(target: Generation): Boolean = !lost && mark() && write(STAMP, target.sha256)
-    fun stamped(target: Generation): Boolean = !lost && preferences.getString(STAMP, null) == target.sha256
+    fun stamped(target: Generation): Boolean = try {
+        !lost && preferences.getString(STAMP, null) == target.sha256
+    } catch (_: RuntimeException) {
+        false
+    }
 
     /** Stored once, before any journal write. Until it is, nothing is written to the journal. */
     private fun mark(): Boolean {
@@ -137,37 +174,58 @@ internal class RemoteJournal(private val preferences: SharedPreferences, private
         false
     }
 
-    private class Read(val marked: Boolean, val lost: Boolean, val state: JournalState?)
+    private class Read(
+        val marked: Boolean, val state: JournalState?, val secondary: JournalGuard?, val failure: RemoteFailure?
+    ) {
+        fun floor(type: DocumentType): Long {
+            val journalFloor = state?.floor(type)?.takeIf { it in 0..WireJson.MAX_INTEGER } ?: 0L
+            return maxOf(journalFloor, secondary?.floors?.getValue(type) ?: 0L)
+        }
+    }
+
+    private fun read(): Read {
+        val marked = runCatching {
+            val value = marker.all[CREATED]
+            // A malformed marker XML can also appear as an empty map.
+            require(value == true || (value == null && markerFileAbsent()))
+            value == true
+        }
+        val journal = runCatching {
+            val stored = preferences.getString(STATE, null)
+            if (stored == null) {
+                // SharedPreferences can return an empty map after a malformed XML read.
+                require(!preferences.contains(STAMP) && journalFileAbsent() && !remoteCommitted())
+                null
+            } else {
+                JournalCodec.decode(stored)
+            }
+        }
+        val secondary = runCatching(guardStore::read)
+        val state = journal.getOrNull()
+        val primary = runCatching { state?.let(JournalGuard::from) }
+        val expected = primary.getOrNull()
+        val copy = secondary.getOrNull()
+        val hasMarker = marked.getOrDefault(false)
+        val failure = when {
+            marked.isFailure || journal.isFailure || primary.isFailure || (hasMarker != (expected != null)) -> JOURNAL_LOST
+            secondary.isFailure -> GUARD_UNREADABLE
+            expected != null && copy == null -> GUARD_MISSING
+            expected == null && copy != null -> JOURNAL_LOST
+            expected != copy -> GUARD_MISMATCH
+            else -> null
+        }
+        return Read(hasMarker, state, copy, failure)
+    }
 
     companion object {
         private const val STATE = "state"
         private const val STAMP = "projection_generation"
         private const val CREATED = "journal_created"
-
-        /** Read-only: whether the files describe a journal that existed and cannot be read. */
-        fun isLost(preferences: SharedPreferences, marker: SharedPreferences): Boolean = read(preferences, marker).lost
-
-        private fun read(preferences: SharedPreferences, marker: SharedPreferences): Read {
-            val marked = try {
-                marker.getBoolean(CREATED, false)
-            } catch (_: RuntimeException) {
-                true
-            }
-            val stored = try {
-                preferences.getString(STATE, null)
-            } catch (_: RuntimeException) {
-                return Read(marked, true, null)
-            }
-            val decoded = stored?.let {
-                try {
-                    JournalCodec.decode(it)
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            // An absent journal is new only if none was ever stored. A present one must decode.
-            return Read(marked, if (stored == null) marked else decoded == null, decoded)
-        }
+        val JOURNAL_LOST = RemoteFailure("journal-lost")
+        val GUARD_UNREADABLE = RemoteFailure("journal-guard-unreadable")
+        val GUARD_MISSING = RemoteFailure("journal-guard-missing")
+        val GUARD_MISMATCH = RemoteFailure("journal-guard-mismatch")
+        val GUARD_WRITE_FAILED = RemoteFailure("journal-guard-write-failed")
     }
 }
 

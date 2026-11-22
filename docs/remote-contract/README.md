@@ -196,13 +196,21 @@ Other device rules:
 - **Kiosk.** A kiosk left in the store of a device with remote intent is not
   restored at boot, and its HOME screen neither locks the task nor starts the
   target. The journal pass turns it off.
-- **Lost journal.** A second file records that this device writes a journal. It
-  is stored before the first journal write and never taken back, and nothing
-  is written to the journal until it is stored. An enrolled device whose
-  journal reads back empty or damaged answers `journal-lost` everywhere, runs
-  no pass and accepts nothing. It keeps the restrictions of its last pass until
-  it is provisioned again. The same answer follows a first journal write that
-  fails after the marker was stored: the device fails closed.
+- **Journal protection.** The journal creation marker is stored first. The
+  journal is committed next, followed by an atomic replacement of a separate
+  SHA-256-checked file in no-backup storage when its protected fields change.
+  That file records the fleet and device binding fingerprint, the active root
+  fingerprint, and the key-set, policy, recovery and command floors. The
+  operation succeeds after both writes. A journal commit failure leaves the
+  previous guard in place. A guard write failure stops remote operations in
+  the running process. A restart checks the two records before allowing work.
+- **Storage refusals.** A previously created or committed remote journal that
+  reads back empty or damaged reports `journal-lost`. A missing or corrupt
+  guard reports `journal-guard-missing` or `journal-guard-unreadable`. Different
+  bindings or floors report `journal-guard-mismatch`. None of these states
+  authorizes a policy pass or fleet bind. The device retains its existing
+  restrictions and the highest readable floor for each channel. Initial
+  enrolment requires absent journal state, creation marker and guard.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 

@@ -84,11 +84,14 @@ internal object RemoteFixtures {
         return Harness(memory, projection).also { assertTrue(it.journal.save(initial)) }
     }
 
-    class Harness(val memory: MemoryPreferences, private val projection: RemoteProjection) {
+    class Harness(
+        val memory: MemoryPreferences, private val projection: RemoteProjection,
+        private val guardStore: RemoteJournalGuardStore = MemoryGuardStore()
+    ) {
         /** The separate file that records that a journal was ever stored. */
         val marker = MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }
         private var journalFile = memory
-        var journal = RemoteJournal(journalFile.preferences(), marker.preferences())
+        var journal = RemoteJournal(journalFile.preferences(), marker.preferences(), guardStore)
             private set
         var engine = engineFor(journal)
             private set
@@ -109,7 +112,7 @@ internal object RemoteFixtures {
         }
 
         private fun reopen() {
-            journal = RemoteJournal(journalFile.preferences(), marker.preferences())
+            journal = RemoteJournal(journalFile.preferences(), marker.preferences(), guardStore)
             engine = engineFor(journal)
         }
 
@@ -121,6 +124,12 @@ internal object RemoteFixtures {
         }
 
         private fun engineFor(journal: RemoteJournal) = RemoteEngine(journal, schema, projection, ::mac)
+    }
+
+    private class MemoryGuardStore : RemoteJournalGuardStore {
+        private var guard: JournalGuard? = null
+        override fun read() = guard
+        override fun write(guard: JournalGuard) { this.guard = guard }
     }
 
     fun policy(name: String): CommittedPolicy = if (name == "baseline") {
