@@ -1,0 +1,253 @@
+{
+  "version": 1,
+  "envelope": {
+    "schema": "v1.schema.json#/$defs/envelope",
+    "maxEncodedBytes": 65536,
+    "signature": "SHA256withECDSA",
+    "curve": "P-256",
+    "signatureEncoding": "DER",
+    "keyId": "base64url(SHA-256(DER subjectPublicKeyInfo))",
+    "base64urlPadding": false
+  },
+  "documents": {
+    "keyset": {
+      "schema": "v1.schema.json#/$defs/keyset",
+      "signer": "current-or-named-successor-root",
+      "binding": "fleet-wide",
+      "separateKeyRoles": ["current-and-successor-roots", "fleet-policy-and-recovery-keys", "server-key"],
+      "keyRoleCollisionFailureCode": "doc-field-invalid",
+      "strictlyIncreasingField": "keySetVersion",
+      "floorScope": "fleet",
+      "keySetVersionMinimum": "active-keyset-version"
+    },
+    "fleet-policy": {
+      "schema": "v1.schema.json#/$defs/fleet-policy",
+      "signer": "fleet-policy-key",
+      "binding": "deviceIds",
+      "strictlyIncreasingField": "fleetPolicyVersion",
+      "floorScope": "fleet",
+      "keySetVersionMinimum": "active-keyset-version"
+    },
+    "recovery": {
+      "schema": "v1.schema.json#/$defs/recovery",
+      "signer": "fleet-policy-key",
+      "binding": "deviceId",
+      "strictlyIncreasingField": "recoveryVersion",
+      "floorScope": "device",
+      "keySetVersionMinimum": "active-keyset-version"
+    },
+    "command": {
+      "schema": "v1.schema.json#/$defs/command",
+      "signer": "server-key",
+      "binding": "deviceId-and-request-nonce",
+      "strictlyIncreasingField": "sequence",
+      "floorScope": "device",
+      "keySetVersionMinimum": "active-keyset-version"
+    }
+  },
+  "sync": {
+    "order": [
+      "keyset",
+      "fleet-policy",
+      "recovery",
+      "command"
+    ],
+    "continueAfterRefusal": true,
+    "keysFromAcceptedKeyset": true,
+    "documentValidationOrder": [
+      "signature",
+      "closed-payload-schema",
+      "fleet-binding",
+      "keyset-role-separation",
+      "version-order-and-floors",
+      "device-binding",
+      "command-nonce-binding"
+    ],
+    "foreignFleetFailureCode": "doc-field-invalid",
+    "fleetPolicySelection": "highest-admissible-listed-version",
+    "commandDependsOnPolicy": false,
+    "nonce": {
+      "bytes": 32,
+      "maxOutstanding": 1,
+      "storage": "memory",
+      "clock": "elapsedRealtime",
+      "sameBoot": true,
+      "maxAgeMsExclusive": 120000,
+      "requireOutstandingExchange": true,
+      "differentExchange": {
+        "failureCode": "sync-response-stale",
+        "consumeOutstandingNonce": false
+      },
+      "consumeOn": [
+        "first-response-from-outstanding-exchange",
+        "timeout",
+        "process-death"
+      ]
+    }
+  },
+  "hashes": {
+    "algorithm": "SHA-256",
+    "digestBytes": 32,
+    "wireEncoding": "lowercase-hex",
+    "canonicalJson": {
+      "encoding": "UTF-8",
+      "objectKeys": "ascending-ASCII",
+      "arrays": "preserve-order",
+      "whitespace": "none",
+      "unicodeNormalization": "none",
+      "escape": "quote, backslash and U+0000–U+001F only; short JSON escapes where defined, otherwise lowercase hex; all other code points as raw UTF-8",
+      "numbers": "decimal-integers-without-negative-zero"
+    },
+    "committedSha256": {
+      "fleet-policy": "exact-base64url-decoded-payload",
+      "baseline": "canonical-policy-body"
+    },
+    "generationSha256": {
+      "domainAscii": "dg-gen/1",
+      "separatorByte": 0,
+      "parts": [
+        "domainAscii",
+        "separatorByte",
+        "raw-committedSha256",
+        "uint8-count",
+        "ASCII-sorted-overrides-as-uint8-length-and-ASCII-code"
+      ],
+      "overrideCodes": [
+        "commands-off",
+        "network-off"
+      ]
+    },
+    "verifiedSha256": {
+      "from": "last-read-back-verified-generation",
+      "report": "verifiedGeneration",
+      "schema": "v1.schema.json#/$defs/verifiedGeneration"
+    }
+  },
+  "semanticChecks": {
+    "rejectDuplicateJsonMembers": true,
+    "rejectNonIntegerNumbers": true,
+    "rejectNegativeZero": true,
+    "maxSafeInteger": 9007199254740991,
+    "rejectLoneSurrogates": true,
+    "wireOverrides": "unique-ascending-ASCII",
+    "requireValidP256Points": true,
+    "systemSelectionUniqueBy": "package",
+    "httpsPortRange": [
+      1,
+      65535
+    ],
+    "canaryExpectedBodyMaxUtf8Bytes": 1024,
+    "caCertificate": "single-X.509-CA-certificate-in-canonical-DER"
+  },
+  "journal": {
+    "policyCommit": [
+      "payloadBytes",
+      "committedSha256",
+      "fleetPolicyVersion"
+    ],
+    "clearOverridesAtomicallyOn": "newer-fleet-policy-commit",
+    "projectionWrites": [
+      "apps-mode-selection",
+      "apps-system-selection",
+      "apps-system-risk-acceptance",
+      "play-compatibility",
+      "system-controls",
+      "home-filter",
+      "management-pins",
+      "kiosk",
+      "locale"
+    ],
+    "stampLast": true,
+    "alwaysReproject": true,
+    "readDurableStateOnly": true,
+    "verifyWhen": [
+      "successful-read-back",
+      "target-unchanged"
+    ],
+    "verifiedCommit": "complete-verifiedGeneration"
+  },
+  "dispatch": {
+    "kinds": [
+      "lock_now",
+      "reapply"
+    ],
+    "states": [
+      "ACCEPTED",
+      "DISPATCHING",
+      "DONE"
+    ],
+    "acceptCommit": [
+      "sequence",
+      "kind",
+      "state",
+      "bootCount",
+      "cutoffElapsed",
+      "sequenceFloor"
+    ],
+    "cutoff": "requestSentElapsed + maxAgeMsExclusive",
+    "postDispatchCommitChecks": [
+      "same-boot",
+      "elapsed-before-cutoff",
+      "commands-off-inactive"
+    ],
+    "policyThread": true,
+    "failedDispatchingCommit": {
+      "durableState": "ACCEPTED",
+      "failureCode": "journal-write-failed",
+      "afterRestart": "command-expired"
+    },
+    "retryAfterDispatchCrash": false
+  },
+  "recovery": {
+    "codeAlphabet": "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567",
+    "codeCharacters": 20,
+    "displayGroupSize": 4,
+    "saltBytes": 16,
+    "kdf": "PBKDF2-HMAC-SHA256",
+    "iterations": 210000,
+    "derivedBytes": 32,
+    "chooseBeforeCode": true,
+    "overrideMerge": "union-of-active-and-selected",
+    "lockout": {
+      "policy": "PinLockoutPolicy",
+      "bootIdentity": "BOOT_COUNT",
+      "firstPenaltyFailures": 5,
+      "firstPenaltyMs": 60000,
+      "persistWrongCodeCount": true,
+      "checkBeforeCodeVerification": true
+    },
+    "atomicCommit": [
+      "removeVerifier",
+      "recordUse",
+      "clearLockout",
+      "setOverrides",
+      "cancelUndispatchedCommands"
+    ],
+    "clearedBy": "newer-fleet-policy-commit"
+  },
+  "failureCodes": {
+    "section5.6": [
+      "doc-signature-invalid",
+      "doc-key-unknown",
+      "doc-device-not-listed",
+      "doc-version-rollback",
+      "doc-field-unknown",
+      "doc-field-invalid",
+      "doc-type-unexpected",
+      "command-unknown",
+      "command-nonce-mismatch",
+      "sync-response-stale",
+      "journal-write-failed",
+      "command-expired",
+      "dispatch-outcome-unknown",
+      "commands-suspended-by-recovery"
+    ],
+    "section5.4And8.3": [
+      "cancelled-by-recovery",
+      "recovery-commit-failed"
+    ],
+    "section7.1Evidence": [
+      "lock-screen-off-only"
+    ]
+  }
+}

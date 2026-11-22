@@ -1,0 +1,330 @@
+{
+  "example": "example",
+  "canonicalJson": {
+    "value": {
+      "z": "é",
+      "a": [
+        "é",
+        "\b\n/\\\""
+      ]
+    },
+    "canonicalUtf8": "{\"a\":[\"é\",\"\\b\\n/\\\\\\\"\"],\"z\":\"é\"}",
+    "expected": {
+      "outcome": "reproduced",
+      "failureCode": null
+    }
+  },
+  "baseline": {
+    "profile": "pilot",
+    "body": {
+      "managementMode": "REMOTE",
+      "protection": {
+        "state": "ON"
+      },
+      "apps": {
+        "mode": "ALLOW_SELECTED",
+        "allowed": [],
+        "systemSelection": [],
+        "playCompatibility": false
+      },
+      "systemControls": {
+        "developer_options_and_adb": false,
+        "usb_file_transfer": true,
+        "unknown_source_installs": true,
+        "app_stores_and_installers": false,
+        "account_modification": true,
+        "vpn_configuration": true,
+        "network_reset": true,
+        "tethering": true,
+        "wifi_configuration": false,
+        "private_dns": true,
+        "date_and_time": true,
+        "safe_boot": true,
+        "factory_reset": true,
+        "user_and_profile_creation": true,
+        "app_uninstall": true,
+        "app_control_settings": true
+      },
+      "homeFilter": {
+        "enabled": false
+      },
+      "managementPins": {},
+      "kiosk": {
+        "mode": "OFF"
+      },
+      "sync": {
+        "pullMinutes": 15
+      }
+    },
+    "canonicalUtf8": "{\"apps\":{\"allowed\":[],\"mode\":\"ALLOW_SELECTED\",\"playCompatibility\":false,\"systemSelection\":[]},\"homeFilter\":{\"enabled\":false},\"kiosk\":{\"mode\":\"OFF\"},\"managementMode\":\"REMOTE\",\"managementPins\":{},\"protection\":{\"state\":\"ON\"},\"sync\":{\"pullMinutes\":15},\"systemControls\":{\"account_modification\":true,\"app_control_settings\":true,\"app_stores_and_installers\":false,\"app_uninstall\":true,\"date_and_time\":true,\"developer_options_and_adb\":false,\"factory_reset\":true,\"network_reset\":true,\"private_dns\":true,\"safe_boot\":true,\"tethering\":true,\"unknown_source_installs\":true,\"usb_file_transfer\":true,\"user_and_profile_creation\":true,\"vpn_configuration\":true,\"wifi_configuration\":false}}",
+    "baselineSha256": "6e8bfba4b7e4e8769dcfd9b87accefe30ace72c1b00e7300031e38385f0d63ec",
+    "expected": {
+      "outcome": "reproduced",
+      "failureCode": null
+    }
+  },
+  "generations": {
+    "example-empty": {
+      "source": "example",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": "baseline",
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+        "overrides": [],
+        "generationSha256": "6248175361a6f10d6e60c31f0ccdd4e91630402b1651e10fcdf5fc6be732f28f"
+      }
+    },
+    "example-network-off": {
+      "source": "example",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": "baseline",
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+        "overrides": [
+          "network-off"
+        ],
+        "generationSha256": "41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb"
+      }
+    },
+    "example-both": {
+      "source": "example",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": "baseline",
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "generationSha256": "8b171f8307b60c5a4dacfacbbcfede14771b87faf1c0ea23f5b1fc2ef44eaaf0"
+      }
+    },
+    "example-both-reversed": {
+      "source": "example",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": "baseline",
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "generationSha256": "8b171f8307b60c5a4dacfacbbcfede14771b87faf1c0ea23f5b1fc2ef44eaaf0"
+      },
+      "hashInputOverrides": [
+        "network-off",
+        "commands-off"
+      ]
+    },
+    "baseline": {
+      "source": "baseline",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": "baseline",
+        "committedSha256": "6e8bfba4b7e4e8769dcfd9b87accefe30ace72c1b00e7300031e38385f0d63ec",
+        "overrides": [],
+        "generationSha256": "05eb8d2b700b51199400b0314e99946355638bbb8d9d003c3b24237c403667f1"
+      }
+    },
+    "policy-1": {
+      "source": "policy-1",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 1,
+        "committedSha256": "42d69a350ab4d4eea9995378a1d10fd4d393b7aae3baa5a946f62f9a0aafa309",
+        "overrides": [],
+        "generationSha256": "a92a2ecddf19c6274dd49029d03151be5ec13b547c2a807b3bb4da2e17dff5ad"
+      }
+    },
+    "policy-5": {
+      "source": "policy-5",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 5,
+        "committedSha256": "41ee49b1fb6365d3c93e9f75f93a55b9357a3e5dcf419efa5383f6108b777b38",
+        "overrides": [],
+        "generationSha256": "347481ed72576f7700f0b92b6bb7022c5cfc3fb117c12c18a233e33fe2a2ff5e"
+      }
+    },
+    "policy-5-network-off": {
+      "source": "policy-5",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 5,
+        "committedSha256": "41ee49b1fb6365d3c93e9f75f93a55b9357a3e5dcf419efa5383f6108b777b38",
+        "overrides": [
+          "network-off"
+        ],
+        "generationSha256": "96d3c57a233860329aecbc5c373cb0352c03d44782e6eb78ae14a34af6aa5ff4"
+      }
+    },
+    "policy-5-both": {
+      "source": "policy-5",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 5,
+        "committedSha256": "41ee49b1fb6365d3c93e9f75f93a55b9357a3e5dcf419efa5383f6108b777b38",
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "generationSha256": "f0bcc8ec942046fd6d6b6c1f7c83af70839076217d87b2b57dc516756d94f2b4"
+      }
+    },
+    "policy-5-spaced": {
+      "source": "policy-5-spaced",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 5,
+        "committedSha256": "926637ebcc5e80b0ca987fd980add5aedc343c13155478a428386453f5547106",
+        "overrides": [],
+        "generationSha256": "43c7c55600a6ec69a84c7284d2ea8dfba9930fb3bd3c03aad611a95e6871eb3d"
+      }
+    },
+    "policy-6": {
+      "source": "policy-6",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 6,
+        "committedSha256": "3e23665da07a38a0b1aeffd10cc0cdb4f8e3186614a1a42000d4d2734782d1aa",
+        "overrides": [],
+        "generationSha256": "4d168dd369e4e55370ca0eee8c65b9c5c34cbe213de439e2422a4b6027da2492"
+      }
+    },
+    "policy-5-commands-off": {
+      "source": "policy-5",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null
+      },
+      "value": {
+        "fleetPolicyVersion": 5,
+        "committedSha256": "41ee49b1fb6365d3c93e9f75f93a55b9357a3e5dcf419efa5383f6108b777b38",
+        "overrides": [
+          "commands-off"
+        ],
+        "generationSha256": "f1a8cadb1a7d2575d356e3c4c285faffc3b255dc9d775c9c430966535728eb93"
+      }
+    }
+  },
+  "verifiedGeneration": {
+    "current": "policy-6",
+    "source": "policy-5",
+    "expected": {
+      "outcome": "reproduced",
+      "failureCode": null
+    },
+    "value": {
+      "fleetPolicyVersion": 5,
+      "committedSha256": "41ee49b1fb6365d3c93e9f75f93a55b9357a3e5dcf419efa5383f6108b777b38",
+      "overrides": [
+        "network-off"
+      ],
+      "verifiedSha256": "96d3c57a233860329aecbc5c373cb0352c03d44782e6eb78ae14a34af6aa5ff4"
+    }
+  },
+  "invalidOverrides": [
+    {
+      "id": "unknown",
+      "overrides": [
+        "console-open"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid"
+      }
+    },
+    {
+      "id": "duplicate",
+      "overrides": [
+        "network-off",
+        "network-off"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid"
+      }
+    },
+    {
+      "id": "unsorted-wire-list",
+      "overrides": [
+        "network-off",
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid"
+      }
+    }
+  ],
+  "exactBytes": {
+    "canonical": "policy-5",
+    "alternative": "policy-5-spaced",
+    "expected": {
+      "outcome": "equal-json-different-committed-hashes",
+      "failureCode": null
+    }
+  },
+  "canonicalStrings": [
+    {
+      "id": "control-lowercase-hex",
+      "value": "\u001f",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null,
+        "canonicalUtf8": "\"\\u001f\""
+      }
+    },
+    {
+      "id": "del-raw-utf8",
+      "value": "",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null,
+        "canonicalUtf8": "\"\""
+      }
+    },
+    {
+      "id": "non-bmp-raw-utf8",
+      "value": "🛫",
+      "expected": {
+        "outcome": "reproduced",
+        "failureCode": null,
+        "canonicalUtf8": "\"🛫\""
+      }
+    }
+  ]
+}

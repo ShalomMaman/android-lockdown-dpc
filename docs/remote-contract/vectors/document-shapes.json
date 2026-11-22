@@ -1,0 +1,1555 @@
+{
+  "payloads": [
+    {
+      "id": "later-field-overlay",
+      "section": "14.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/overlay",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/overlay"
+      }
+    },
+    {
+      "id": "later-field-basePolicySha256",
+      "section": "14.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/basePolicySha256",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/basePolicySha256"
+      }
+    },
+    {
+      "id": "later-field-serverOverlay",
+      "section": "14.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/serverOverlay",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/serverOverlay"
+      }
+    },
+    {
+      "id": "later-field-convertLocalDevice",
+      "section": "14.2",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/convertLocalDevice",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/convertLocalDevice"
+      }
+    },
+    {
+      "id": "later-field-approvalGrant",
+      "section": "14.3",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/approvalGrant",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/approvalGrant"
+      }
+    },
+    {
+      "id": "later-field-approvalKey",
+      "section": "14.3",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/approvalKey",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/approvalKey"
+      }
+    },
+    {
+      "id": "later-field-looseningProposal",
+      "section": "14.3",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/looseningProposal",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/looseningProposal"
+      }
+    },
+    {
+      "id": "later-field-pause",
+      "section": "14.4",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/pause",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/pause"
+      }
+    },
+    {
+      "id": "later-field-pauseUntil",
+      "section": "14.4",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/pauseUntil",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/pauseUntil"
+      }
+    },
+    {
+      "id": "later-field-maintenanceWindow",
+      "section": "14.4",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/maintenanceWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/maintenanceWindow"
+      }
+    },
+    {
+      "id": "later-field-consoleGrant",
+      "section": "14.4",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/consoleGrant",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/consoleGrant"
+      }
+    },
+    {
+      "id": "later-field-consoleWindow",
+      "section": "14.4",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/consoleWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/consoleWindow"
+      }
+    },
+    {
+      "id": "later-field-installWindow",
+      "section": "14.5",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/installWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/installWindow"
+      }
+    },
+    {
+      "id": "later-field-updateWindow",
+      "section": "14.5",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/updateWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/updateWindow"
+      }
+    },
+    {
+      "id": "later-field-selfUpdateWindow",
+      "section": "14.5",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/selfUpdateWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/selfUpdateWindow"
+      }
+    },
+    {
+      "id": "later-field-browserThroughFilter",
+      "section": "14.6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/browserThroughFilter",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/homeFilter/browserThroughFilter"
+      }
+    },
+    {
+      "id": "later-field-wipe",
+      "section": "14.7",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/wipe",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/wipe"
+      }
+    },
+    {
+      "id": "later-field-reboot",
+      "section": "14.7",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/reboot",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/reboot"
+      }
+    },
+    {
+      "id": "later-field-permittedAccessibilityServices",
+      "section": "14.8",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/permittedAccessibilityServices",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/permittedAccessibilityServices"
+      }
+    },
+    {
+      "id": "later-field-permittedInputMethods",
+      "section": "14.8",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/permittedInputMethods",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/permittedInputMethods"
+      }
+    },
+    {
+      "id": "later-field-systemUpdates",
+      "section": "14.8",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/systemUpdates",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/systemUpdates"
+      }
+    },
+    {
+      "id": "later-field-mcpPolicyActions",
+      "section": "14.9",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/mcpPolicyActions",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/mcpPolicyActions"
+      }
+    },
+    {
+      "id": "later-field-wakeChannel",
+      "section": "14.9",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/wakeChannel",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/wakeChannel"
+      }
+    },
+    {
+      "id": "later-field-contentCheck",
+      "section": "14.9",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/contentCheck",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/contentCheck"
+      }
+    },
+    {
+      "id": "later-command-apply_overlay",
+      "section": "14.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "apply_overlay",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-convert_local_device",
+      "section": "14.2",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "convert_local_device",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-approve_loosening",
+      "section": "14.3",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "approve_loosening",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-pause",
+      "section": "14.4",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "pause",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-open_maintenance",
+      "section": "14.4",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "open_maintenance",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-open_console",
+      "section": "14.4",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "open_console",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-open_install_window",
+      "section": "14.5",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "open_install_window",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-open_update_window",
+      "section": "14.5",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "open_update_window",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-self_update",
+      "section": "14.5",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "self_update",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-allow_browser_through_filter",
+      "section": "14.6",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "allow_browser_through_filter",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-wipe",
+      "section": "14.7",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "wipe",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-reboot",
+      "section": "14.7",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "reboot",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-set_accessibility_allowlist",
+      "section": "14.8",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "set_accessibility_allowlist",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-set_input_method_allowlist",
+      "section": "14.8",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "set_input_method_allowlist",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-set_system_updates",
+      "section": "14.8",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "set_system_updates",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-policy_set",
+      "section": "14.9",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "policy_set",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-wake",
+      "section": "14.9",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "wake",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "later-command-content_check",
+      "section": "14.9",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": "content_check",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "command-unknown",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "keyset-open-field",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/timeDocument",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/timeDocument"
+      }
+    },
+    {
+      "id": "recovery-open-field",
+      "section": "5.1",
+      "document": "recovery-1",
+      "op": "set",
+      "path": "/action",
+      "value": "open_console",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/action"
+      }
+    },
+    {
+      "id": "command-payload",
+      "section": "5.1",
+      "document": "reapply-3",
+      "op": "set",
+      "path": "/payload",
+      "value": {},
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/payload"
+      }
+    },
+    {
+      "id": "policy-predecessor",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/predecessorSha256",
+      "value": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/predecessorSha256"
+      }
+    },
+    {
+      "id": "protection-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/protection/pauseUntil",
+      "value": 1,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/protection/pauseUntil"
+      }
+    },
+    {
+      "id": "apps-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/temporaryAllowed",
+      "value": [],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/apps/temporaryAllowed"
+      }
+    },
+    {
+      "id": "system-selection-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/systemSelection/0/expiry",
+      "value": 1,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/apps/systemSelection/0/expiry"
+      }
+    },
+    {
+      "id": "management-pins-cannot-add-trust",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/managementPins/org.example.reader",
+      "value": [],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/managementPins/org.example.reader"
+      }
+    },
+    {
+      "id": "unknown-system-control",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/systemControls/oem_made_up",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/systemControls/oem_made_up"
+      }
+    },
+    {
+      "id": "routing-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/routing/allowedBrowser",
+      "value": "org.example.browser",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/homeFilter/routing/allowedBrowser"
+      }
+    },
+    {
+      "id": "canary-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/canary/method",
+      "value": "GET",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/homeFilter/canary/method"
+      }
+    },
+    {
+      "id": "kiosk-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk/escapeWindow",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/kiosk/escapeWindow"
+      }
+    },
+    {
+      "id": "sync-nested-field",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/sync/wakeChannel",
+      "value": true,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/policy/sync/wakeChannel"
+      }
+    },
+    {
+      "id": "schema-version",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/schemaVersion",
+      "value": 2,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/schemaVersion"
+      }
+    },
+    {
+      "id": "invalid-mode",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/managementMode",
+      "value": "LOCAL_PIN",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/managementMode"
+      }
+    },
+    {
+      "id": "protection-off",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/protection/state",
+      "value": "OFF",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/protection/state"
+      }
+    },
+    {
+      "id": "device-list-empty",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/deviceIds",
+      "value": [],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/deviceIds"
+      }
+    },
+    {
+      "id": "device-list-duplicate",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/deviceIds",
+      "value": [
+        "0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I",
+        "0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/deviceIds"
+      }
+    },
+    {
+      "id": "no-wildcard-fleet-policy",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/deviceIds/0",
+      "value": "*",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/deviceIds/0"
+      }
+    },
+    {
+      "id": "recovery-one-device",
+      "section": "5.1",
+      "document": "recovery-1",
+      "op": "set",
+      "path": "/deviceId",
+      "value": [
+        "0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I",
+        "yry0uOnre8zDLuLKEy0BbEzndWUotWqG1JSNz18Rh5o"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/deviceId"
+      }
+    },
+    {
+      "id": "short-salt",
+      "section": "5.1",
+      "document": "recovery-1",
+      "op": "set",
+      "path": "/salt",
+      "value": "AAECAwQFBgcICQoLDA0O",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/salt"
+      }
+    },
+    {
+      "id": "short-verifier",
+      "section": "5.1",
+      "document": "recovery-1",
+      "op": "set",
+      "path": "/verifier",
+      "value": "QkU7XKZCxbmanBf9Vr2iDMcc5L-f9jtxYtcCxmWtBQ",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/verifier"
+      }
+    },
+    {
+      "id": "short-nonce",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/nonce",
+      "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/nonce"
+      }
+    },
+    {
+      "id": "padded-nonce",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/nonce",
+      "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/nonce"
+      }
+    },
+    {
+      "id": "nonzero-pad-bits",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/nonce",
+      "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHhB",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/nonce"
+      }
+    },
+    {
+      "id": "zero-sequence",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/sequence",
+      "value": 0,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/sequence"
+      }
+    },
+    {
+      "id": "fractional-floor",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/keySetVersion",
+      "value": 1.5,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/keySetVersion"
+      }
+    },
+    {
+      "id": "unsafe-integer",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/sequence",
+      "value": 9007199254740992,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/sequence"
+      }
+    },
+    {
+      "id": "no-fleet-key",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/fleetPolicyKeys",
+      "value": [],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/fleetPolicyKeys"
+      }
+    },
+    {
+      "id": "server-key-invalid-encoding",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/serverKey",
+      "value": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/serverKey"
+      }
+    },
+    {
+      "id": "server-url-query",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/serverUrl",
+      "value": "https://management.example.org/?x=y",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/serverUrl"
+      }
+    },
+    {
+      "id": "server-url-credentials",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/serverUrl",
+      "value": "https://user@management.example.org/",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/serverUrl"
+      }
+    },
+    {
+      "id": "filter-invalid-host",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/canary/url",
+      "value": "https://bad..example.org/",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/homeFilter/canary/url"
+      }
+    },
+    {
+      "id": "server-url-invalid-port",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/serverUrl",
+      "value": "https://management.example.org:65536/",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/serverUrl"
+      }
+    },
+    {
+      "id": "server-url-backslash",
+      "section": "5.1",
+      "document": "keyset-1",
+      "op": "set",
+      "path": "/serverUrl",
+      "value": "https://management.example.org/\\path",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/serverUrl"
+      }
+    },
+    {
+      "id": "kiosk-dot-segment",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": {
+        "mode": "SINGLE_SITE",
+        "siteUrl": "https://kiosk.example.org/%2e%2E/"
+      },
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/kiosk/siteUrl"
+      }
+    },
+    {
+      "id": "canary-over-utf8-limit",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/canary/expectedBody",
+      "value": "אאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאא",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/homeFilter/canary/expectedBody"
+      }
+    },
+    {
+      "id": "valid-utf8-canary-boundary",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/canary/expectedBody",
+      "value": "אאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאאא",
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "allowlist-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/allowed",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/apps/allowed"
+      }
+    },
+    {
+      "id": "selection-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/systemSelection",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/apps/systemSelection"
+      }
+    },
+    {
+      "id": "conflicting-system-app-approvals",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/systemSelection",
+      "value": [
+        {
+          "package": "com.oem.gallery",
+          "signerSha256": "eea77e4c032bd8f1736905922f53fd17140702cae57412a5f838476a9375c8f2",
+          "versionCode": 1234
+        },
+        {
+          "package": "com.oem.gallery",
+          "signerSha256": "eea77e4c032bd8f1736905922f53fd17140702cae57412a5f838476a9375c8f2",
+          "versionCode": 1235
+        }
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/apps/systemSelection"
+      }
+    },
+    {
+      "id": "control-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/systemControls/wifi_configuration",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/systemControls/wifi_configuration"
+      }
+    },
+    {
+      "id": "control-number",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/systemControls/wifi_configuration",
+      "value": 1,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/systemControls/wifi_configuration"
+      }
+    },
+    {
+      "id": "home-filter-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/homeFilter"
+      }
+    },
+    {
+      "id": "kiosk-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/kiosk"
+      }
+    },
+    {
+      "id": "sync-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/sync/pullMinutes",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/sync/pullMinutes"
+      }
+    },
+    {
+      "id": "locale-null",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/locale",
+      "value": null,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/locale"
+      }
+    },
+    {
+      "id": "sync-too-fast",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/sync/pullMinutes",
+      "value": 14,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/sync/pullMinutes"
+      }
+    },
+    {
+      "id": "sync-too-slow",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/sync/pullMinutes",
+      "value": 241,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/sync/pullMinutes"
+      }
+    },
+    {
+      "id": "kiosk-missing-target",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": {
+        "mode": "SINGLE_APP"
+      },
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/kiosk"
+      }
+    },
+    {
+      "id": "kiosk-off-with-site",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": {
+        "mode": "OFF",
+        "siteUrl": "https://kiosk.example.org/"
+      },
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/kiosk"
+      }
+    },
+    {
+      "id": "unknown-document-type",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/type",
+      "value": "overlay",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-type-unexpected",
+        "path": "/type"
+      }
+    },
+    {
+      "id": "wrong-command-kind-type",
+      "section": "5.1",
+      "document": "lock-2",
+      "op": "set",
+      "path": "/kind",
+      "value": 1,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/kind"
+      }
+    },
+    {
+      "id": "missing-state",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "remove",
+      "path": "/policy/protection/state",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/protection/state"
+      }
+    },
+    {
+      "id": "missing-mode",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "remove",
+      "path": "/policy/apps/mode",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/apps/mode"
+      }
+    },
+    {
+      "id": "missing-allowed",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "remove",
+      "path": "/policy/apps/allowed",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/apps/allowed"
+      }
+    },
+    {
+      "id": "missing-managementMode",
+      "section": "5.1",
+      "document": "policy-5",
+      "op": "remove",
+      "path": "/policy/managementMode",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/policy/managementMode"
+      }
+    },
+    {
+      "id": "configured-empty-selection",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/apps/allowed",
+      "value": [],
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "ca-explicit-removal",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter/caCertificate",
+      "value": null,
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "home-filter-explicit-off",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/homeFilter",
+      "value": {
+        "enabled": false
+      },
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "kiosk-single-app",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": {
+        "mode": "SINGLE_APP",
+        "targetPackage": "org.example.reader"
+      },
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "kiosk-single-site",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/kiosk",
+      "value": {
+        "mode": "SINGLE_SITE",
+        "siteUrl": "https://kiosk.example.org/lesson#page"
+      },
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "sync-upper-bound",
+      "section": "6",
+      "document": "policy-5",
+      "op": "set",
+      "path": "/policy/sync/pullMinutes",
+      "value": 240,
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "device-list-size-1",
+      "section": "5.2",
+      "document": "policy-5",
+      "op": "device-id-range",
+      "path": "/deviceIds",
+      "value": 1,
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "device-list-size-256",
+      "section": "5.2",
+      "document": "policy-5",
+      "op": "device-id-range",
+      "path": "/deviceIds",
+      "value": 256,
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "device-list-size-257",
+      "section": "5.2",
+      "document": "policy-5",
+      "op": "device-id-range",
+      "path": "/deviceIds",
+      "value": 257,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/deviceIds"
+      }
+    }
+  ],
+  "envelopes": [
+    {
+      "id": "extra-envelope-field",
+      "document": "policy-5",
+      "set": {
+        "unexpected": true
+      },
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-unknown",
+        "path": "/unexpected"
+      }
+    },
+    {
+      "id": "unknown-envelope-format",
+      "document": "policy-5",
+      "set": {
+        "format": "dg-signed/2"
+      },
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": "/format"
+      }
+    },
+    {
+      "id": "wire-at-cap",
+      "document": "policy-5",
+      "wireBytes": 65536,
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "wire-over-cap",
+      "document": "policy-5",
+      "wireBytes": 65537,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    }
+  ],
+  "rawPayloads": [
+    {
+      "id": "duplicate-key",
+      "utf8": "{\"type\":\"keyset\",\"type\":\"command\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "invalid-utf8",
+      "bytesHex": "ff",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "lone-surrogate",
+      "utf8": "{\"type\":\"\\ud800\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "nonfinite-number",
+      "utf8": "{\"type\":\"command\",\"sequence\":NaN}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "plain-integer-token",
+      "utf8": "{\"deviceId\":\"0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I\",\"fleetId\":\"test-fleet\",\"keySetVersion\":1,\"kind\":\"lock_now\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"schemaVersion\":1,\"sequence\":1,\"type\":\"command\"}",
+      "expected": {
+        "outcome": "valid",
+        "failureCode": null
+      }
+    },
+    {
+      "id": "wire-number-decimal-point",
+      "utf8": "{\"deviceId\":\"0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I\",\"fleetId\":\"test-fleet\",\"keySetVersion\":1,\"kind\":\"lock_now\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"schemaVersion\":1,\"sequence\":1.0,\"type\":\"command\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "wire-number-exponent",
+      "utf8": "{\"deviceId\":\"0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I\",\"fleetId\":\"test-fleet\",\"keySetVersion\":1,\"kind\":\"lock_now\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"schemaVersion\":1,\"sequence\":1e0,\"type\":\"command\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "wire-number-negative-zero",
+      "utf8": "{\"deviceId\":\"0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I\",\"fleetId\":\"test-fleet\",\"keySetVersion\":1,\"kind\":\"lock_now\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"schemaVersion\":1,\"sequence\":-0,\"type\":\"command\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    },
+    {
+      "id": "wire-number-out-of-safe-range",
+      "utf8": "{\"deviceId\":\"0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I\",\"fleetId\":\"test-fleet\",\"keySetVersion\":1,\"kind\":\"lock_now\",\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"schemaVersion\":1,\"sequence\":9007199254740993,\"type\":\"command\"}",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "doc-field-invalid",
+        "path": ""
+      }
+    }
+  ]
+}

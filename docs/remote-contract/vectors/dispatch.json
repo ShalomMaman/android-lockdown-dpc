@@ -1,0 +1,305 @@
+{
+  "initial": {
+    "boot": 8,
+    "requestSentElapsedMs": 100,
+    "sequenceFloor": 1
+  },
+  "cases": [
+    {
+      "id": "secure-lock",
+      "document": "lock-2",
+      "secureLock": true,
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "evidence": {
+          "secureLock": true,
+          "effect": "lockNow"
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "insecure-lock",
+      "document": "lock-2",
+      "secureLock": false,
+      "expected": {
+        "outcome": "executed",
+        "failureCode": "lock-screen-off-only",
+        "state": "DONE",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "evidence": {
+          "secureLock": false,
+          "effect": "lockNow"
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "reapply",
+      "document": "reapply-3",
+      "generation": "policy-5",
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 3,
+        "calls": 1,
+        "evidence": {
+          "effect": "ensureProjected+reconcile",
+          "readBackVerified": true,
+          "verifiedGeneration": "policy-5",
+          "syncEnqueued": true
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "reapply-unverified",
+      "document": "reapply-3",
+      "generation": "policy-5",
+      "readBackVerified": false,
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 3,
+        "calls": 1,
+        "evidence": {
+          "effect": "ensureProjected+reconcile",
+          "readBackVerified": false,
+          "verifiedGeneration": "policy-1",
+          "syncEnqueued": true
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "network-off-does-not-suspend-new-commands",
+      "document": "lock-2",
+      "secureLock": true,
+      "overrides": [
+        "network-off"
+      ],
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "evidence": {
+          "secureLock": true,
+          "effect": "lockNow"
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "already-suspended",
+      "document": "lock-2",
+      "overrides": [
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "commands-suspended-by-recovery",
+        "state": null,
+        "sequenceFloor": 1,
+        "calls": 0
+      }
+    },
+    {
+      "id": "accepted-write-failed",
+      "document": "lock-2",
+      "fault": "accept-write",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "state": null,
+        "sequenceFloor": 1,
+        "calls": 0
+      }
+    },
+    {
+      "id": "dispatching-write-failed",
+      "document": "lock-2",
+      "fault": "dispatch-write",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "state": "ACCEPTED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100,
+        "afterRestart": {
+          "outcome": "expired",
+          "failureCode": "command-expired",
+          "state": "EXPIRED",
+          "sequenceFloor": 2,
+          "cutoffElapsed": 120100,
+          "calls": 0
+        }
+      }
+    },
+    {
+      "id": "restart-after-accepted",
+      "document": "lock-2",
+      "fault": "crash-after-accepted",
+      "expected": {
+        "outcome": "expired",
+        "failureCode": "command-expired",
+        "state": "EXPIRED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "restart-after-dispatching-before-call",
+      "document": "lock-2",
+      "fault": "crash-before-call",
+      "expected": {
+        "outcome": "unknown",
+        "failureCode": "dispatch-outcome-unknown",
+        "state": "OUTCOME_UNKNOWN",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "restart-after-call-before-done",
+      "document": "lock-2",
+      "fault": "crash-after-call",
+      "expected": {
+        "outcome": "unknown",
+        "failureCode": "dispatch-outcome-unknown",
+        "state": "OUTCOME_UNKNOWN",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "done-write-failed",
+      "document": "lock-2",
+      "fault": "done-write",
+      "expected": {
+        "outcome": "unknown",
+        "failureCode": "dispatch-outcome-unknown",
+        "state": "OUTCOME_UNKNOWN",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "boot-changed-at-final-check",
+      "document": "lock-2",
+      "dispatchBoot": 9,
+      "expected": {
+        "outcome": "expired",
+        "failureCode": "command-expired",
+        "state": "EXPIRED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "cutoff-is-exclusive-at-final-check",
+      "document": "lock-2",
+      "dispatchElapsedMs": 120100,
+      "expected": {
+        "outcome": "expired",
+        "failureCode": "command-expired",
+        "state": "EXPIRED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "last-valid-dispatch-millisecond",
+      "document": "lock-2",
+      "secureLock": true,
+      "dispatchElapsedMs": 120099,
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "evidence": {
+          "secureLock": true,
+          "effect": "lockNow"
+        },
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "final-check-sees-commands-off",
+      "document": "lock-2",
+      "dispatchOverrides": [
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "cancelled",
+        "failureCode": "cancelled-by-recovery",
+        "state": "CANCELLED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "commands-off-between-dispatch-commit-and-call",
+      "document": "lock-2",
+      "recoveryOverride": "commands-off",
+      "expected": {
+        "outcome": "cancelled",
+        "failureCode": "cancelled-by-recovery",
+        "state": "CANCELLED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "network-off-atomic-cancel-before-call",
+      "document": "lock-2",
+      "recoveryOverride": "network-off",
+      "expected": {
+        "outcome": "cancelled",
+        "failureCode": "cancelled-by-recovery",
+        "state": "CANCELLED",
+        "sequenceFloor": 2,
+        "calls": 0,
+        "cutoffElapsed": 120100
+      }
+    },
+    {
+      "id": "accepted-recovery-after-call-preserves-evidence",
+      "document": "lock-2",
+      "secureLock": true,
+      "recoveryAfterCall": true,
+      "expected": {
+        "outcome": "executed",
+        "failureCode": null,
+        "state": "DONE",
+        "sequenceFloor": 2,
+        "calls": 1,
+        "evidence": {
+          "secureLock": true,
+          "effect": "lockNow",
+          "recoveryOutcome": "command-already-executed"
+        },
+        "cutoffElapsed": 120100
+      }
+    }
+  ]
+}
