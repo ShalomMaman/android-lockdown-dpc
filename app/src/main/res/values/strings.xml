@@ -64,6 +64,7 @@
     <string name="pin_setup_save_replace">Save the new PIN</string>
     <string name="pin_error_format">The PIN must contain 6 to 12 digits.</string>
     <string name="pin_error_mismatch">The two PINs do not match.</string>
+    <string name="pin_error_recovery_reuse">Choose a PIN different from your previous PIN and recovery code.</string>
     <string name="pin_error_save">The PIN could not be saved on this device.</string>
 
     <!-- Locked -->

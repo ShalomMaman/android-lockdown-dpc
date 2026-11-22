@@ -81,6 +81,7 @@
     <string name="pin_setup_save_replace">שמירת הקוד החדש</string>
     <string name="pin_error_format">הקוד חייב להכיל 6 עד 12 ספרות.</string>
     <string name="pin_error_mismatch">שני הקודים אינם זהים.</string>
+    <string name="pin_error_recovery_reuse">יש לבחור קוד מנהל שונה מקוד המנהל הקודם ומקוד השחזור.</string>
     <string name="pin_error_save">לא ניתן לשמור את הקוד במכשיר.</string>
 
     <!-- Locked -->

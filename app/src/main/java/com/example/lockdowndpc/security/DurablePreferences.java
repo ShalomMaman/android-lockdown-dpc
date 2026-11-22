@@ -4,6 +4,7 @@ import android.content.SharedPreferences;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /** Synchronous preference writes that undo Android's in-memory change on disk failure. */
@@ -14,6 +15,14 @@ public final class DurablePreferences {
     public static boolean commit(
             SharedPreferences prefs, SharedPreferences.Editor update, String... keys
     ) {
+        return commit(prefs, update, () -> false, keys);
+    }
+
+    /** Confirm an ambiguous commit from disk before attempting to roll it back. */
+    static boolean commit(
+            SharedPreferences prefs, SharedPreferences.Editor update,
+            BooleanSupplier committedOnDisk, String... keys
+    ) {
         Map<String, ?> before = prefs.getAll();
         return commit(update, () -> {
             SharedPreferences.Editor rollback = prefs.edit();
@@ -21,12 +30,19 @@ public final class DurablePreferences {
                 restore(rollback, key, before.get(key));
             }
             return rollback;
-        });
+        }, committedOnDisk);
     }
 
     /** For a store that already has a typed snapshot of its previous state. */
     public static boolean commit(
             SharedPreferences.Editor update, Supplier<SharedPreferences.Editor> rollback
+    ) {
+        return commit(update, rollback, () -> false);
+    }
+
+    private static boolean commit(
+            SharedPreferences.Editor update, Supplier<SharedPreferences.Editor> rollback,
+            BooleanSupplier committedOnDisk
     ) {
         try {
             if (update.commit()) {
@@ -34,6 +50,9 @@ public final class DurablePreferences {
             }
         } catch (RuntimeException failedWrite) {
             // A throwing editor may already have changed the in-memory map.
+        }
+        if (committedOnDisk.getAsBoolean()) {
+            return true;
         }
         // Even if disk is still unwritable, this puts the old values back in memory.
         rollback.get().commit();

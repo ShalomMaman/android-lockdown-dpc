@@ -175,9 +175,9 @@ public class AuthorizedPolicyWriterTest {
         // maintenance, or updates. Evidence writes do not change policy choices.
         return switch (store) {
             case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify",
-                    // Recovery reset: read-only check, and a PIN write allowed only while a committed
-                    // recovery consumption is pending (LOCAL_PIN mode).
-                    "hasPendingRecoveryPinReset", "completeRecoveryPinReset")
+                    // completeRecoveryPinReset writes credentials without an AdminSession.
+                    // It requires a live recovery grant and LOCAL_PIN mode.
+                    "completeRecoveryPinReset")
                     .contains(method);
             case "ManagementModeStore" -> method.equals("selectLocal");
             case "AllowedAppsStore" -> method.equals("rememberPackageLabel");
