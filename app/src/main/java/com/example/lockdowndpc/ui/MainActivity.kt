@@ -335,6 +335,7 @@ private fun AdminConsole(
             subtitle = when (val code = journalFailureCode) {
                 null -> stringResource(R.string.remote_policy_unavailable)
                 "journal-lost" -> stringResource(R.string.remote_policy_journal_lost)
+                "journal-guard-reenrolment-needed" -> stringResource(R.string.remote_policy_reenrolment_needed)
                 else -> stringResource(R.string.remote_policy_guard_blocked, code)
             },
         ) {}

@@ -15,6 +15,7 @@
     <string name="admin_description">Manage apps, block installations, and restrict internet access.</string>
     <string name="remote_policy_unavailable">Managed policy unavailable</string>
     <string name="remote_policy_journal_lost">The managed policy record on this device is damaged (journal-lost). The device stays locked down and accepts no new policy. To manage it again, reset it to factory settings and enrol it again.</string>
+    <string name="remote_policy_reenrolment_needed">This device uses an older managed policy record format. The device stays locked down. To manage it again, reset it to factory settings and enrol it again.</string>
     <string name="remote_policy_guard_blocked">The two copies of the managed policy record could not be verified (%1$s). The device stays locked down and accepts no new policy.</string>
     <string name="admin_profile_name">Protected device</string>
     <string name="provisioning_compliance_progress">Applying device protection…</string>

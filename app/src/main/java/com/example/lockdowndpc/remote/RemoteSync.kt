@@ -28,6 +28,7 @@ internal class RemoteSync(private val verifier: RemoteVerifier, private val bind
     fun respond(
         exchange: Exchange, responseNonce: String, now: RemoteTime, documents: List<RemoteDocument>,
         trust: () -> RemoteTrust, floor: (DocumentType) -> Long,
+        canRetry: (RemoteVerifier.Authenticated) -> Boolean,
         accept: (RemoteVerifier.Authenticated, Exchange) -> RemoteFailure?
     ): Response {
         if (outstanding !== exchange) return stale()
@@ -55,8 +56,14 @@ internal class RemoteSync(private val verifier: RemoteVerifier, private val bind
                     continue
                 }
                 val failure = try {
-                    val keySetFloor = maxOf(trust().version, floor(DocumentType.KEY_SET))
-                    verifier.checkFloorsAndBinding(doc, keySetFloor, floor(type), binding.deviceId, exchange.nonce)
+                    val trustVersion = trust().version
+                    val keySetFloor = maxOf(trustVersion, floor(DocumentType.KEY_SET))
+                    // Once a keyset is reserved, delegated keys cannot act
+                    // under its version until that keyset is committed.
+                    if (type != DocumentType.KEY_SET && trustVersion < keySetFloor) refuse("doc-version-rollback")
+                    verifier.checkFloorsAndBinding(
+                        doc, keySetFloor, floor(type), binding.deviceId, exchange.nonce, canRetry(doc)
+                    )
                     accept(doc, exchange)
                 } catch (error: Refused) {
                     error.failure

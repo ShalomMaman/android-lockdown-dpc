@@ -99,7 +99,9 @@ internal class RemoteEngine(
     fun receive(sync: RemoteSync, exchange: RemoteSync.Exchange, nonce: String, now: RemoteTime,
                 documents: List<RemoteDocument>): RemoteSync.Response {
         failure?.let { return RemoteSync.Response(it) }
-        return sync.respond(exchange, nonce, now, documents, { requireNotNull(state.trust) }, journal::floor, ::accept)
+        return sync.respond(
+            exchange, nonce, now, documents, { requireNotNull(state.trust) }, journal::floor, journal::canRetry, ::accept
+        )
     }
 
     private fun accept(doc: RemoteVerifier.Authenticated, exchange: RemoteSync.Exchange): RemoteFailure? {
@@ -128,7 +130,7 @@ internal class RemoteEngine(
                 state.copy(commandFloor = doc.version, commands = state.commands + (entry.sequence to entry))
             }
         }
-        val failure = save(next)
+        val failure = save(next, doc)
         if (failure == null && doc.type == DocumentType.COMMAND) liveDispatches.add(doc.version)
         return failure
     }
@@ -340,7 +342,8 @@ internal class RemoteEngine(
     }
 
     private fun saveCommand(entry: CommandEntry) = save(state.copy(commands = state.commands + (entry.sequence to entry)))
-    private fun save(next: JournalState) = if (journal.save(next)) null else failure ?: WRITE_FAILED
+    private fun save(next: JournalState, doc: RemoteVerifier.Authenticated? = null) =
+        if (journal.save(next, doc)) null else failure ?: WRITE_FAILED
 
     companion object {
         /** Android 10: the first release that can enforce every default control and the home filter. */
