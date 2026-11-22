@@ -20,8 +20,8 @@ class UiLogicTest {
     }
 
     @Test
-    fun consoleBack_stepsThroughRecoveryAndKioskScreens() {
-        assertEquals(ConsoleScreen.ADMIN, ConsoleScreen.RECOVERY.backDestination(false, false))
+    fun consoleBack_staysOnRecoveryCodeAndStepsThroughKioskScreens() {
+        assertEquals(ConsoleScreen.RECOVERY, ConsoleScreen.RECOVERY.backDestination(false, false))
         assertEquals(ConsoleScreen.ADMIN, ConsoleScreen.KIOSK.backDestination(false, false))
         assertEquals(ConsoleScreen.KIOSK, ConsoleScreen.KIOSK_APPS.backDestination(false, false))
         assertEquals(ConsoleScreen.KIOSK, ConsoleScreen.KIOSK_SITE.backDestination(false, false))

@@ -355,10 +355,10 @@ internal fun PinField(
             keyboardType = KeyboardType.NumberPassword,
             imeAction = imeAction,
         ),
+        // Leave Next to the default focus traversal between the two PIN fields.
         keyboardActions = KeyboardActions(
             onDone = { onImeAction() },
             onGo = { onImeAction() },
-            onNext = { onImeAction() },
         ),
         modifier = modifier.fillMaxWidth(),
     )

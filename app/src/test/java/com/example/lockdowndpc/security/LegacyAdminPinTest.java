@@ -26,6 +26,7 @@ import javax.crypto.spec.SecretKeySpec;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 @RunWith(RobolectricTestRunner.class)
@@ -56,6 +57,48 @@ public class LegacyAdminPinTest {
         assertEquals("LOCAL_PIN", context.getSharedPreferences("management_mode", Context.MODE_PRIVATE)
                 .getString("mode", null));
         assertEquals(verifier, pinStore.getString("pin_verifier", null));
+    }
+
+    @Test
+    public void verifiesAndConsumesRecoveryCodeThenSavesExactlyOneNewPinWithoutASession() throws Exception {
+        String recoveryCode = "1234-5678-9012";
+        byte[] salt = new byte[16];
+        assertTrue(pinStore.edit()
+                .putString("recovery_salt", Base64.encodeToString(salt, Base64.NO_WRAP))
+                .putString("recovery_verifier", Base64.encodeToString(
+                        AdminPinStore.createVerifier("123456789012", salt, KEY), Base64.NO_WRAP))
+                .commit());
+        AdminSession.unlock();
+        var result = AdminPinStore.verify(context, recoveryCode, () -> KEY);
+        assertEquals(AdminPinStore.Status.SUCCESS, result.status());
+        assertTrue(result.usedRecoveryCode());
+        assertTrue(AdminPinStore.hasPendingRecoveryPinReset(context));
+        assertFalse(AdminSession.isUnlocked());
+        assertEquals(AdminPinStore.Status.ERROR, verify(context));
+        assertEquals(AdminPinStore.Status.ERROR, AdminPinStore.verify(context, recoveryCode, () -> KEY).status());
+        assertThrows(SecurityException.class, () -> AdminPinStore.rotateRecoveryCode(context));
+
+        var before = pinStore.getAll();
+        assertThrows(IllegalArgumentException.class,
+                () -> AdminPinStore.completeRecoveryPinReset(context, "12345", () -> KEY));
+        assertEquals(before, pinStore.getAll());
+        MemoryPreferences failed = new MemoryPreferences(before);
+        SharedPreferences pendingStore = failed.preferences();
+        Context faulted = withStore("admin_security", pendingStore);
+        String newPin = "654321";
+        assertThrows(SecurityException.class, () -> AdminPinStore.completeRecoveryPinReset(faulted, newPin, () -> KEY));
+        assertEquals(before, pendingStore.getAll());
+
+        failed.failCommit = false;
+        assertFalse(AdminPinStore.replacePin(faulted, newPin));
+        assertTrue(AdminPinStore.completeRecoveryPinReset(faulted, newPin, () -> KEY));
+        assertEquals(1, failed.successfulCommits);
+        assertFalse(pendingStore.contains("recovery_pin_reset_pending"));
+        assertFalse(before.get("pin_verifier").equals(pendingStore.getString("pin_verifier", null)));
+        assertFalse(AdminSession.isUnlocked());
+        assertFalse(AdminPinStore.completeRecoveryPinReset(faulted, PIN, () -> KEY));
+        assertEquals(AdminPinStore.Status.INVALID, verify(faulted));
+        assertEquals(AdminPinStore.Status.SUCCESS, AdminPinStore.verify(faulted, newPin, () -> KEY).status());
     }
 
     @Test

@@ -28,7 +28,7 @@ internal enum class ConsoleScreen(val secure: Boolean, val requiresSession: Bool
     KIOSK_CONFIRM(false, requiresSession = true),
 }
 
-/** The system owns Back at the enrollment, remote status and PIN gates. */
+/** A self-destination consumes Back without navigating. Null delegates to the system. */
 internal fun ConsoleScreen.backDestination(
     replacingPin: Boolean,
     replacingAfterRecovery: Boolean,
@@ -42,7 +42,8 @@ internal fun ConsoleScreen.backDestination(
         else -> ConsoleScreen.ADMIN
     }
     ConsoleScreen.ADMIN -> ConsoleScreen.LOCKED
-    ConsoleScreen.RECOVERY, ConsoleScreen.KIOSK -> ConsoleScreen.ADMIN
+    ConsoleScreen.RECOVERY -> ConsoleScreen.RECOVERY
+    ConsoleScreen.KIOSK -> ConsoleScreen.ADMIN
     ConsoleScreen.KIOSK_APPS, ConsoleScreen.KIOSK_SITE, ConsoleScreen.KIOSK_CONFIRM -> ConsoleScreen.KIOSK
 }
 

@@ -49,6 +49,7 @@ public final class AdminPinStore {
     private static final String KEY_LOCKOUT_PENALTY = "pin_lockout_penalty";
     private static final String KEY_RECOVERY_SALT = "recovery_salt";
     private static final String KEY_RECOVERY_VERIFIER = "recovery_verifier";
+    private static final String KEY_RECOVERY_PIN_RESET_PENDING = "recovery_pin_reset_pending";
     private static final String KEYSTORE = "AndroidKeyStore";
     private static final String KEY_ALIAS = "lockdown_admin_pin_hmac_v1";
     private static final int PBKDF2_ITERATIONS = 210_000;
@@ -67,13 +68,21 @@ public final class AdminPinStore {
         return prefs.contains(KEY_SALT) && prefs.contains(KEY_VERIFIER);
     }
 
+    public static synchronized boolean hasPendingRecoveryPinReset(Context context) {
+        return hasPendingRecoveryPinReset(prefs(context));
+    }
+
+    private static boolean hasPendingRecoveryPinReset(SharedPreferences prefs) {
+        return prefs.getBoolean(KEY_RECOVERY_PIN_RESET_PENDING, false);
+    }
+
     /** Returns false if another setup has already stored a PIN. */
     public static synchronized boolean setInitialPin(Context context, String pin) {
         if (!ManagementModeStore.selectLocal(context)) {
             return false;
         }
         SharedPreferences prefs = prefs(context);
-        return setInitialPin(prefs, () -> writePin(prefs, pin));
+        return setInitialPin(prefs, () -> writePin(prefs, pin, AdminPinStore::getOrCreateHmacKey));
     }
 
     static synchronized boolean setInitialPin(SharedPreferences prefs, Runnable save) {
@@ -90,11 +99,32 @@ public final class AdminPinStore {
                 || ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
             return false;
         }
-        writePin(prefs(context), pin);
+        SharedPreferences prefs = prefs(context);
+        if (hasPendingRecoveryPinReset(prefs)) {
+            return false;
+        }
+        writePin(prefs, pin, AdminPinStore::getOrCreateHmacKey);
         return true;
     }
 
-    private static void writePin(SharedPreferences prefs, String pin) {
+    /** A consumed recovery code authorizes only the next PIN write. */
+    public static boolean completeRecoveryPinReset(Context context, String pin) {
+        return completeRecoveryPinReset(context, pin, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    static synchronized boolean completeRecoveryPinReset(Context context, String pin, HmacKeySource keySource) {
+        if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
+            return false;
+        }
+        SharedPreferences prefs = prefs(context);
+        if (!hasPendingRecoveryPinReset(prefs)) {
+            return false;
+        }
+        writePin(prefs, pin, keySource);
+        return true;
+    }
+
+    private static void writePin(SharedPreferences prefs, String pin, HmacKeySource keySource) {
         if (!isValidPin(pin)) {
             throw new IllegalArgumentException("pin-must-contain-6-to-12-digits");
         }
@@ -102,13 +132,14 @@ public final class AdminPinStore {
         try {
             byte[] salt = new byte[16];
             new SecureRandom().nextBytes(salt);
-            byte[] verifier = createVerifier(pin, salt, getOrCreateHmacKey());
+            byte[] verifier = createVerifier(pin, salt, keySource.get());
             SharedPreferences.Editor editor = putLockout(
                     prefs.edit()
                             .putString(KEY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
-                            .putString(KEY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP)),
+                            .putString(KEY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP))
+                            .remove(KEY_RECOVERY_PIN_RESET_PENDING),
                     PinLockoutPolicy.LockoutState.CLEARED);
-            saved = DurablePreferences.commit(prefs, editor, KEY_SALT, KEY_VERIFIER,
+            saved = DurablePreferences.commit(prefs, editor, KEY_SALT, KEY_VERIFIER, KEY_RECOVERY_PIN_RESET_PENDING,
                     KEY_FAILURES, KEY_LOCKOUT_BOOT_KIND, KEY_LOCKOUT_BOOT_VALUE,
                     KEY_LOCKOUT_ELAPSED_UNTIL, KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL);
         } catch (Exception exception) {
@@ -124,6 +155,10 @@ public final class AdminPinStore {
         if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
             throw new SecurityException("recovery-code-mode-refused");
         }
+        SharedPreferences prefs = prefs(context);
+        if (hasPendingRecoveryPinReset(prefs)) {
+            throw new SecurityException("recovery-pin-reset-pending");
+        }
         try {
             SecureRandom random = new SecureRandom();
             StringBuilder code = new StringBuilder(12);
@@ -133,7 +168,6 @@ public final class AdminPinStore {
             byte[] salt = new byte[16];
             random.nextBytes(salt);
             byte[] verifier = createVerifier(code.toString(), salt, getOrCreateHmacKey());
-            SharedPreferences prefs = prefs(context);
             if (!DurablePreferences.commit(prefs, prefs.edit()
                     .putString(KEY_RECOVERY_SALT, Base64.encodeToString(salt, Base64.NO_WRAP))
                     .putString(KEY_RECOVERY_VERIFIER, Base64.encodeToString(verifier, Base64.NO_WRAP)),
@@ -167,7 +201,7 @@ public final class AdminPinStore {
             return new Verification(Status.NOT_CONFIGURED, 0L, false);
         }
 
-        if (mode != ManagementMode.LOCAL_PIN) {
+        if (mode != ManagementMode.LOCAL_PIN || hasPendingRecoveryPinReset(prefs)) {
             return new Verification(Status.ERROR, 0L, false);
         }
         PinLockoutPolicy.BootId boot = currentBootId(context);
@@ -234,17 +268,21 @@ public final class AdminPinStore {
         }
     }
 
-    /** A verified recovery code is usable only once its removal is durable. */
+    /** Consume the code and persist authorization for the PIN reset in one write. */
     static synchronized Verification consumeMatchedRecoveryCode(SharedPreferences prefs) {
         SharedPreferences.Editor editor = putLockout(
-                prefs.edit().remove(KEY_RECOVERY_SALT).remove(KEY_RECOVERY_VERIFIER),
+                prefs.edit()
+                        .remove(KEY_RECOVERY_SALT)
+                        .remove(KEY_RECOVERY_VERIFIER)
+                        .putBoolean(KEY_RECOVERY_PIN_RESET_PENDING, true),
                 PinLockoutPolicy.LockoutState.CLEARED);
-        boolean consumed = DurablePreferences.commit(prefs, editor,
+        boolean consumed = DurablePreferences.commit(prefs, editor, KEY_RECOVERY_PIN_RESET_PENDING,
                 KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER, KEY_FAILURES, KEY_LOCKOUT_BOOT_KIND,
                 KEY_LOCKOUT_BOOT_VALUE, KEY_LOCKOUT_ELAPSED_UNTIL, KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL);
         if (!consumed) {
             return new Verification(Status.ERROR, 0L, false);
         }
+        AdminSession.lock();
         unpersistedLockouts.remove(prefs);
         return new Verification(Status.SUCCESS, 0L, true);
     }

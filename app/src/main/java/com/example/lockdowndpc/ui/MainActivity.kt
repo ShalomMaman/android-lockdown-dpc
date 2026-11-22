@@ -227,6 +227,10 @@ internal fun initialScreen(context: Context): ConsoleScreen {
     if (!isDeviceOwner(context)) {
         return ConsoleScreen.ENROLLMENT
     }
+    if (AdminPinStore.hasPendingRecoveryPinReset(context)) {
+        AdminSession.lock()
+        return ConsoleScreen.PIN_SETUP
+    }
     if (!AdminPinStore.hasPin(context)) {
         return ConsoleScreen.PIN_SETUP
     }
@@ -234,6 +238,34 @@ internal fun initialScreen(context: Context): ConsoleScreen {
     // activity recreation. That was the behaviour of the shipped build.
     AdminSession.lock()
     return ConsoleScreen.LOCKED
+}
+
+internal enum class PinSetupMode(val replacing: Boolean, val canCancel: Boolean) {
+    INITIAL(false, false),
+    CHANGE(true, true),
+    RECOVERY(true, false);
+
+    companion object {
+        // Restore the recovery screen from durable state without saving PIN input
+        // or restoring a session-bound screen across activity recreation.
+        fun restored(context: Context): PinSetupMode =
+            if (AdminPinStore.hasPendingRecoveryPinReset(context)) RECOVERY else INITIAL
+    }
+}
+
+@Composable
+internal fun ConsoleBackHandler(
+    screen: ConsoleScreen,
+    pinSetupMode: PinSetupMode,
+    navigationBlocked: Boolean,
+    onNavigate: (ConsoleScreen) -> Unit,
+) {
+    val destination = screen.backDestination(pinSetupMode.replacing, pinSetupMode == PinSetupMode.RECOVERY)
+    BackHandler(enabled = destination != null) {
+        if (!navigationBlocked && destination != null && destination != screen) {
+            onNavigate(destination)
+        }
+    }
 }
 
 /**
@@ -278,8 +310,7 @@ private fun AdminConsole(
         ) {}
         return
     }
-    var replacingPin by remember { mutableStateOf(false) }
-    var replacingAfterRecovery by remember { mutableStateOf(false) }
+    var pinSetupMode by remember { mutableStateOf(PinSetupMode.restored(context)) }
     var recoveryCode by remember { mutableStateOf("") }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var applyFailureMessage by remember { mutableStateOf<UiMessage?>(null) }
@@ -323,9 +354,17 @@ private fun AdminConsole(
         AdminSession.lock()
         message = null
         applyFailureMessage = null
-        replacingPin = false
-        replacingAfterRecovery = false
-        screen = ConsoleScreen.LOCKED
+        pinSetupMode = PinSetupMode.restored(context)
+        screen = if (pinSetupMode == PinSetupMode.RECOVERY) {
+            modePickerVisible = false
+            languagePickerVisible = false
+            auditLogVisible = false
+            recoveryRotateVisible = false
+            managementVisible = false
+            ConsoleScreen.PIN_SETUP
+        } else {
+            ConsoleScreen.LOCKED
+        }
     }
 
     fun enterRemoteStatusIfNeeded(): Boolean {
@@ -335,8 +374,15 @@ private fun AdminConsole(
         return true
     }
 
+    fun routeToPendingRecoveryPinReset(): Boolean {
+        if (!AdminPinStore.hasPendingRecoveryPinReset(context)) return false
+        if (screen != ConsoleScreen.PIN_SETUP || pinSetupMode != PinSetupMode.RECOVERY) showLocked()
+        return true
+    }
+
     fun requireSession(): Boolean {
         if (enterRemoteStatusIfNeeded()) return false
+        if (routeToPendingRecoveryPinReset()) return false
         if (AdminAuthority.localSession(context) != null) {
             return true
         }
@@ -370,7 +416,7 @@ private fun AdminConsole(
     fun backFromPinReplacement() {
         // After a recovery unlock the old PIN is unknown and the recovery code is
         // already consumed: leaving before a new PIN is saved would strand the admin.
-        if (replacingAfterRecovery) return
+        if (!pinSetupMode.canCancel) return
         if (requireSession()) showAdmin()
     }
 
@@ -380,7 +426,8 @@ private fun AdminConsole(
 
     fun savePin(first: String, second: String) {
         if (enterRemoteStatusIfNeeded()) return
-        if (replacingPin && !requireSession()) {
+        val setupMode = pinSetupMode
+        if (setupMode == PinSetupMode.CHANGE && !requireSession()) {
             return
         }
         if (!AdminPinStore.isValidPin(first)) {
@@ -393,23 +440,25 @@ private fun AdminConsole(
             message = UiMessage(resources.getString(R.string.pin_error_mismatch), isError = true)
             return
         }
+        var recoveryPinSaved = false
         try {
-            val saved = if (replacingPin) {
-                AdminPinStore.replacePin(context, first)
-            } else {
-                AdminPinStore.setInitialPin(context, first)
+            val saved = when (setupMode) {
+                PinSetupMode.INITIAL -> AdminPinStore.setInitialPin(context, first)
+                PinSetupMode.CHANGE -> AdminPinStore.replacePin(context, first)
+                PinSetupMode.RECOVERY -> AdminPinStore.completeRecoveryPinReset(context, first)
             }
             if (!saved) {
                 haptics.reject()
                 showLocked()
                 return
             }
+            recoveryPinSaved = setupMode == PinSetupMode.RECOVERY
             val code = AdminPinStore.rotateRecoveryCode(context)
             AuditLog.append(
                 context,
-                if (replacingPin) AuditEvent.PIN_REPLACED else AuditEvent.PIN_SET,
+                if (setupMode.replacing) AuditEvent.PIN_REPLACED else AuditEvent.PIN_SET,
                 resources.getString(
-                    if (replacingPin) R.string.audit_pin_replaced else R.string.audit_pin_set
+                    if (setupMode.replacing) R.string.audit_pin_replaced else R.string.audit_pin_set
                 ),
             )
             AdminSession.unlock()
@@ -418,24 +467,27 @@ private fun AdminConsole(
             haptics.confirm()
         } catch (exception: RuntimeException) {
             haptics.reject()
-            message = UiMessage(resources.getString(R.string.pin_error_save), isError = true)
+            val error = if (recoveryPinSaved) {
+                showLocked()
+                R.string.admin_error_recovery
+            } else {
+                R.string.pin_error_save
+            }
+            message = UiMessage(resources.getString(error), isError = true)
         }
     }
 
     fun unlockWith(pin: String) {
-        if (enterRemoteStatusIfNeeded()) return
+        if (enterRemoteStatusIfNeeded() || routeToPendingRecoveryPinReset()) return
         val result = AdminPinStore.verify(context, pin)
         if (enterRemoteStatusIfNeeded()) return
         when (result.status()) {
             AdminPinStore.Status.SUCCESS -> {
-                AdminSession.unlock()
                 haptics.confirm()
                 if (result.usedRecoveryCode()) {
-                    replacingPin = true
-                    replacingAfterRecovery = true
-                    message = null
-                    screen = ConsoleScreen.PIN_SETUP
+                    showLocked()
                 } else {
+                    AdminSession.unlock()
                     showAdmin()
                 }
             }
@@ -451,7 +503,7 @@ private fun AdminConsole(
             }
 
             AdminPinStore.Status.NOT_CONFIGURED -> {
-                replacingPin = false
+                pinSetupMode = PinSetupMode.INITIAL
                 message = null
                 screen = ConsoleScreen.PIN_SETUP
             }
@@ -697,7 +749,7 @@ private fun AdminConsole(
     }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (enterRemoteStatusIfNeeded()) return@LifecycleEventEffect
+        if (enterRemoteStatusIfNeeded() || routeToPendingRecoveryPinReset()) return@LifecycleEventEffect
         when {
             // Every session-bound screen, including the kiosk configuration
             // flow, drops to the PIN screen the moment the session is gone.
@@ -710,8 +762,8 @@ private fun AdminConsole(
             screen == ConsoleScreen.KIOSK -> refreshKiosk()
             screen == ConsoleScreen.ENROLLMENT && isDeviceOwner(context) -> {
                 message = null
-                replacingPin = false
                 screen = initialScreen(context)
+                pinSetupMode = PinSetupMode.restored(context)
             }
 
             else -> Unit
@@ -722,15 +774,12 @@ private fun AdminConsole(
     // first read has to happen without waiting for a resume event.
     LaunchedEffect(Unit) { refreshKiosk() }
 
-    val backDestination = screen.backDestination(replacingPin, replacingAfterRecovery)
-    BackHandler(enabled = backDestination != null) {
-        if (kioskActionInProgress == null) {
-            when (backDestination) {
-                ConsoleScreen.LOCKED -> showLocked()
-                ConsoleScreen.ADMIN -> if (requireSession()) showAdmin()
-                ConsoleScreen.KIOSK -> backToKiosk()
-                else -> Unit
-            }
+    ConsoleBackHandler(screen, pinSetupMode, navigationBlocked = kioskActionInProgress != null) { destination ->
+        when (destination) {
+            ConsoleScreen.LOCKED -> showLocked()
+            ConsoleScreen.ADMIN -> if (requireSession()) showAdmin()
+            ConsoleScreen.KIOSK -> backToKiosk()
+            else -> Unit
         }
     }
 
@@ -739,8 +788,8 @@ private fun AdminConsole(
         ConsoleScreen.REMOTE_STATUS -> Unit
 
         ConsoleScreen.PIN_SETUP -> PinSetupScreen(
-            replacing = replacingPin,
-            canCancel = replacingPin && !replacingAfterRecovery,
+            replacing = pinSetupMode.replacing,
+            canCancel = pinSetupMode.canCancel,
             message = message,
             onSave = ::savePin,
             onCancel = ::backFromPinReplacement,
@@ -803,8 +852,7 @@ private fun AdminConsole(
             },
             onChangePin = {
                 if (requireSession()) {
-                    replacingPin = true
-                    replacingAfterRecovery = false
+                    pinSetupMode = PinSetupMode.CHANGE
                     message = null
                     screen = ConsoleScreen.PIN_SETUP
                 }

@@ -174,7 +174,10 @@ public class AuthorizedPolicyWriterTest {
         // Named readers and state owned by authentication, provisioning,
         // maintenance, or updates. Evidence writes do not change policy choices.
         return switch (store) {
-            case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify")
+            case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify",
+                    // Recovery reset: read-only check, and a PIN write allowed only while a committed
+                    // recovery consumption is pending (LOCAL_PIN mode).
+                    "hasPendingRecoveryPinReset", "completeRecoveryPinReset")
                     .contains(method);
             case "ManagementModeStore" -> method.equals("selectLocal");
             case "AllowedAppsStore" -> method.equals("rememberPackageLabel");

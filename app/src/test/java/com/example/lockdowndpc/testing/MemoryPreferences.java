@@ -17,6 +17,7 @@ public final class MemoryPreferences {
     public Consumer<Set<String>> afterCommit = keys -> {};
     public boolean failCommit = true;
     public boolean throwBeforeCommit;
+    public int successfulCommits;
 
     public MemoryPreferences(Map<String, ?> initial) {
         memory = new HashMap<>(initial);
@@ -72,6 +73,7 @@ public final class MemoryPreferences {
                                 }
                             });
                             if (failCommit) return false;
+                            successfulCommits++;
                             durable.clear();
                             durable.putAll(memory);
                             afterCommit.accept(Set.copyOf(touched));

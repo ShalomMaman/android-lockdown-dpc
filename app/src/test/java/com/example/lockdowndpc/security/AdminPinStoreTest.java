@@ -34,13 +34,16 @@ public class AdminPinStoreTest {
         assertEquals(AdminPinStore.Status.ERROR, failed.status());
         assertFalse(failed.usedRecoveryCode());
         assertEquals(before, prefs.getAll());
+        assertEquals(0, fake.successfulCommits);
 
         fake.failCommit = false;
         AdminPinStore.Verification retried = AdminPinStore.consumeMatchedRecoveryCode(prefs);
         assertEquals(AdminPinStore.Status.SUCCESS, retried.status());
         assertTrue(retried.usedRecoveryCode());
+        assertEquals(1, fake.successfulCommits);
         assertFalse(prefs.contains("recovery_salt"));
         assertFalse(prefs.contains("recovery_verifier"));
+        assertTrue(prefs.getBoolean("recovery_pin_reset_pending", false));
         assertEquals(0, prefs.getInt("pin_failures", -1));
     }
 
