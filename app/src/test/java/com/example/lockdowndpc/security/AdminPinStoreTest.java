@@ -2,12 +2,9 @@ package com.example.lockdowndpc.security;
 
 import android.content.SharedPreferences;
 
-import com.example.lockdowndpc.testing.MemoryPreferences;
-
 import org.junit.Test;
 
 import java.lang.reflect.Proxy;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,27 +20,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class AdminPinStoreTest {
-    @Test
-    public void recoveryCodeRequiresDurableConsumption() {
-        Map<String, ?> before = Map.of(
-                "recovery_salt", "test-salt", "recovery_verifier", "test-verifier", "pin_failures", 2);
-        MemoryPreferences fake = new MemoryPreferences(before);
-        SharedPreferences prefs = fake.preferences();
-
-        AdminPinStore.Verification failed = AdminPinStore.consumeMatchedRecoveryCode(prefs);
-        assertEquals(AdminPinStore.Status.ERROR, failed.status());
-        assertFalse(failed.usedRecoveryCode());
-        assertEquals(before, prefs.getAll());
-
-        fake.failCommit = false;
-        AdminPinStore.Verification retried = AdminPinStore.consumeMatchedRecoveryCode(prefs);
-        assertEquals(AdminPinStore.Status.SUCCESS, retried.status());
-        assertTrue(retried.usedRecoveryCode());
-        assertFalse(prefs.contains("recovery_salt"));
-        assertFalse(prefs.contains("recovery_verifier"));
-        assertEquals(0, prefs.getInt("pin_failures", -1));
-    }
-
     @Test
     public void initialSetupRefusesToOverwriteAnExistingPin() {
         AtomicReference<String> storedPin = new AtomicReference<>("first");

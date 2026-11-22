@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.BuiltInBlockExemptions
@@ -217,12 +219,16 @@ private fun ExemptionCandidate.displayName(): String =
 internal fun BuiltInExemptionsSection(
     view: ExemptionsView,
     enabled: Boolean,
+    clearingApprovals: Boolean,
     onRequestChrome: () -> Unit,
     onRemoveChrome: () -> Unit,
     onRequestSocial: (ExemptionCandidate) -> Unit,
     onRemoveSocial: (ExemptionCandidate) -> Unit,
     onClearApprovals: () -> Unit,
 ) {
+    val haptics = rememberHaptics()
+    val chromeApproved = view.settings.chrome()
+    val chromeEnabled = enabled && (view.chromeInstalled || chromeApproved)
     SectionCard(title = stringResource(R.string.system_policy_section_exemptions)) {
         if (view.recordUnreadable) {
             Text(
@@ -231,19 +237,28 @@ internal fun BuiltInExemptionsSection(
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
             )
-            TextButton(
+            ConsoleTextAction(
+                text = stringResource(R.string.system_policy_exempt_clear_approvals),
                 onClick = onClearApprovals,
                 enabled = enabled,
+                loading = clearingApprovals,
                 modifier = Modifier.padding(horizontal = 8.dp),
-            ) {
-                Text(stringResource(R.string.system_policy_exempt_clear_approvals))
-            }
+            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(min = 64.dp)
+                .toggleable(
+                    value = chromeApproved,
+                    enabled = chromeEnabled,
+                    role = Role.Switch,
+                    onValueChange = { requested ->
+                        haptics.toggle(requested)
+                        if (requested) onRequestChrome() else onRemoveChrome()
+                    },
+                )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -260,11 +275,9 @@ internal fun BuiltInExemptionsSection(
             }
             Spacer(Modifier.size(16.dp))
             Switch(
-                checked = view.settings.chrome(),
-                onCheckedChange = { requested ->
-                    if (requested) onRequestChrome() else onRemoveChrome()
-                },
-                enabled = enabled && (view.chromeInstalled || view.settings.chrome()),
+                checked = chromeApproved,
+                onCheckedChange = null,
+                enabled = chromeEnabled,
             )
         }
         Text(
@@ -304,6 +317,15 @@ internal fun BuiltInExemptionsSection(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = 64.dp)
+                    .toggleable(
+                        value = approved,
+                        enabled = enabled,
+                        role = Role.Switch,
+                        onValueChange = { requested ->
+                            haptics.toggle(requested)
+                            if (requested) onRequestSocial(candidate) else onRemoveSocial(candidate)
+                        },
+                    )
                     .padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -322,9 +344,7 @@ internal fun BuiltInExemptionsSection(
                 Spacer(Modifier.size(16.dp))
                 Switch(
                     checked = approved,
-                    onCheckedChange = { requested ->
-                        if (requested) onRequestSocial(candidate) else onRemoveSocial(candidate)
-                    },
+                    onCheckedChange = null,
                     enabled = enabled,
                 )
             }

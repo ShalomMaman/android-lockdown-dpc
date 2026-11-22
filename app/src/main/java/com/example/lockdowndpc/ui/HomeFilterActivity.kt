@@ -11,11 +11,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -31,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextDirection
@@ -88,10 +93,14 @@ private enum class HomeFilterAction(val title: Int, val guidance: Int) {
 private fun HomeFilterScreen(onBack: () -> Unit) {
     val context = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
+    val resources = LocalResources.current
+    val haptics = rememberHaptics()
     var snapshot by remember { mutableStateOf<HomeFilterController.Snapshot?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<Int?>(null) }
+    var readError by remember { mutableStateOf<Int?>(null) }
+    var message by remember { mutableStateOf<UiMessage?>(null) }
+    var applyingAction by remember { mutableStateOf<Int?>(null) }
     var vpn by remember { mutableStateOf(HomeFilterPolicy.DEFAULT_VPN_PACKAGE) }
     var pac by remember { mutableStateOf("") }
     var signerPin by remember { mutableStateOf("") }
@@ -107,8 +116,14 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     var pendingConfig by remember { mutableStateOf<HomeFilterPolicy.Config?>(null) }
     val supported = HomeFilterPolicy.supportedOn(Build.VERSION.SDK_INT)
 
+    fun report(id: Int, isError: Boolean) {
+        message = UiMessage(resources.getString(id), isError)
+        haptics.result(isError)
+    }
+
     fun authorize(): Boolean {
         if (!AdminSession.isUnlocked()) {
+            haptics.reject()
             onBack()
             return false
         }
@@ -116,34 +131,52 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         return true
     }
 
-    fun applyPolicy(operation: (AdminAuthority) -> HomeFilterController.Snapshot) {
+    fun applyPolicy(action: Int, operation: (AdminAuthority) -> HomeFilterController.Snapshot) {
         if (busy || !authorize()) return
-        val authority = AdminAuthority.localSession(context) ?: return
+        val authority = AdminAuthority.localSession(context)
+        if (authority == null) {
+            report(R.string.home_filter_operation_failed, isError = true)
+            return
+        }
         busy = true
+        applyingAction = action
         probe = HomeFilterPolicy.ProbeState.NOT_RUN
-        error = null
+        message = null
         scope.launch {
             try {
-                snapshot = withContext(Dispatchers.IO) { operation(authority) }
+                val applied = withContext(Dispatchers.IO) { operation(authority) }
+                snapshot = applied
                 selectedCa = null
+                val verified = if (applied.settings().enabled()) {
+                    applied.report().androidSettingsConfirmed(applied.settings())
+                } else {
+                    // A disabled configuration stays on file until removal is verified.
+                    !applied.settings().configured()
+                }
+                report(
+                    if (verified) R.string.home_filter_apply_success else R.string.home_filter_apply_unverified,
+                    isError = !verified,
+                )
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (refused: HomeFilterController.FilterTeardownRefusedException) {
-                error = when (refused.verdict()) {
+                val reason = when (refused.verdict()) {
                     BuiltInBlockExemptions.TeardownVerdict.APPROVAL_UNREADABLE ->
                         R.string.home_filter_chrome_approval_unreadable
                     BuiltInBlockExemptions.TeardownVerdict.CHROME_NOT_CONTAINED ->
                         R.string.home_filter_chrome_not_contained
                     else -> R.string.home_filter_chrome_approval_blocks_change
                 }
+                report(reason, isError = true)
             } catch (_: HomeFilterController.CorruptConfigurationException) {
                 snapshot = null
-                error = R.string.home_filter_corrupt_settings
+                report(R.string.home_filter_corrupt_settings, isError = true)
             } catch (_: UnsupportedOperationException) {
-                error = R.string.home_filter_requires_android_10
+                report(R.string.home_filter_requires_android_10, isError = true)
             } catch (_: Exception) {
-                error = R.string.home_filter_operation_failed
+                report(R.string.home_filter_operation_failed, isError = true)
             } finally {
+                applyingAction = null
                 busy = false
                 revision++
             }
@@ -155,7 +188,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     ) { uri ->
         if (uri != null && authorize()) {
             busy = true
-            error = null
+            message = null
             selectedCa = null
             scope.launch {
                 try {
@@ -169,7 +202,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (_: Exception) {
-                    error = R.string.home_filter_invalid_ca
+                    report(R.string.home_filter_invalid_ca, isError = true)
                 } finally {
                     busy = false
                 }
@@ -182,7 +215,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         try {
             certificatePicker.launch(arrayOf("*/*"))
         } catch (_: RuntimeException) {
-            error = R.string.home_filter_picker_unavailable
+            report(R.string.home_filter_picker_unavailable, isError = true)
         }
     }
 
@@ -197,6 +230,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             try {
                 val android = withContext(Dispatchers.IO) { HomeFilterController.read(context) }
                 snapshot = android
+                readError = null
                 val canary = android.settings().config()?.canary()
                 if (canary != null && android.report().androidSettingsConfirmed(android.settings())) {
                     val result = withContext(Dispatchers.IO) { HomeFilterProbe.check(canary) }
@@ -208,10 +242,12 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 throw cancelled
             } catch (_: HomeFilterController.CorruptConfigurationException) {
                 snapshot = null
-                error = R.string.home_filter_corrupt_settings
+                readError = R.string.home_filter_corrupt_settings
+                haptics.reject()
             } catch (_: Exception) {
                 snapshot = null
-                error = R.string.home_filter_operation_failed
+                readError = R.string.home_filter_operation_failed
+                haptics.reject()
             }
         }
     }
@@ -229,7 +265,28 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             HomeFilterStatus(current, busy, probe)
             Spacer(Modifier.height(16.dp))
         }
-        error?.let { Text(stringResource(it), color = MaterialTheme.colorScheme.error) }
+        val readFailure = readError
+        MessageBanner(
+            readFailure?.let { UiMessage(stringResource(it), isError = true) } ?: message,
+            Modifier.padding(bottom = 16.dp),
+        )
+        if (current == null) {
+            if (readFailure == null) {
+                CircularProgressIndicator()
+            } else {
+                SecondaryAction(
+                    text = stringResource(R.string.action_retry),
+                    onClick = {
+                        if (authorize()) {
+                            readError = null
+                            message = null
+                            revision++
+                        }
+                    },
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+        }
         if (!supported) {
             Text(stringResource(R.string.home_filter_requires_android_10), color = MaterialTheme.colorScheme.error)
         }
@@ -243,13 +300,20 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             HomeFilterField(pac, { pac = it }, R.string.home_filter_pac_url, busy, KeyboardType.Uri)
             HomeFilterField(canaryUrl, { canaryUrl = it }, R.string.home_filter_canary_url, busy, KeyboardType.Uri)
             HomeFilterField(canaryBody, { canaryBody = it }, R.string.home_filter_canary_body, busy)
-            TextButton(onClick = ::chooseCertificate, enabled = !busy) {
-                Text(stringResource(R.string.home_filter_choose_ca))
-            }
-            if (selectedCa != null) {
-                Text(stringResource(R.string.home_filter_ca_selected))
-                TextButton(onClick = { selectedCa = null }, enabled = !busy) {
-                    Text(stringResource(R.string.home_filter_clear_selection))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                ConsoleTextAction(
+                    text = stringResource(R.string.home_filter_choose_ca),
+                    enabled = !busy,
+                    loading = busy && applyingAction == null,
+                    onClick = ::chooseCertificate,
+                )
+                if (selectedCa != null) {
+                    Text(stringResource(R.string.home_filter_ca_selected))
+                    ConsoleTextAction(
+                        text = stringResource(R.string.home_filter_clear_selection),
+                        enabled = !busy,
+                        onClick = { selectedCa = null },
+                    )
                 }
             }
             PrimaryAction(
@@ -260,13 +324,14 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                         val canary = if (canaryUrl.isBlank() && canaryBody.isBlank()) null
                             else HomeFilterPolicy.Canary(canaryUrl, canaryBody)
                         pendingConfig = HomeFilterPolicy.Config(vpn, pac, signerPin, routing, canary)
-                        error = null
+                        message = null
                         confirm = HomeFilterAction.ENABLE
                     } catch (_: IllegalArgumentException) {
-                        error = R.string.home_filter_invalid_settings
+                        report(R.string.home_filter_invalid_settings, isError = true)
                     }
                 },
                 enabled = !busy,
+                loading = applyingAction == R.string.home_filter_enable,
             )
         } else if (current?.settings()?.configured() == true) {
             val settings = current.settings()
@@ -275,26 +340,41 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
             }
             PrimaryAction(
                 text = stringResource(R.string.home_filter_retry),
-                onClick = { applyPolicy { HomeFilterController.retry(context, it) } },
+                onClick = {
+                    applyPolicy(R.string.home_filter_retry) { HomeFilterController.retry(context, it) }
+                },
                 enabled = !busy,
+                loading = applyingAction == R.string.home_filter_retry,
             )
             if (settings.enabled()) {
-                if (settings.ca() == null) {
-                    TextButton(onClick = ::chooseCertificate, enabled = !busy) {
-                        Text(stringResource(R.string.home_filter_choose_ca))
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (settings.ca() == null) {
+                        ConsoleTextAction(
+                            text = stringResource(R.string.home_filter_choose_ca),
+                            enabled = !busy,
+                            loading = busy && (applyingAction == null ||
+                                applyingAction == R.string.home_filter_install_ca),
+                            onClick = ::chooseCertificate,
+                        )
+                    } else if (!settings.removeCa()) {
+                        ConsoleTextAction(
+                            text = stringResource(R.string.home_filter_remove_ca),
+                            enabled = !busy,
+                            loading = applyingAction == R.string.home_filter_remove_ca,
+                            onClick = { confirm = HomeFilterAction.REMOVE_CA },
+                        )
                     }
-                } else if (!settings.removeCa()) {
-                    TextButton(
-                        onClick = { confirm = HomeFilterAction.REMOVE_CA },
+                    ConsoleTextAction(
+                        text = stringResource(R.string.home_filter_disable),
                         enabled = !busy,
-                    ) { Text(stringResource(R.string.home_filter_remove_ca)) }
-                }
-                TextButton(onClick = { confirm = HomeFilterAction.DISABLE }, enabled = !busy) {
-                    Text(stringResource(R.string.home_filter_disable))
+                        loading = applyingAction == R.string.home_filter_disable,
+                        onClick = { confirm = HomeFilterAction.DISABLE },
+                    )
                 }
             }
         }
-        TextButton(onClick = onBack) { Text(stringResource(R.string.action_back)) }
+        Spacer(Modifier.height(8.dp))
+        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
     }
 
     confirm?.let { action ->
@@ -309,17 +389,17 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                     when (action) {
                         HomeFilterAction.ENABLE -> {
                             pendingConfig?.let { config ->
-                                applyPolicy { HomeFilterController.enable(context, it, config, ca) }
+                                applyPolicy(action.title) { HomeFilterController.enable(context, it, config, ca) }
                             }
                             pendingConfig = null
                         }
                         HomeFilterAction.DISABLE ->
-                            applyPolicy { HomeFilterController.disable(context, it) }
+                            applyPolicy(action.title) { HomeFilterController.disable(context, it) }
                         HomeFilterAction.INSTALL_CA -> if (ca != null) {
-                            applyPolicy { HomeFilterController.installCa(context, it, ca) }
+                            applyPolicy(action.title) { HomeFilterController.installCa(context, it, ca) }
                         }
                         HomeFilterAction.REMOVE_CA ->
-                            applyPolicy { HomeFilterController.removeCa(context, it) }
+                            applyPolicy(action.title) { HomeFilterController.removeCa(context, it) }
                     }
                 }) { Text(stringResource(action.title)) }
             },

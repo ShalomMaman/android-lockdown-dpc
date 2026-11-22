@@ -184,6 +184,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val resources = LocalResources.current
     val coroutineScope = rememberCoroutineScope()
+    val haptics = rememberHaptics()
 
     // Bumped after every write so the rows re-read the store rather than caching
     // a copy that could drift from what the device was actually told.
@@ -191,6 +192,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
     var pending by remember { mutableStateOf<PendingChange?>(null) }
     var pendingPlayCompatibility by remember { mutableStateOf<Boolean?>(null) }
     var working by remember { mutableStateOf(false) }
+    var clearingApprovals by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<UiMessage?>(null) }
 
     val profile = remember(revision) { SystemPolicyStore.effectiveProfile(context) }
@@ -213,6 +215,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             AdminSession.extend()
             return true
         }
+        haptics.reject()
         message = UiMessage(resources.getString(R.string.system_policy_error_auth), isError = true)
         return false
     }
@@ -225,6 +228,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 context, AdminAuthority.localSession(context), change.control, change.requested,
             )
         ) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
             return
         }
@@ -247,6 +251,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             ),
             isError = false,
         )
+        haptics.confirm()
     }
 
     /**
@@ -264,6 +269,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 context, AdminAuthority.localSession(context), requested,
             )
         ) {
+            haptics.reject()
             message = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
             return
         }
@@ -286,6 +292,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             ),
             isError = false,
         )
+        haptics.confirm()
     }
 
     fun applyNow() {
@@ -334,6 +341,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            message?.let { haptics.result(it.isError) }
         }
     }
 
@@ -355,6 +363,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             AdminSession.extend()
         }
         working = true
+        clearingApprovals = clearApprovals
         message = null
         coroutineScope.launch {
             val outcome = withContext(Dispatchers.IO) {
@@ -379,6 +388,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 }
             }
             working = false
+            clearingApprovals = false
             revision++
             val changed = outcome.getOrNull()
             val result = changed?.result()
@@ -434,6 +444,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     isError = false,
                 )
             }
+            message?.let { haptics.result(it.isError) }
         }
     }
 
@@ -473,6 +484,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                         isError = true,
                     )
                 }
+                haptics.reject()
                 return@launch
             }
             val pass = result.pass()
@@ -509,6 +521,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                     )
                 }
             }
+            message?.let { haptics.result(it.isError) }
         }
     }
 
@@ -519,6 +532,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             candidate.packageName,
         )
         if (signer.isEmpty()) {
+            haptics.reject()
             message = UiMessage(
                 resources.getString(R.string.system_policy_exempt_social_signer_unreadable),
                 isError = true,
@@ -613,6 +627,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             BuiltInExemptionsSection(
                 view = exemptionsView,
                 enabled = !working,
+                clearingApprovals = clearingApprovals,
                 onRequestChrome = { pendingExemption = PendingExemption.Chrome },
                 onRemoveChrome = {
                     submitExemption("remove:chrome") { settings -> settings.withChrome(false) }
@@ -631,11 +646,10 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(28.dp))
         PrimaryAction(
-            text = stringResource(
-                if (working) R.string.system_policy_applying else R.string.system_policy_apply
-            ),
+            text = stringResource(R.string.system_policy_apply),
             onClick = { applyNow() },
-            enabled = !working && protectionEnabled,
+            enabled = protectionEnabled && !working,
+            loading = working && !clearingApprovals,
         )
         Spacer(Modifier.height(12.dp))
         SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
@@ -707,10 +721,20 @@ private fun PlayCompatibilityRow(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
+    val haptics = rememberHaptics()
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
+            .toggleable(
+                value = requested,
+                enabled = enabled,
+                role = Role.Switch,
+                onValueChange = { requested ->
+                    haptics.toggle(requested)
+                    onToggle(requested)
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -736,7 +760,7 @@ private fun PlayCompatibilityRow(
         Spacer(Modifier.size(16.dp))
         Switch(
             checked = requested,
-            onCheckedChange = { onToggle(it) },
+            onCheckedChange = null,
             enabled = enabled,
         )
     }
@@ -766,6 +790,7 @@ private fun ScheduleRow(
 ) {
     // On while any window restricts: one enabled window is still a schedule
     // in force, and the fail-closed windows of an unreadable record too.
+    val haptics = rememberHaptics()
     val on = settings.unreadable() || settings.enforcing()
     Row(
         modifier = Modifier
@@ -777,7 +802,10 @@ private fun ScheduleRow(
                 value = on,
                 enabled = enabled,
                 role = Role.Switch,
-                onValueChange = onToggle,
+                onValueChange = { requested ->
+                    haptics.toggle(requested)
+                    onToggle(requested)
+                },
             )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -959,10 +987,21 @@ private fun SystemPolicyControlRow(
     if (showDivider) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     }
+    val haptics = rememberHaptics()
+    val rowEnabled = enabled && !lockedByPlayCompatibility && !lockedByHomeFilter
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
+            .toggleable(
+                value = requested,
+                enabled = rowEnabled,
+                role = Role.Switch,
+                onValueChange = { requested ->
+                    haptics.toggle(requested)
+                    onToggle(requested)
+                },
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1010,14 +1049,8 @@ private fun SystemPolicyControlRow(
         Spacer(Modifier.size(16.dp))
         Switch(
             checked = requested,
-            onCheckedChange = { onToggle(it) },
-            // An unsupported control can still be requested — the request is kept
-            // so the device enforces it after an OS upgrade — but the row says
-            // plainly that nothing was sent to this release. A control the Google
-            // Play compatibility opt-in pins on is different: the next pass would
-            // put it straight back, so the switch is disabled and says why rather
-            // than accepting a change that cannot survive.
-            enabled = enabled && !lockedByPlayCompatibility && !lockedByHomeFilter,
+            onCheckedChange = null,
+            enabled = rowEnabled,
         )
     }
     if (!supported) {

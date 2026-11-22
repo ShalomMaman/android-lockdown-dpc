@@ -93,4 +93,6 @@
         <item quantity="other">%1$d system components selected</item>
     </plurals>
 
+    <string name="sysinv_load_failed">Could not read the application inventory. Pull down to try again.</string>
+
 </resources>

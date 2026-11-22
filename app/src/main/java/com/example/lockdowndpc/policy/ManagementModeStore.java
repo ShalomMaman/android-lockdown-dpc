@@ -32,6 +32,14 @@ public final class ManagementModeStore {
     private ManagementModeStore() {}
 
     public static synchronized ManagementMode read(Context context) {
+        ManagementMode mode = readMode(context);
+        if (mode != ManagementMode.LOCAL_PIN) {
+            AdminPinStore.clearRecoveryGrant();
+        }
+        return mode;
+    }
+
+    private static ManagementMode readMode(Context context) {
         Marker marker = readMarker(context);
         if (marker == Marker.UNREADABLE) {
             return ManagementMode.ENROLLING;
@@ -97,6 +105,7 @@ public final class ManagementModeStore {
             return false;
         }
         AdminSession.lock();
+        AdminPinStore.clearRecoveryGrant();
         try {
             File marker = markerFile(context.createDeviceProtectedStorageContext());
             File staged = File.createTempFile(MARKER_FILE, ".pending", marker.getParentFile());

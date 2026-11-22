@@ -1,8 +1,13 @@
 package com.example.lockdowndpc.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -28,6 +33,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -36,11 +43,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -58,6 +73,22 @@ import com.example.lockdowndpc.ui.theme.LockdownStatusColors
 /** A single inline result line shown under the status card or a form. */
 internal data class UiMessage(val text: String, val isError: Boolean)
 
+internal class ConsoleHaptics(private val feedback: HapticFeedback) {
+    fun confirm() = feedback.performHapticFeedback(HapticFeedbackType.Confirm)
+    fun reject() = feedback.performHapticFeedback(HapticFeedbackType.Reject)
+    fun toggle(checked: Boolean) = feedback.performHapticFeedback(
+        if (checked) HapticFeedbackType.ToggleOn else HapticFeedbackType.ToggleOff,
+    )
+    fun tick() = feedback.performHapticFeedback(HapticFeedbackType.SegmentTick)
+    fun result(isError: Boolean) = if (isError) reject() else confirm()
+}
+
+@Composable
+internal fun rememberHaptics(): ConsoleHaptics {
+    val feedback = LocalHapticFeedback.current
+    return remember(feedback) { ConsoleHaptics(feedback) }
+}
+
 /** Minimum touch target used for every interactive row and button. */
 private val MinTouchTarget = 52.dp
 
@@ -66,37 +97,55 @@ private val MinTouchTarget = 52.dp
  * subtitle, and the caller's content. Matches the accepted baseline layout while
  * moving spacing and type onto the Material 3 scale.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LockdownScreen(
     title: String,
     subtitle: String,
     modifier: Modifier = Modifier,
+    refreshing: Boolean = false,
+    onRefresh: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Scaffold(modifier = modifier.fillMaxSize()) { insets ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .padding(top = 28.dp, bottom = 36.dp),
-        ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.semantics { heading() },
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(24.dp))
-            content()
+        val frame = Modifier.fillMaxSize().padding(insets)
+        if (onRefresh != null) {
+            PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = frame) {
+                LockdownScreenContent(title, subtitle, Modifier.fillMaxSize(), content)
+            }
+        } else {
+            LockdownScreenContent(title, subtitle, frame, content)
         }
+    }
+}
+
+@Composable
+private fun LockdownScreenContent(
+    title: String,
+    subtitle: String,
+    modifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp)
+            .padding(top = 28.dp, bottom = 36.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.headlineMedium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.semantics { heading() },
+        )
+        Spacer(Modifier.height(10.dp))
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.height(24.dp))
+        content()
     }
 }
 
@@ -224,7 +273,22 @@ internal fun PolicyStatusCard(
  */
 @Composable
 internal fun MessageBanner(message: UiMessage?, modifier: Modifier = Modifier) {
-    if (message == null) return
+    val lastMessage = remember { mutableStateOf(message) }
+    SideEffect {
+        if (message != null) lastMessage.value = message
+    }
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = modifier,
+        enter = fadeIn(tween(170)),
+        exit = fadeOut(tween(170)),
+    ) {
+        (message ?: lastMessage.value)?.let { MessageBannerContent(it) }
+    }
+}
+
+@Composable
+private fun MessageBannerContent(message: UiMessage) {
     val container = if (message.isError) {
         LockdownStatusColors.failedContainer
     } else {
@@ -236,7 +300,7 @@ internal fun MessageBanner(message: UiMessage?, modifier: Modifier = Modifier) {
         LockdownStatusColors.onVerifiedContainer
     }
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .semantics { liveRegion = LiveRegionMode.Polite }
             .background(container, RoundedCornerShape(14.dp))
@@ -275,6 +339,7 @@ internal fun PinField(
     imeAction: ImeAction = ImeAction.Next,
     onImeAction: () -> Unit = {},
 ) {
+    // No per-digit haptic: a tick per digit would tell a bystander the PIN length.
     OutlinedTextField(
         value = value,
         onValueChange = { onValueChange(sanitizePin(it)) },
@@ -290,10 +355,10 @@ internal fun PinField(
             keyboardType = KeyboardType.NumberPassword,
             imeAction = imeAction,
         ),
+        // Leave Next to the default focus traversal between the two PIN fields.
         keyboardActions = KeyboardActions(
             onDone = { onImeAction() },
             onGo = { onImeAction() },
-            onNext = { onImeAction() },
         ),
         modifier = modifier.fillMaxWidth(),
     )
@@ -307,21 +372,18 @@ internal fun PrimaryAction(
     modifier: Modifier = Modifier,
     icon: ImageVector? = null,
     enabled: Boolean = true,
+    loading: Boolean = false,
 ) {
     Button(
         onClick = onClick,
-        enabled = enabled,
+        enabled = enabled && !loading,
         shape = MaterialTheme.shapes.small,
         contentPadding = ButtonDefaults.ContentPadding,
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = MinTouchTarget),
     ) {
-        if (icon != null) {
-            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.size(10.dp))
-        }
-        Text(text = text, style = MaterialTheme.typography.labelLarge)
+        ActionButtonContent(text, loading, icon)
     }
 }
 
@@ -331,16 +393,50 @@ internal fun SecondaryAction(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
 ) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled && !loading,
         shape = MaterialTheme.shapes.small,
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = MinTouchTarget),
     ) {
-        Text(text = text, style = MaterialTheme.typography.labelLarge)
+        ActionButtonContent(text, loading)
     }
+}
+
+@Composable
+internal fun ConsoleTextAction(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = modifier.heightIn(min = 48.dp),
+        enabled = enabled && !loading,
+    ) {
+        ActionButtonContent(text, loading)
+    }
+}
+
+@Composable
+private fun ActionButtonContent(text: String, loading: Boolean, icon: ImageVector? = null) {
+    Box(Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+        if (loading) {
+            CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+        } else if (icon != null) {
+            Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(20.dp))
+        }
+    }
+    Spacer(Modifier.size(10.dp))
+    Text(text = text, style = MaterialTheme.typography.labelLarge)
+    if (icon == null) Spacer(Modifier.size(30.dp))
 }
 
 /** A titled group of related secondary actions. */
@@ -380,6 +476,7 @@ internal fun ActionRow(
     supporting: String? = null,
     showDivider: Boolean = false,
     enabled: Boolean = true,
+    loading: Boolean = false,
 ) {
     if (showDivider) {
         HorizontalDivider(
@@ -394,20 +491,27 @@ internal fun ActionRow(
     // "Remote updates are not configured" is disabled in every build that ships
     // without an update URL, so that was the common case, not an edge one.
     val disabledContent = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    val canClick = enabled && !loading
     Row(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 64.dp)
-            .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+            .clickable(enabled = canClick, role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = if (enabled) MaterialTheme.colorScheme.primary else disabledContent,
-            modifier = Modifier.size(24.dp),
-        )
+        Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            if (loading) {
+                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (canClick) MaterialTheme.colorScheme.primary else disabledContent,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
         Spacer(Modifier.size(16.dp))
         // `weight` rather than `fillMaxWidth`: filling the row's max width pushes
         // the text past the trailing edge instead of wrapping it, which the longer
@@ -416,7 +520,7 @@ internal fun ActionRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = if (enabled) MaterialTheme.colorScheme.onSurface else disabledContent,
+                color = if (canClick) MaterialTheme.colorScheme.onSurface else disabledContent,
             )
             if (supporting != null) {
                 Text(

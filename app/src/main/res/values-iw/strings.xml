@@ -81,6 +81,7 @@
     <string name="pin_setup_save_replace">שמירת הקוד החדש</string>
     <string name="pin_error_format">הקוד חייב להכיל 6 עד 12 ספרות.</string>
     <string name="pin_error_mismatch">שני הקודים אינם זהים.</string>
+    <string name="pin_error_recovery_reuse">יש לבחור קוד מנהל שונה מקוד המנהל הקודם ומקוד השחזור.</string>
     <string name="pin_error_save">לא ניתן לשמור את הקוד במכשיר.</string>
 
     <!-- Locked -->
@@ -346,4 +347,11 @@
     <string name="audit_mode_allow">נבחר מצב: רק אפליקציות מותרות</string>
     <string name="audit_mode_block">נבחר מצב: חסימת אפליקציות מסומנות</string>
     <string name="audit_apps_saved">רשימת האפליקציות נשמרה</string>
+    <string name="action_retry">ניסיון חוזר</string>
+    <string name="update_up_to_date">הגרסה של Device Guard מעודכנת.</string>
+    <string name="health_load_failed">לא ניתן לקרוא את דוח תקינות המכשיר. יש למשוך למטה כדי לנסות שוב.</string>
+    <string name="health_export_failed">לא ניתן להעתיק את דוח תקינות המכשיר.</string>
+    <string name="kiosk_app_load_failed">לא ניתן לקרוא את רשימת האפליקציות למצב קיוסק. יש למשוך למטה כדי לנסות שוב.</string>
+    <string name="home_filter_apply_success">השינויים בסינון הביתי אומתו במכשיר.</string>
+    <string name="home_filter_apply_unverified">המכשיר עדיין לא אישר את השינויים בסינון הביתי. אפשר לבדוק את המצב ולהחיל שוב לפי הצורך.</string>
 </resources>

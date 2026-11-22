@@ -9,6 +9,26 @@ import org.junit.Test
 class UiLogicTest {
 
     @Test
+    fun consoleBack_relocksFromAdminAndKeepsPinGatesClosed() {
+        assertEquals(ConsoleScreen.LOCKED, ConsoleScreen.ADMIN.backDestination(false, false))
+        assertNull(ConsoleScreen.LOCKED.backDestination(false, false))
+        assertNull(ConsoleScreen.PIN_SETUP.backDestination(false, false))
+        assertEquals(ConsoleScreen.ADMIN, ConsoleScreen.PIN_SETUP.backDestination(true, false))
+        assertEquals(ConsoleScreen.PIN_SETUP, ConsoleScreen.PIN_SETUP.backDestination(true, true))
+        assertNull(ConsoleScreen.ENROLLMENT.backDestination(false, false))
+        assertNull(ConsoleScreen.REMOTE_STATUS.backDestination(false, false))
+    }
+
+    @Test
+    fun consoleBack_staysOnRecoveryCodeAndStepsThroughKioskScreens() {
+        assertEquals(ConsoleScreen.RECOVERY, ConsoleScreen.RECOVERY.backDestination(false, false))
+        assertEquals(ConsoleScreen.ADMIN, ConsoleScreen.KIOSK.backDestination(false, false))
+        assertEquals(ConsoleScreen.KIOSK, ConsoleScreen.KIOSK_APPS.backDestination(false, false))
+        assertEquals(ConsoleScreen.KIOSK, ConsoleScreen.KIOSK_SITE.backDestination(false, false))
+        assertEquals(ConsoleScreen.KIOSK, ConsoleScreen.KIOSK_CONFIRM.backDestination(false, false))
+    }
+
+    @Test
     fun sanitizePin_dropsNonDigits() {
         assertEquals("123456", sanitizePin("1a2 3-4b5\n6"))
     }

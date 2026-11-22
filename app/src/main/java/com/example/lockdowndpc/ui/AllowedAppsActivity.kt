@@ -7,6 +7,7 @@ import android.graphics.Color
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -57,9 +58,11 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -94,6 +97,7 @@ import com.example.lockdowndpc.policy.SystemAppClassifier.RiskAcceptanceStatus
 import com.example.lockdowndpc.policy.SystemAppClassifier.RowState
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -166,8 +170,10 @@ class AllowedAppsActivity : AppCompatActivity() {
         adminSelectedSystem: Set<String>,
         selection: Set<String>,
         managed: Set<String>,
+        haptics: ConsoleHaptics,
     ) {
         if (!AdminSession.isUnlocked()) {
+            haptics.reject()
             finish()
             return
         }
@@ -178,6 +184,7 @@ class AllowedAppsActivity : AppCompatActivity() {
                 this, AdminAuthority.localSession(this), selection, managed, adminSelectedSystem,
             )
         ) {
+            haptics.reject()
             Toast.makeText(this, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
             return
         }
@@ -193,6 +200,7 @@ class AllowedAppsActivity : AppCompatActivity() {
             }
         }
         AdminSession.extend()
+        haptics.confirm()
         setResult(RESULT_OK)
         finish()
     }
@@ -211,28 +219,61 @@ private data class InventoryUiState(
 private fun InventoryScreen(
     allowSelected: Boolean,
     onBack: () -> Unit,
-    onSave: (Set<String>, Set<String>, Set<String>) -> Unit,
+    onSave: (Set<String>, Set<String>, Set<String>, ConsoleHaptics) -> Unit,
 ) {
     val context = LocalContext.current
 
+    val haptics = rememberHaptics()
+    val loadFailedText = stringResource(R.string.sysinv_load_failed)
     var loading by remember { mutableStateOf(true) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
+    var loadFailed by remember { mutableStateOf(false) }
+    var pendingTicks by remember { mutableStateOf(emptyMap<String, Boolean>()) }
+    var message by remember { mutableStateOf<UiMessage?>(null) }
     var state by remember { mutableStateOf(InventoryUiState()) }
     var query by remember { mutableStateOf("") }
     var category by remember { mutableStateOf(Category.ALL) }
     var riskRow by remember { mutableStateOf<InventoryRow?>(null) }
+    var riskWriteFailed by remember { mutableStateOf(false) }
     var confirmingSave by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        val loaded = withContext(Dispatchers.IO) { loadInventory(context, allowSelected) }
-        state = InventoryUiState(
-            rows = loaded.rows,
-            protectedContext = loaded.protectedContext,
-            ticked = loaded.ticked,
-            optedInSystem = loaded.optedInSystem,
-            firmwareBuild = loaded.firmwareBuild,
-        )
-        loading = false
+    LaunchedEffect(refreshVersion) {
+        try {
+            val loaded = withContext(Dispatchers.IO) { loadInventory(context, allowSelected) }
+            // Keep draft changes only for apps still eligible under the latest classification.
+            val editableRows = loaded.rows.filter { it.toggleable }
+            val editablePackages = editableRows.mapTo(mutableSetOf()) { it.packageName }
+            pendingTicks = pendingTicks.filterKeys { it in editablePackages }
+            val ticked = loaded.ticked.toMutableSet()
+            pendingTicks.forEach { (name, checked) ->
+                if (checked) ticked.add(name) else ticked.remove(name)
+            }
+            state = InventoryUiState(
+                rows = loaded.rows,
+                protectedContext = loaded.protectedContext,
+                ticked = ticked,
+                optedInSystem = loaded.optedInSystem + editableRows
+                    .filter { it.isAdminSelectableSystem && it.packageName in pendingTicks }
+                    .map { it.packageName },
+                firmwareBuild = loaded.firmwareBuild,
+            )
+            loadFailed = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            loadFailed = true
+            message = UiMessage(loadFailedText, isError = true)
+            haptics.reject()
+        } finally {
+            loading = false
+        }
     }
+
+    fun back() {
+        if (query.isNotEmpty()) query = "" else onBack()
+    }
+
+    BackHandler(enabled = query.isNotEmpty(), onBack = ::back)
 
     val visible = remember(state.rows, category, query) {
         filterInventory(state.rows, state.protectedContext, category, query)
@@ -251,7 +292,7 @@ private fun InventoryScreen(
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = ::back) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                             contentDescription = stringResource(R.string.action_back),
@@ -268,18 +309,29 @@ private fun InventoryScreen(
         bottomBar = {
             SaveBar(
                 systemCount = adminSelectedSystem.size,
-                enabled = !loading,
+                enabled = !loading && !loadFailed,
                 onSave = { confirmingSave = true },
             )
         },
     ) { insets ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(insets),
+        PullToRefreshBox(
+            isRefreshing = loading && refreshVersion > 0,
+            onRefresh = {
+                if (!loading) {
+                    if (!AdminSession.isUnlocked()) {
+                        haptics.reject()
+                        onBack()
+                    } else {
+                        loading = true
+                        message = null
+                        refreshVersion++
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize().padding(insets),
         ) {
             when {
-                loading -> Column(modifier = Modifier.fillMaxSize()) {
+                loading && refreshVersion == 0 -> Column(modifier = Modifier.fillMaxSize()) {
                     InventoryControls(
                         allowSelected = allowSelected,
                         query = query,
@@ -294,22 +346,6 @@ private fun InventoryScreen(
                             text = stringResource(R.string.sysinv_loading),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-
-                visible.isEmpty() -> Column(modifier = Modifier.fillMaxSize()) {
-                    InventoryControls(
-                        allowSelected = allowSelected,
-                        query = query,
-                        onQueryChange = { query = it },
-                        category = category,
-                        onCategoryChange = { category = it },
-                    )
-                    CenteredState(Modifier.weight(1f)) {
-                        EmptyState(
-                            title = stringResource(R.string.sysinv_no_results_title),
-                            body = stringResource(R.string.sysinv_no_results_body),
                         )
                     }
                 }
@@ -330,13 +366,28 @@ private fun InventoryScreen(
                             onCategoryChange = { category = it },
                         )
                     }
+                    item(key = "inventory-message") {
+                        MessageBanner(message, Modifier.padding(horizontal = 20.dp))
+                    }
+                    if (visible.isEmpty() && !loadFailed) {
+                        item(key = "inventory-empty") {
+                            CenteredState(Modifier.fillParentMaxHeight(0.5f)) {
+                                EmptyState(
+                                    title = stringResource(R.string.sysinv_no_results_title),
+                                    body = stringResource(R.string.sysinv_no_results_body),
+                                )
+                            }
+                        }
+                    }
                     items(visible, key = { it.packageName }) { row ->
                         val ticked = row.packageName in state.ticked
                         InventoryRowItem(
                             row = row,
                             ticked = ticked,
                             rowState = pendingRowState(row, ticked, allowSelected),
+                            enabled = !loading && !loadFailed,
                             onTickedChange = { checked ->
+                                pendingTicks = pendingTicks + (row.packageName to checked)
                                 state = state.copy(
                                     ticked = if (checked) {
                                         state.ticked + row.packageName
@@ -356,7 +407,10 @@ private fun InventoryScreen(
                                     },
                                 )
                             },
-                            onReview = { riskRow = row },
+                            onReview = {
+                                riskWriteFailed = false
+                                riskRow = row
+                            },
                         )
                     }
                 }
@@ -368,6 +422,7 @@ private fun InventoryScreen(
         RiskAcceptanceDialog(
             row = row,
             firmwareBuild = state.firmwareBuild,
+            writeFailed = riskWriteFailed,
             onDismiss = { riskRow = null },
             onAccept = {
                 if (!AuthorizedPolicyWriter.recordSystemRiskAcceptance(
@@ -375,7 +430,8 @@ private fun InventoryScreen(
                         riskAcceptanceFor(row, state.firmwareBuild, System.currentTimeMillis()),
                     )
                 ) {
-                    Toast.makeText(context, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
+                    haptics.reject()
+                    riskWriteFailed = true
                     return@RiskAcceptanceDialog
                 }
                 val accepted = row.withAcceptedRisk(
@@ -387,6 +443,7 @@ private fun InventoryScreen(
                 state = state.copy(
                     rows = state.rows.map { if (it.packageName == row.packageName) accepted else it },
                 )
+                haptics.confirm()
                 riskRow = null
             },
         )
@@ -402,6 +459,7 @@ private fun InventoryScreen(
                     adminSelectedSystem,
                     persistedSelection(state.rows, state.ticked, adminSelectedSystem),
                     managedPackagesToPersist(state.rows),
+                    haptics,
                 )
             },
         )
@@ -471,6 +529,7 @@ private fun InventoryControls(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CategoryFilters(selected: Category, onSelect: (Category) -> Unit) {
+    val haptics = rememberHaptics()
     // A horizontally scrolling row rather than a wrapping grid: the chips keep one
     // reading order, and `horizontalScroll` starts from the leading edge in both
     // layout directions, so Hebrew begins at the right without any mirroring here.
@@ -484,7 +543,10 @@ private fun CategoryFilters(selected: Category, onSelect: (Category) -> Unit) {
         Category.values().forEach { entry ->
             FilterChip(
                 selected = entry == selected,
-                onClick = { onSelect(entry) },
+                onClick = {
+                    if (entry != selected) haptics.tick()
+                    onSelect(entry)
+                },
                 label = { Text(stringResource(categoryLabelOf(entry))) },
             )
         }
@@ -535,6 +597,7 @@ private fun InventoryRowItem(
     row: InventoryRow,
     ticked: Boolean,
     rowState: RowState,
+    enabled: Boolean,
     onTickedChange: (Boolean) -> Unit,
     onReview: () -> Unit,
 ) {
@@ -555,18 +618,25 @@ private fun InventoryRowItem(
         originText,
     )
 
+    val haptics = rememberHaptics()
     val base = Modifier
         .fillMaxWidth()
         .heightIn(min = 72.dp)
     Row(
-        modifier = (
-            if (row.toggleable) {
-                base.toggleable(value = ticked, role = Role.Checkbox, onValueChange = onTickedChange)
-            } else {
-                base
-            }
+        modifier = (if (row.toggleable) {
+            base.toggleable(
+                value = ticked,
+                enabled = enabled,
+                role = Role.Checkbox,
+                onValueChange = { checked ->
+                    haptics.toggle(checked)
+                    onTickedChange(checked)
+                },
             )
-            .semantics(mergeDescendants = true) { contentDescription = description }
+        } else {
+            base
+        })
+            .semantics(mergeDescendants = !row.needsRiskAcceptance) { contentDescription = description }
             .padding(horizontal = 20.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
@@ -614,7 +684,11 @@ private fun InventoryRowItem(
                 modifier = Modifier.padding(top = 4.dp),
             )
             if (row.needsRiskAcceptance) {
-                TextButton(onClick = onReview, modifier = Modifier.padding(top = 2.dp)) {
+                TextButton(
+                    onClick = onReview,
+                    enabled = enabled,
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
                     Icon(
                         imageVector = Icons.Rounded.Warning,
                         contentDescription = null,
@@ -630,7 +704,7 @@ private fun InventoryRowItem(
         }
         Spacer(Modifier.size(12.dp))
         if (row.toggleable) {
-            Checkbox(checked = ticked, onCheckedChange = null)
+            Checkbox(checked = ticked, onCheckedChange = null, enabled = enabled)
         } else {
             // A padlock rather than a disabled checkbox: a greyed-out box reads as
             // "not yet", and this is "never from this console".
@@ -729,6 +803,7 @@ private fun loadIcon(context: Context, packageName: String, sizePx: Int): ImageB
 private fun RiskAcceptanceDialog(
     row: InventoryRow,
     firmwareBuild: String,
+    writeFailed: Boolean,
     onDismiss: () -> Unit,
     onAccept: () -> Unit,
 ) {
@@ -778,6 +853,12 @@ private fun RiskAcceptanceDialog(
                 RecordLine(
                     R.string.sysinv_risk_field_firmware,
                     firmwareBuild.ifEmpty { unknown },
+                )
+                MessageBanner(
+                    if (writeFailed) {
+                        UiMessage(stringResource(R.string.policy_settings_save_failed), isError = true)
+                    } else null,
+                    Modifier.padding(top = 12.dp),
                 )
             }
         },

@@ -7,6 +7,45 @@ import java.util.Locale
  * dependencies so it can be covered by plain JVM unit tests.
  */
 
+/**
+ * @param secure          keep the screen out of screenshots and the recents thumbnail
+ * @param requiresSession the screen may only be shown while an administrator
+ *                        session is valid, and is abandoned for the PIN screen
+ *                        the moment it is not — including on resume, so a
+ *                        console left open on a kiosk configuration screen
+ *                        cannot be picked up later by whoever finds the device
+ */
+internal enum class ConsoleScreen(val secure: Boolean, val requiresSession: Boolean = false) {
+    ENROLLMENT(false),
+    REMOTE_STATUS(false),
+    PIN_SETUP(true),
+    LOCKED(true),
+    ADMIN(false, requiresSession = true),
+    RECOVERY(true, requiresSession = true),
+    KIOSK(false, requiresSession = true),
+    KIOSK_APPS(false, requiresSession = true),
+    KIOSK_SITE(false, requiresSession = true),
+    KIOSK_CONFIRM(false, requiresSession = true),
+}
+
+/** A self-destination consumes Back without navigating. Null delegates to the system. */
+internal fun ConsoleScreen.backDestination(
+    replacingPin: Boolean,
+    replacingAfterRecovery: Boolean,
+): ConsoleScreen? = when (this) {
+    ConsoleScreen.ENROLLMENT, ConsoleScreen.REMOTE_STATUS, ConsoleScreen.LOCKED -> null
+    ConsoleScreen.PIN_SETUP -> when {
+        !replacingPin -> null
+        // Keep the administrator in recovery setup while its grant is live.
+        replacingAfterRecovery -> ConsoleScreen.PIN_SETUP
+        else -> ConsoleScreen.ADMIN
+    }
+    ConsoleScreen.ADMIN -> ConsoleScreen.LOCKED
+    ConsoleScreen.RECOVERY -> ConsoleScreen.RECOVERY
+    ConsoleScreen.KIOSK -> ConsoleScreen.ADMIN
+    ConsoleScreen.KIOSK_APPS, ConsoleScreen.KIOSK_SITE, ConsoleScreen.KIOSK_CONFIRM -> ConsoleScreen.KIOSK
+}
+
 /** Longest admin PIN accepted by `AdminPinStore.isValidPin`. */
 internal const val MAX_PIN_LENGTH = 12
 

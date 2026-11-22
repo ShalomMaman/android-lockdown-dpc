@@ -5,7 +5,7 @@ import android.os.SystemClock;
 import java.util.concurrent.TimeUnit;
 
 public final class AdminSession {
-    private static final long SESSION_MILLIS = TimeUnit.MINUTES.toMillis(3);
+    static final long SESSION_MILLIS = TimeUnit.MINUTES.toMillis(3);
     private static long unlockedUntilElapsed;
     private static long generation;
 

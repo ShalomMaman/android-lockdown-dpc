@@ -174,7 +174,12 @@ public class AuthorizedPolicyWriterTest {
         // Named readers and state owned by authentication, provisioning,
         // maintenance, or updates. Evidence writes do not change policy choices.
         return switch (store) {
-            case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify")
+            case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify",
+                    // completeRecoveryPinReset writes credentials without an AdminSession.
+                    // It requires a live recovery grant and LOCAL_PIN mode.
+                    "completeRecoveryPinReset",
+                    // clearRecoveryGrant only drops the in-memory grant (tightening; writes nothing).
+                    "clearRecoveryGrant")
                     .contains(method);
             case "ManagementModeStore" -> method.equals("selectLocal");
             case "AllowedAppsStore" -> method.equals("rememberPackageLabel");
