@@ -1,0 +1,1331 @@
+{
+  "fleetId": "test-fleet",
+  "deviceKey": "device",
+  "nonces": {
+    "a": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "b": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+  },
+  "nonceCases": [
+    {
+      "id": "fresh-response-and-replay",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 101,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 102,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "last-valid-millisecond",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120099,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null
+        }
+      ]
+    },
+    {
+      "id": "exact-cutoff",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120101,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "late-response",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120101,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "receive-before-send-clock",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 99,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "only-one-outstanding",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "send",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 101,
+          "exchange": "request-b"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 102,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "not-sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null
+        }
+      ]
+    },
+    {
+      "id": "mismatched-first-response-consumes",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 101,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 102,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "different-boot",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 5,
+          "elapsedMs": 101,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "timeout-allows-fresh-request",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "timeout",
+          "elapsedMs": 120100
+        },
+        {
+          "event": "send",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 120101,
+          "exchange": "request-b"
+        },
+        {
+          "event": "response",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 120102,
+          "exchange": "request-b"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "discarded",
+          "failureCode": null
+        },
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null
+        }
+      ]
+    },
+    {
+      "id": "process-death-even-same-boot",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "process-death"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 101,
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "discarded",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale"
+        }
+      ]
+    },
+    {
+      "id": "stale-response-does-not-run-any-step",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120100,
+          "documents": [
+            "lock-1",
+            "policy-1"
+          ],
+          "exchange": "request-a"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale",
+          "processedDocuments": []
+        }
+      ]
+    },
+    {
+      "id": "commands-bind-to-the-second-request",
+      "events": [
+        {
+          "event": "send",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100,
+          "exchange": "request-a"
+        },
+        {
+          "event": "response",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 101,
+          "exchange": "request-a"
+        },
+        {
+          "event": "send",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 102,
+          "exchange": "request-b"
+        },
+        {
+          "event": "response",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 103,
+          "documents": [
+            "lock-2",
+            "lock-4-wrong-nonce",
+            "keyset-2"
+          ],
+          "exchange": "request-b"
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null
+        },
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null,
+          "processedDocuments": [
+            {
+              "document": "keyset-2",
+              "outcome": "accepted",
+              "failureCode": null
+            },
+            {
+              "document": "lock-2",
+              "outcome": "refused",
+              "failureCode": "command-nonce-mismatch"
+            },
+            {
+              "document": "lock-4-wrong-nonce",
+              "outcome": "accepted",
+              "failureCode": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "timed-out-exchange-cannot-consume-the-new-request",
+      "events": [
+        {
+          "event": "send",
+          "exchange": "request-a",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 100
+        },
+        {
+          "event": "timeout",
+          "elapsedMs": 120100
+        },
+        {
+          "event": "send",
+          "exchange": "request-b",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 120101
+        },
+        {
+          "event": "response",
+          "exchange": "request-a",
+          "nonce": "a",
+          "boot": 4,
+          "elapsedMs": 120102,
+          "documents": [
+            "policy-1"
+          ]
+        },
+        {
+          "event": "response",
+          "exchange": "request-a",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 120103,
+          "documents": [
+            "policy-1"
+          ]
+        },
+        {
+          "event": "response",
+          "exchange": "request-b",
+          "nonce": "b",
+          "boot": 4,
+          "elapsedMs": 120104,
+          "documents": [
+            "policy-1"
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "discarded",
+          "failureCode": null
+        },
+        {
+          "outcome": "sent",
+          "failureCode": null
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale",
+          "processedDocuments": []
+        },
+        {
+          "outcome": "dropped",
+          "failureCode": "sync-response-stale",
+          "processedDocuments": []
+        },
+        {
+          "outcome": "processed",
+          "failureCode": null,
+          "processedDocuments": [
+            {
+              "document": "policy-1",
+              "outcome": "accepted",
+              "failureCode": null
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "batches": [
+    {
+      "id": "rotation-is-visible-in-all-later-steps",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "lock-2",
+        "recovery-2",
+        "policy-5",
+        "keyset-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-2",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "policy-5",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "recovery-2",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-2",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 5,
+          "recoveryVersion": 2,
+          "commandFloor": 2,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "current-root-can-rotate-operational-keys",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "keyset-2-current-root",
+        "policy-5",
+        "lock-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-2-current-root",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "policy-5",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-2",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2-current-root",
+          "policyVersion": 5,
+          "recoveryVersion": 0,
+          "commandFloor": 2,
+          "root": "root"
+        }
+      }
+    },
+    {
+      "id": "promoted-successor-remains-current-root",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 5,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "keyset-3-successor",
+        "lock-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-3-successor",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-2",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-3-successor",
+          "policyVersion": 5,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "bad-keyset-does-not-stop-later-steps",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "lock-1",
+        "keyset-3-untrusted",
+        "recovery-1",
+        "policy-1"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-3-untrusted",
+            "outcome": "refused",
+            "failureCode": "doc-key-unknown"
+          },
+          {
+            "document": "policy-1",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "recovery-1",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-1",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-1",
+          "policyVersion": 1,
+          "recoveryVersion": 1,
+          "commandFloor": 1,
+          "root": "root"
+        }
+      }
+    },
+    {
+      "id": "invalid-signature-keeps-keyset",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "lock-1",
+        {
+          "document": "keyset-2",
+          "tamper": "signature"
+        },
+        "policy-1"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-2",
+            "outcome": "refused",
+            "failureCode": "doc-signature-invalid"
+          },
+          {
+            "document": "policy-1",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-1",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-1",
+          "policyVersion": 1,
+          "recoveryVersion": 0,
+          "commandFloor": 1,
+          "root": "root"
+        }
+      }
+    },
+    {
+      "id": "jump-to-highest-admissible-listed-policy",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 1,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "lock-2",
+        "policy-5",
+        "policy-8-old-key",
+        "policy-7-other",
+        "policy-6",
+        "policy-11-server-signed"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "policy-8-old-key",
+            "outcome": "refused",
+            "failureCode": "doc-key-unknown"
+          },
+          {
+            "document": "policy-11-server-signed",
+            "outcome": "refused",
+            "failureCode": "doc-key-unknown"
+          },
+          {
+            "document": "policy-7-other",
+            "outcome": "refused",
+            "failureCode": "doc-device-not-listed"
+          },
+          {
+            "document": "policy-6",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "policy-5",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          },
+          {
+            "document": "lock-2",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 6,
+          "recoveryVersion": 0,
+          "commandFloor": 2,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "policy-and-recovery-refusals-do-not-gate-command",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "lock-2",
+        "policy-7-other",
+        "recovery-3-other"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "policy-7-other",
+            "outcome": "refused",
+            "failureCode": "doc-device-not-listed"
+          },
+          {
+            "document": "recovery-3-other",
+            "outcome": "refused",
+            "failureCode": "doc-device-not-listed"
+          },
+          {
+            "document": "lock-2",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 2,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "floors-reject-equal-or-lower",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 6,
+        "recoveryVersion": 2,
+        "commandFloor": 2,
+        "root": "successor"
+      },
+      "documents": [
+        "lock-2",
+        "keyset-1",
+        "recovery-2",
+        "policy-5",
+        "keyset-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-1",
+            "outcome": "refused",
+            "failureCode": "doc-key-unknown"
+          },
+          {
+            "document": "keyset-2",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          },
+          {
+            "document": "policy-5",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          },
+          {
+            "document": "recovery-2",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          },
+          {
+            "document": "lock-2",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 6,
+          "recoveryVersion": 2,
+          "commandFloor": 2,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "keyset-header-below-active-floor",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "policy-9-old-keyset-version"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "policy-9-old-keyset-version",
+            "outcome": "refused",
+            "failureCode": "doc-version-rollback"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "higher-header-does-not-change-active-keyset",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "policy-10-higher-keyset-version"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "policy-10-higher-keyset-version",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 10,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "command-with-different-nonce",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "lock-4-wrong-nonce"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "lock-4-wrong-nonce",
+            "outcome": "refused",
+            "failureCode": "command-nonce-mismatch"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "old-server-key-revoked-at-step-one",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "lock-5-old-key",
+        "keyset-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "keyset-2",
+            "outcome": "accepted",
+            "failureCode": null
+          },
+          {
+            "document": "lock-5-old-key",
+            "outcome": "refused",
+            "failureCode": "doc-key-unknown"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "command-for-another-device",
+      "initial": {
+        "keyset": "keyset-2",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "successor"
+      },
+      "documents": [
+        "lock-6-other"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "lock-6-other",
+            "outcome": "refused",
+            "failureCode": "doc-device-not-listed"
+          }
+        ],
+        "final": {
+          "keyset": "keyset-2",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "successor"
+        }
+      }
+    },
+    {
+      "id": "command-still-accepted-with-baseline",
+      "initial": {
+        "keyset": "keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "root"
+      },
+      "documents": [
+        "lock-1"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "lock-1",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "keyset-1",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 1,
+          "root": "root"
+        }
+      }
+    },
+    {
+      "id": "foreign-fleet-refused-in-every-step",
+      "initial": {
+        "keyset": "review-keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "review-root"
+      },
+      "documents": [
+        "foreign-command",
+        "foreign-recovery",
+        "foreign-policy",
+        "foreign-keyset"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "foreign-keyset",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "foreign-policy",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "foreign-recovery",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "foreign-command",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          }
+        ],
+        "final": {
+          "keyset": "review-keyset-1",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "review-root"
+        }
+      }
+    },
+    {
+      "id": "signed-later-field-does-not-block-lower-valid-policy",
+      "initial": {
+        "keyset": "review-keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "review-root"
+      },
+      "documents": [
+        "review-policy-1",
+        "review-policy-later-field",
+        "review-keyset-later-field"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "review-keyset-later-field",
+            "outcome": "refused",
+            "failureCode": "doc-field-unknown"
+          },
+          {
+            "document": "review-policy-later-field",
+            "outcome": "refused",
+            "failureCode": "doc-field-unknown"
+          },
+          {
+            "document": "review-policy-1",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "review-keyset-1",
+          "policyVersion": 1,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "review-root"
+        }
+      }
+    },
+    {
+      "id": "signed-schema-2-does-not-block-lower-valid-policy",
+      "initial": {
+        "keyset": "review-keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "review-root"
+      },
+      "documents": [
+        "review-policy-1",
+        "review-policy-schema-2",
+        "review-keyset-schema-2"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "review-keyset-schema-2",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "review-policy-schema-2",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "review-policy-1",
+            "outcome": "accepted",
+            "failureCode": null
+          }
+        ],
+        "final": {
+          "keyset": "review-keyset-1",
+          "policyVersion": 1,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "review-root"
+        }
+      }
+    },
+    {
+      "id": "bad-signature-precedes-fleet-and-version-checks",
+      "initial": {
+        "keyset": "review-keyset-1",
+        "policyVersion": 2,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "review-root"
+      },
+      "documents": [
+        {
+          "document": "review-policy-1",
+          "tamper": "signature"
+        },
+        {
+          "document": "foreign-policy",
+          "tamper": "signature"
+        }
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "review-policy-1",
+            "outcome": "refused",
+            "failureCode": "doc-signature-invalid"
+          },
+          {
+            "document": "foreign-policy",
+            "outcome": "refused",
+            "failureCode": "doc-signature-invalid"
+          }
+        ],
+        "final": {
+          "keyset": "review-keyset-1",
+          "policyVersion": 2,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "review-root"
+        }
+      }
+    },
+    {
+      "id": "overlapping-key-roles-do-not-rotate-trust",
+      "initial": {
+        "keyset": "review-keyset-1",
+        "policyVersion": 0,
+        "recoveryVersion": 0,
+        "commandFloor": 0,
+        "root": "review-root"
+      },
+      "documents": [
+        "review-keyset-server-is-policy",
+        "review-keyset-server-is-root",
+        "review-keyset-recovery-signer-is-root",
+        "review-keyset-server-is-successor"
+      ],
+      "expected": {
+        "processed": [
+          {
+            "document": "review-keyset-server-is-policy",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "review-keyset-server-is-root",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "review-keyset-recovery-signer-is-root",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          },
+          {
+            "document": "review-keyset-server-is-successor",
+            "outcome": "refused",
+            "failureCode": "doc-field-invalid"
+          }
+        ],
+        "final": {
+          "keyset": "review-keyset-1",
+          "policyVersion": 0,
+          "recoveryVersion": 0,
+          "commandFloor": 0,
+          "root": "review-root"
+        }
+      }
+    }
+  ]
+}

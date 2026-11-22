@@ -1,0 +1,775 @@
+{
+  "cases": [
+    {
+      "id": "1-after-journal-commit",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "journal",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "3-after-projection-before-stamp",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "before-stamp",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "4-after-stamp-before-pass",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "stamp",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "5-after-read-back-before-verified-commit",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "read-back",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": true,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "6-new-policy-during-pass",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "pass",
+      "fault": "replace-target",
+      "boot": false,
+      "replacement": "policy-6",
+      "expected": {
+        "outcome": "reconciled",
+        "failureCode": null,
+        "passStartedBeforeRetry": true,
+        "durableTargetBeforeRetry": "policy-6",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-6",
+        "verifiedAfterRetry": "policy-6",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "7-recovery-during-projection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "system-controls",
+      "fault": "replace-target",
+      "boot": false,
+      "replacement": "policy-5-network-off",
+      "expected": {
+        "outcome": "reconciled",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5-network-off",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5-network-off",
+        "verifiedAfterRetry": "policy-5-network-off",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "8-boot-after-journal",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "journal",
+      "fault": "crash",
+      "boot": true,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "boot",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "8-boot-during-projection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-mode-selection",
+      "fault": "crash",
+      "boot": true,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "boot",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "8-boot-after-projection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "before-stamp",
+      "fault": "crash",
+      "boot": true,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "boot",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "journal-write-fails-live-process",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "journal",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-1",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-1",
+        "verifiedAfterRetry": "policy-1",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "stamp-write-fails-live-process",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "stamp",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "verified-write-fails-live-process",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "verified",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": true,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "matching-stamp-still-reprojects-full-state",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "matching-stamp",
+      "fault": "none",
+      "boot": false,
+      "expected": {
+        "outcome": "reconciled",
+        "failureCode": null,
+        "passStartedBeforeRetry": true,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-5",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false,
+        "ranFullProjection": true
+      }
+    },
+    {
+      "id": "baseline-boot-reprojects-before-pass",
+      "initial": null,
+      "target": "baseline",
+      "phase": "stamp",
+      "fault": "crash",
+      "boot": true,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "baseline",
+        "verifiedBeforeRetry": null,
+        "retryTrigger": "boot",
+        "durableTargetAfterRetry": "baseline",
+        "verifiedAfterRetry": "baseline",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-apps-mode-selection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-mode-selection",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-apps-mode-selection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-mode-selection",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-apps-system-selection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-system-selection",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-apps-system-selection",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-system-selection",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-apps-system-risk-acceptance",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-system-risk-acceptance",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-apps-system-risk-acceptance",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "apps-system-risk-acceptance",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-play-compatibility",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "play-compatibility",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-play-compatibility",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "play-compatibility",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-system-controls",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "system-controls",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-system-controls",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "system-controls",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-home-filter",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "home-filter",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-home-filter",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "home-filter",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-management-pins",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "management-pins",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-management-pins",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "management-pins",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-kiosk",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "kiosk",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-kiosk",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "kiosk",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "2-after-locale",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "locale",
+      "fault": "crash",
+      "boot": false,
+      "expected": {
+        "outcome": "interrupted",
+        "failureCode": null,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "process-start",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "failed-write-locale",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "phase": "locale",
+      "fault": "write-failed",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "journal-write-failed",
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    },
+    {
+      "id": "partial-projection-refused-even-with-matching-stamp",
+      "initial": "policy-1",
+      "target": "policy-5",
+      "initialStamp": "policy-5",
+      "phase": "apps-mode-selection",
+      "fault": "premature-pass",
+      "boot": false,
+      "expected": {
+        "outcome": "refused",
+        "failureCode": null,
+        "prematurePassRefused": true,
+        "passStartedBeforeRetry": false,
+        "durableTargetBeforeRetry": "policy-5",
+        "verifiedBeforeRetry": "policy-1",
+        "retryTrigger": "reconcile",
+        "durableTargetAfterRetry": "policy-5",
+        "verifiedAfterRetry": "policy-5",
+        "passReadsMixedGeneration": false
+      }
+    }
+  ],
+  "readBackCases": [
+    {
+      "id": "vpn-failure-before-unhide",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "protections": {
+        "vpnLockdown": "refused"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1"
+      }
+    },
+    {
+      "id": "interrupted-before-unhide",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "protections": {
+        "vpnLockdown": "interrupted"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1"
+      }
+    },
+    {
+      "id": "hide-is-not-delayed",
+      "previouslyHidden": false,
+      "wouldUnhide": false,
+      "protections": {
+        "vpnLockdown": "refused"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1"
+      }
+    },
+    {
+      "id": "advisory-control-refused",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "protections": {
+        "wifi_configuration": "refused"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1"
+      }
+    },
+    {
+      "id": "requested-control-unsupported",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "protections": {
+        "date_and_time": "unsupported"
+      },
+      "deviceSdk": 27,
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1"
+      }
+    },
+    {
+      "id": "null-ca-requires-cleanup",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "previousCa": "installed",
+      "protections": {
+        "caRemoval": "refused"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1",
+        "retainPreviousCa": true
+      }
+    },
+    {
+      "id": "null-ca-removed-and-read-back",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "previousCa": "installed",
+      "protections": {
+        "caRemoval": "verified"
+      },
+      "expected": {
+        "outcome": "verified",
+        "failureCode": null,
+        "packageHidden": false,
+        "verified": "policy-5",
+        "retainPreviousCa": false
+      }
+    },
+    {
+      "id": "disabled-filter-keeps-old-config-until-cleanup",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "previousFilter": "enabled",
+      "target": "policy-6",
+      "protections": {
+        "filterRemoval": "refused"
+      },
+      "expected": {
+        "outcome": "unverified",
+        "failureCode": null,
+        "packageHidden": true,
+        "verified": "policy-1",
+        "retainPreviousFilter": true
+      }
+    },
+    {
+      "id": "disabled-filter-cleanup-verified",
+      "previouslyHidden": true,
+      "wouldUnhide": true,
+      "previousFilter": "enabled",
+      "target": "policy-6",
+      "protections": {
+        "filterRemoval": "verified"
+      },
+      "expected": {
+        "outcome": "verified",
+        "failureCode": null,
+        "packageHidden": false,
+        "verified": "policy-6",
+        "retainPreviousFilter": false
+      }
+    }
+  ]
+}

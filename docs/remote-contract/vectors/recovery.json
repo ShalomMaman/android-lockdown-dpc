@@ -1,0 +1,573 @@
+{
+  "testCode": {
+    "notice": "TEST ONLY — public deterministic code, never use on a device.",
+    "display": "ABCD EFGH IJKL MNOP QRST",
+    "document": "recovery-1",
+    "expected": {
+      "outcome": "reproduced",
+      "failureCode": null
+    }
+  },
+  "boot": 4,
+  "elapsedMs": 100,
+  "callsMadeOnPolicyThread": [
+    "pending-dispatch"
+  ],
+  "initial": {
+    "verifierPresent": true,
+    "uses": 0,
+    "overrides": [],
+    "commandFloor": 4,
+    "commandStates": {
+      "accepted": "ACCEPTED",
+      "dispatching": "DISPATCHING",
+      "done": "DONE",
+      "pending-dispatch": "DISPATCHING"
+    },
+    "lockout": {
+      "failures": 0
+    }
+  },
+  "cases": [
+    {
+      "id": "no-choice-no-code-consumption",
+      "choices": [],
+      "expected": {
+        "outcome": "unchanged",
+        "failureCode": null,
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 0
+        }
+      }
+    },
+    {
+      "id": "cancel-before-code",
+      "choices": [
+        "network-off"
+      ],
+      "fault": "cancel-before-code",
+      "expected": {
+        "outcome": "unchanged",
+        "failureCode": null,
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 0
+        }
+      }
+    },
+    {
+      "id": "wrong-code-increments-durable-counter",
+      "choices": [
+        "network-off"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": null,
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 1
+        },
+        "codeChecked": true
+      },
+      "codeMatches": false
+    },
+    {
+      "id": "fifth-failure-locks-out-even-the-right-code",
+      "choices": [
+        "network-off"
+      ],
+      "expected": {
+        "outcome": "refused",
+        "failureCode": null,
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 5,
+          "boot": 4,
+          "untilElapsedMs": 60100
+        },
+        "codeChecked": true,
+        "nextAttempt": {
+          "outcome": "refused",
+          "failureCode": null,
+          "verifierPresent": true,
+          "uses": 0,
+          "overrides": [],
+          "commandFloor": 4,
+          "commandStates": {
+            "accepted": "ACCEPTED",
+            "dispatching": "DISPATCHING",
+            "done": "DONE",
+            "pending-dispatch": "DISPATCHING"
+          },
+          "generation": "policy-5",
+          "cancellationCode": null,
+          "policyFieldsChanged": [],
+          "rejectsNewCommands": false,
+          "lockout": {
+            "failures": 5,
+            "boot": 4,
+            "untilElapsedMs": 60100
+          },
+          "codeChecked": false
+        }
+      },
+      "codeMatches": false,
+      "initial": {
+        "lockout": {
+          "failures": 4
+        }
+      },
+      "nextAttempt": {
+        "codeMatches": true,
+        "elapsedMs": 101
+      }
+    },
+    {
+      "id": "crash-before-atomic-commit",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "fault": "crash-before",
+      "expected": {
+        "outcome": "unchanged",
+        "failureCode": null,
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 0
+        }
+      }
+    },
+    {
+      "id": "commit-failure-preserves-every-field",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "fault": "write-failed",
+      "expected": {
+        "outcome": "refused",
+        "failureCode": "recovery-commit-failed",
+        "verifierPresent": true,
+        "uses": 0,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "ACCEPTED",
+          "dispatching": "DISPATCHING",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5",
+        "cancellationCode": null,
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 0
+        }
+      }
+    },
+    {
+      "id": "crash-after-atomic-commit-applies-both",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "fault": "crash-after",
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "OUTCOME_UNKNOWN"
+        },
+        "generation": "policy-5-both",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [
+          "homeFilter",
+          "homeFilterControlFloor"
+        ],
+        "rejectsNewCommands": true,
+        "networkReadBackTarget": {
+          "vpnLockdown": false,
+          "proxy": null,
+          "caCertificate": null
+        },
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "network-off-only",
+      "choices": [
+        "network-off"
+      ],
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "network-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5-network-off",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [
+          "homeFilter",
+          "homeFilterControlFloor"
+        ],
+        "rejectsNewCommands": false,
+        "networkReadBackTarget": {
+          "vpnLockdown": false,
+          "proxy": null,
+          "caCertificate": null
+        },
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "commands-off-only",
+      "choices": [
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5-commands-off",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": true,
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      },
+      "note": "The live policy thread has the call-made flag. The platform call happened, and the DONE commit failed, leaving the durable entry DISPATCHING."
+    },
+    {
+      "id": "replacement-verifier-preserves-active-overrides",
+      "choices": [
+        "network-off"
+      ],
+      "initial": {
+        "uses": 1,
+        "overrides": [
+          "commands-off"
+        ]
+      },
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 2,
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5-both",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [
+          "homeFilter",
+          "homeFilterControlFloor"
+        ],
+        "rejectsNewCommands": true,
+        "networkReadBackTarget": {
+          "vpnLockdown": false,
+          "proxy": null,
+          "caCertificate": null
+        },
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "second-use-fails",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "fault": "retry",
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5-both",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [
+          "homeFilter",
+          "homeFilterControlFloor"
+        ],
+        "rejectsNewCommands": true,
+        "networkReadBackTarget": {
+          "vpnLockdown": false,
+          "proxy": null,
+          "caCertificate": null
+        },
+        "secondUse": {
+          "outcome": "unchanged",
+          "failureCode": null
+        },
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "newer-policy-removes-overrides",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "newerPolicy": "committed",
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-6",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": false,
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "failed-newer-policy-keeps-overrides",
+      "choices": [
+        "commands-off",
+        "network-off"
+      ],
+      "newerPolicy": "write-failed",
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off",
+          "network-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "DISPATCHING"
+        },
+        "generation": "policy-5-both",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [
+          "homeFilter",
+          "homeFilterControlFloor"
+        ],
+        "rejectsNewCommands": true,
+        "networkReadBackTarget": {
+          "vpnLockdown": false,
+          "proxy": null,
+          "caCertificate": null
+        },
+        "newerPolicyFailureCode": "journal-write-failed",
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "command-already-executed"
+      }
+    },
+    {
+      "id": "live-thread-cancels-truly-uncalled-dispatch",
+      "choices": [
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "CANCELLED",
+          "done": "DONE",
+          "pending-dispatch": "CANCELLED"
+        },
+        "generation": "policy-5-commands-off",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": true,
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "cancelled-by-recovery"
+      },
+      "note": "The live policy thread is still before the platform call, so the call-made flag is absent.",
+      "callsMadeOnPolicyThread": []
+    },
+    {
+      "id": "lost-call-flag-after-restart-keeps-outcome-unknown",
+      "choices": [
+        "commands-off"
+      ],
+      "expected": {
+        "outcome": "committed",
+        "failureCode": null,
+        "verifierPresent": false,
+        "uses": 1,
+        "overrides": [
+          "commands-off"
+        ],
+        "commandFloor": 4,
+        "commandStates": {
+          "accepted": "CANCELLED",
+          "dispatching": "OUTCOME_UNKNOWN",
+          "done": "DONE",
+          "pending-dispatch": "OUTCOME_UNKNOWN"
+        },
+        "generation": "policy-5-commands-off",
+        "cancellationCode": "cancelled-by-recovery",
+        "policyFieldsChanged": [],
+        "rejectsNewCommands": true,
+        "lockout": {
+          "failures": 0
+        },
+        "pendingCallOutcomeAtRecovery": "dispatch-outcome-unknown"
+      },
+      "note": "After process death, the in-memory call-made flag is gone and durable DISPATCHING is ambiguous.",
+      "restarted": true
+    }
+  ]
+}
