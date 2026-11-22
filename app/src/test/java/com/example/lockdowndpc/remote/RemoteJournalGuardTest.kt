@@ -3,9 +3,11 @@ package com.example.lockdowndpc.remote
 import com.example.lockdowndpc.testing.MemoryPreferences
 import java.io.File
 import java.io.IOException
+import java.util.function.Consumer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,12 +23,15 @@ class RemoteJournalGuardTest {
         policy = f.policy("policy-5"), recoveryVersion = 4, commandFloor = 7
     )
 
-    private fun harness(store: RemoteJournalGuardStore = RemoteJournalGuardFile(file)) = RemoteFixtures.Harness(
+    private fun fileStore() = RemoteJournalGuardFile(file, f::mac)
+
+    private fun harness(store: RemoteJournalGuardStore = fileStore()) = RemoteFixtures.Harness(
         MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }, f.noProjection, store
     )
 
-    private fun bind(harness: RemoteFixtures.Harness, binding: RemoteBinding = f.binding): RemoteFailure? {
-        val root = f.keys.obj("root")
+    private fun bind(harness: RemoteFixtures.Harness, binding: RemoteBinding = f.binding,
+                     key: String = "root"): RemoteFailure? {
+        val root = f.keys.obj(key)
         return harness.engine.bindFleet(f.verifier, binding, root.text("keyId"), root.text("spki"), 35)
     }
 
@@ -46,7 +51,7 @@ class RemoteJournalGuardTest {
         assertEquals(5L, harness.journal.floor(DocumentType.POLICY))
     }
 
-    @Test fun checksumFailureBlocksRemoteOperationsAndKeepsJournalFloors() {
+    @Test fun macFailureBlocksRemoteOperationsAndKeepsJournalFloors() {
         val harness = harness()
         assertTrue(harness.journal.save(initial))
         val record = file.readBytes()
@@ -58,6 +63,33 @@ class RemoteJournalGuardTest {
         assertEquals("journal-guard-unreadable", bind(harness)?.code)
         assertEquals("journal-guard-unreadable", harness.engine.reconcile().failure?.code)
         assertEquals(DocumentType.entries.map(initial::floor), DocumentType.entries.map(harness.journal::floor))
+    }
+
+    @Test fun replacingTheMacWithAPublicDigestDoesNotAuthenticateTheGuard() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial))
+        val record = file.readBytes()
+        val payload = record.copyOfRange(32, record.size)
+        file.writeBytes(RemoteCrypto.sha256(payload) + payload)
+
+        harness.restart()
+        assertEquals(RemoteJournal.GUARD_UNREADABLE, harness.engine.failure)
+    }
+
+    @Test fun missingMacKeyCannotBeRecreatedWhenReadingAnExistingGuard() {
+        var keyPresent = false
+        val store = RemoteJournalGuardFile(file) { payload, create ->
+            if (create) keyPresent = true
+            check(keyPresent)
+            f.mac(payload)
+        }
+        val harness = harness(store)
+        assertTrue(harness.journal.save(initial))
+        keyPresent = false
+
+        harness.restart()
+        assertEquals(RemoteJournal.GUARD_UNREADABLE, bind(harness))
+        assertFalse(keyPresent)
     }
 
     @Test fun absentStoresPermitBindingAndPersistTheIdentity() {
@@ -72,7 +104,7 @@ class RemoteJournalGuardTest {
     }
 
     @Test fun disagreementsKeepTheMaximumOfEachChannelWithoutAuthorizingEitherCopy() {
-        val store = RemoteJournalGuardFile(file)
+        val store = fileStore()
         val harness = harness(store)
         assertTrue(harness.journal.save(initial))
         val original = requireNotNull(store.read())
@@ -88,7 +120,7 @@ class RemoteJournalGuardTest {
     }
 
     @Test fun sameFloorsWithDifferentBindingOrRootStillDisagree() {
-        val store = RemoteJournalGuardFile(file)
+        val store = fileStore()
         val harness = harness(store)
         assertTrue(harness.journal.save(initial))
         for (changed in listOf(
@@ -102,7 +134,7 @@ class RemoteJournalGuardTest {
     }
 
     @Test fun anInvalidFloorDoesNotEraseOtherReadableFloors() {
-        val store = RemoteJournalGuardFile(file)
+        val store = fileStore()
         val harness = harness(store)
         assertTrue(harness.journal.save(initial.copy(policy = f.policy("policy-6"))))
         store.write(JournalGuard.from(initial))
@@ -136,13 +168,13 @@ class RemoteJournalGuardTest {
         assertEquals("journal-lost", harness.receive("policy-5").failure?.code)
     }
 
-    @Test fun failedSecondWriteStopsTheLiveBatchAndRetainsTheHigherJournalFloorAfterRestart() {
-        val fileStore = RemoteJournalGuardFile(file)
+    @Test fun failedGuardWriteStopsTheLiveBatchWithoutAdvancingTheJournal() {
+        val fileStore = fileStore()
         var fail = false
         val harness = harness(object : RemoteJournalGuardStore by fileStore {
-            override fun write(guard: JournalGuard) {
+            override fun write(guard: JournalGuard, createKey: Boolean) {
                 if (fail) throw IOException("Simulated guard write failure")
-                fileStore.write(guard)
+                fileStore.write(guard, createKey)
             }
         })
         assertTrue(harness.journal.save(initial.copy(commandFloor = 0)))
@@ -150,11 +182,62 @@ class RemoteJournalGuardTest {
         assertEquals(listOf("journal-guard-write-failed", "journal-guard-write-failed"),
             harness.receive("policy-6", "lock-2").decisions.map { it.failure?.code })
         assertEquals(5L, harness.engine.state.policy?.version)
-        assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
+        assertEquals(5L, harness.journal.floor(DocumentType.POLICY))
         assertEquals(0L, harness.journal.floor(DocumentType.COMMAND))
         assertEquals("journal-guard-write-failed", bind(harness)?.code)
         harness.restart()
-        assertEquals("journal-guard-mismatch", bind(harness)?.code)
+        assertNull(harness.engine.failure)
+        fail = false
+        assertNull(harness.receive("policy-6").decisions.single().failure)
+        assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
+    }
+
+    @Test fun crashBeforeFirstJournalWriteCanOnlyResumeWithTheGuardedIdentity() {
+        val harness = harness()
+        harness.memory.beforeCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { bind(harness) }
+        harness.memory.beforeCommit = Consumer { }
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertNull(harness.engine.state.binding)
+        assertEquals("journal-write-failed", bind(harness, f.binding.copy(fleetId = "another-fleet"))?.code)
+        assertEquals("journal-write-failed", bind(harness, key = "successor")?.code)
+        assertNull(bind(harness))
+        harness.restart()
+        assertEquals(f.binding, harness.engine.state.binding)
+        assertNull(harness.engine.failure)
+    }
+
+    @Test fun crashBeforeJournalFloorRaiseRetainsThePreviousPolicyAndHonorsTheNewFloor() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial.copy(commandFloor = 0)))
+        harness.memory.beforeCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { harness.receive("policy-6") }
+        harness.memory.beforeCommit = Consumer { }
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertEquals(5L, harness.engine.state.policy?.version)
+        assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
+        assertTrue(harness.engine.reconcile().verified)
+        assertEquals("doc-version-rollback", harness.receive("policy-6").decisions.single().failure?.code)
+        assertNull(harness.receive("lock-2").decisions.single().failure)
+        harness.restart()
+        assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
+        assertEquals(2L, harness.journal.floor(DocumentType.COMMAND))
+    }
+
+    @Test fun aJournalAheadOfTheGuardFailsClosed() {
+        val store = fileStore()
+        val harness = harness(store)
+        assertTrue(harness.journal.save(initial))
+        assertNull(harness.receive("policy-6").decisions.single().failure)
+        store.write(JournalGuard.from(initial))
+
+        harness.restart()
+        assertEquals(RemoteJournal.GUARD_MISMATCH, bind(harness))
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
         assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
     }
 
@@ -167,4 +250,6 @@ class RemoteJournalGuardTest {
         assertEquals(5L, harness.journal.floor(DocumentType.POLICY))
         assertFalse(file.exists())
     }
+
+    private class ProcessDeath : Error()
 }

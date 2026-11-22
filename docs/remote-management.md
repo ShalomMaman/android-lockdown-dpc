@@ -541,8 +541,9 @@ A command is valid only inside the sync that requested it. There is no queue
 on the device and no expiry to compute from time:
 
 1. Verify the signature, the nonce binding and the `sequence` floor.
-2. Commit `{sequence, kind, state: ACCEPTED, bootCount, cutoffElapsed}` with
-   the raised floor, where `cutoffElapsed = requestSentElapsed + 120 s`.
+2. Raise the replay floor in the guard, then commit
+   `{sequence, kind, state: ACCEPTED, bootCount, cutoffElapsed}` with
+   that floor in the journal, where `cutoffElapsed = requestSentElapsed + 120 s`.
 3. Commit `state: DISPATCHING`.
 4. **After that commit**, check again that the boot count is unchanged,
    that `elapsedRealtime < cutoffElapsed`, **and that `commands-off` is not
@@ -569,10 +570,11 @@ The journal holds, in one preferences file written only with `commit()`:
 - the command entries;
 - `verifiedSha256`.
 
-**Accepting a policy** (baseline, or a fleet policy that passed 5.2) is one
-commit: the payload bytes, `committedSha256` and the raised floor together. If
-that commit fails, the policy is refused (`journal-write-failed`) and nothing
-else changes.
+**Accepting a policy** (baseline, or a fleet policy that passed 5.2) commits
+the payload bytes, `committedSha256` and its floor together in the journal.
+The Keystore-authenticated guard records a raised floor before that commit.
+If the journal commit fails, the policy is refused (`journal-write-failed`),
+the prior policy remains active, and the higher replay floor stays in force.
 
 **The single rule.** On every process start, on every lifecycle trigger (boot,
 package replaced, package added or removed, sweep), on `reapply`, and before

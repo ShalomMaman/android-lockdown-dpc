@@ -82,7 +82,7 @@ internal data class JournalState(
 
 internal const val MAX_FINISHED_COMMANDS = 16
 
-/** One live instance on the policy thread. Only an agreed record authorizes remote operations. */
+/** One live instance on the policy thread. The guard bounds what the journal can authorize. */
 internal class RemoteJournal(
     private val preferences: SharedPreferences,
     private val marker: SharedPreferences,
@@ -92,6 +92,7 @@ internal class RemoteJournal(
     private val remoteCommitted: () -> Boolean = { false }
 ) {
     private var marked: Boolean
+    private var hasJournal: Boolean
     private var guard: JournalGuard?
     private var floors: Map<DocumentType, Long>
     var state: JournalState
@@ -103,6 +104,7 @@ internal class RemoteJournal(
     init {
         val initial = read()
         marked = initial.marked
+        hasJournal = initial.state != null
         guard = initial.secondary
         floors = DocumentType.entries.associateWith(initial::floor)
         state = initial.state ?: JournalState()
@@ -115,7 +117,11 @@ internal class RemoteJournal(
     fun checkStores(): RemoteFailure? {
         val stored = read()
         floors = DocumentType.entries.associateWith { maxOf(floor(it), stored.floor(it)) }
-        if (!lost) failure = stored.failure ?: GUARD_MISMATCH.takeIf { stored.secondary != guard }
+        if (!lost) failure = stored.failure ?: when {
+            hasJournal && stored.state == null -> JOURNAL_LOST
+            stored.secondary != guard -> GUARD_MISMATCH
+            else -> null
+        }
         return failure
     }
 
@@ -123,28 +129,41 @@ internal class RemoteJournal(
         if (lost) return false
         val (bounded, nextGuard, encoded) = try {
             val bounded = next.bounded()
-            val nextGuard = JournalGuard.from(bounded)
+            val nextRecord = JournalGuard.from(bounded)
             val binding = guard?.bindingFingerprint
-            require(binding == null || binding == nextGuard.bindingFingerprint)
-            require(DocumentType.entries.all { nextGuard.floors.getValue(it) >= floor(it) })
+            require(binding == null || binding == nextRecord.bindingFingerprint)
+            // Before the first journal commit an existing guard pins the whole bootstrap identity.
+            require(hasJournal || guard == null || guard == nextRecord)
+            // Unchanged journal channels can keep running beneath a reserved floor.
+            require(DocumentType.entries.all {
+                bounded.floor(it) == state.floor(it) || bounded.floor(it) >= floor(it)
+            })
+            val nextGuard = nextRecord.copy(floors = DocumentType.entries.associateWith {
+                maxOf(floor(it), bounded.floor(it))
+            })
             Triple(bounded, nextGuard, JournalCodec.encode(bounded))
         } catch (_: Exception) {
             return false
         }
-        // Mark first, then write the full journal, then the independent guard.
-        // A failure after the full write leaves different records and blocks all
-        // operations. A failed journal write never advances the guard by itself.
-        if (!mark() || !write(STATE, encoded)) return false
-        floors = nextGuard.floors
+        // Publish the independent floors before the full journal. They remain in
+        // force even when the second write fails and the old policy stays active.
+        if (!mark()) return false
+        val changesRoot = hasJournal && guard?.rootFingerprint != nextGuard.rootFingerprint
         if (guard != nextGuard) {
             try {
-                guardStore.write(nextGuard)
+                guardStore.write(nextGuard, createKey = guard == null)
             } catch (_: Exception) {
                 failure = GUARD_WRITE_FAILED
                 return false
             }
             guard = nextGuard
         }
+        floors = nextGuard.floors
+        if (!write(STATE, encoded)) {
+            if (changesRoot) failure = GUARD_MISMATCH
+            return false
+        }
+        hasJournal = true
         state = bounded
         return true
     }
@@ -207,11 +226,12 @@ internal class RemoteJournal(
         val copy = secondary.getOrNull()
         val hasMarker = marked.getOrDefault(false)
         val failure = when {
-            marked.isFailure || journal.isFailure || primary.isFailure || (hasMarker != (expected != null)) -> JOURNAL_LOST
+            marked.isFailure || journal.isFailure || primary.isFailure -> JOURNAL_LOST
+            !hasMarker && (expected != null || copy != null) -> JOURNAL_LOST
             secondary.isFailure -> GUARD_UNREADABLE
+            expected == null && hasMarker && copy?.isInitialBinding() != true -> JOURNAL_LOST
             expected != null && copy == null -> GUARD_MISSING
-            expected == null && copy != null -> JOURNAL_LOST
-            expected != copy -> GUARD_MISMATCH
+            expected != null && copy?.covers(expected) != true -> GUARD_MISMATCH
             else -> null
         }
         return Read(hasMarker, state, copy, failure)

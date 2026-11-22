@@ -197,20 +197,20 @@ Other device rules:
   restored at boot, and its HOME screen neither locks the task nor starts the
   target. The journal pass turns it off.
 - **Journal protection.** The journal creation marker is stored first. The
-  journal is committed next, followed by an atomic replacement of a separate
-  SHA-256-checked file in no-backup storage when its protected fields change.
-  That file records the fleet and device binding fingerprint, the active root
-  fingerprint, and the key-set, policy, recovery and command floors. The
-  operation succeeds after both writes. A journal commit failure leaves the
-  previous guard in place. A guard write failure stops remote operations in
-  the running process. A restart checks the two records before allowing work.
-- **Storage refusals.** A previously created or committed remote journal that
-  reads back empty or damaged reports `journal-lost`. A missing or corrupt
-  guard reports `journal-guard-missing` or `journal-guard-unreadable`. Different
-  bindings or floors report `journal-guard-mismatch`. None of these states
-  authorizes a policy pass or fleet bind. The device retains its existing
-  restrictions and the highest readable floor for each channel. Initial
-  enrolment requires absent journal state, creation marker and guard.
+  guard in no-backup storage is atomically replaced before the journal whenever
+  its protected fields change. A device-specific Android Keystore HMAC
+  authenticates its fleet and device binding fingerprint, active root fingerprint,
+  and key-set, policy, recovery and command floors. Remote mode is committed
+  after the first successful bind. If only the guard write completes, matching
+  identities let the previous policy continue with the higher replay floors.
+- **Storage refusals.** A missing or damaged committed journal reports
+  `journal-lost`, even when all three journal stores are missing. A missing
+  guard reports `journal-guard-missing`. A corrupt guard or unusable MAC key
+  reports `journal-guard-unreadable`. An identity mismatch or a journal floor
+  ahead of the guard reports `journal-guard-mismatch`. These failures leave
+  existing restrictions in force. Before remote mode is committed, a creation
+  marker and a valid guard with initial floors can resume an interrupted first
+  bind to the same fleet, device and root when the journal file is absent.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 

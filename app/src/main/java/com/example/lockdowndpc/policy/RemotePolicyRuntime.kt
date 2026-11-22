@@ -37,6 +37,7 @@ internal object RemotePolicyRuntime {
     )
 
     private var open: Open? = null
+    private var guardMac: (ByteArray, Boolean) -> ByteArray = ::keystoreGuardMac
 
     @JvmStatic
     fun reconcile(context: Context): LockdownPolicyController.PolicyResult {
@@ -47,6 +48,10 @@ internal object RemotePolicyRuntime {
             val current = open(context.applicationContext)
             // With a storage failure Android keeps the restrictions of the last pass.
             current.engine.checkStores()?.let { return failed(it) }
+            if (!commitRemoteMode(context, current.engine)) {
+                current.engine.revokeReleases()
+                return failed(WRITE_FAILED)
+            }
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
@@ -64,8 +69,17 @@ internal object RemotePolicyRuntime {
     }
 
     fun bindFleet(context: Context, binding: RemoteBinding, pinnedId: String, rootSpki: String): RemoteFailure? =
-        onRemoteThread(context, DISABLED, WRITE_FAILED) {
-            engine.bindFleet(verifier, binding, pinnedId, rootSpki, Build.VERSION.SDK_INT)
+        onRemoteThread(context, DISABLED, WRITE_FAILED, resumeMode = false) {
+            val app = context.applicationContext
+            val sdk = Build.VERSION.SDK_INT
+            val trust = engine.state.trust
+            val interrupted = !engine.lost && sdk >= RemoteEngine.MIN_SDK && engine.state.binding == binding &&
+                trust != null && trust.version == 0L && trust.root == rootSpki && RemoteCrypto.keyId(rootSpki) == pinnedId &&
+                ManagementModeStore.read(app) == ManagementMode.ENROLLING
+            if (!interrupted) {
+                engine.bindFleet(verifier, binding, pinnedId, rootSpki, sdk)?.let { return@onRemoteThread it }
+            }
+            WRITE_FAILED.takeUnless { ManagementModeStore.commitRemote(app) }
         }
 
     /** Read status on the writer's thread so an in-progress two-store write is never reported as damage. */
@@ -117,7 +131,9 @@ internal object RemotePolicyRuntime {
         })
     }
 
-    private fun <T> onRemoteThread(context: Context, blocked: T, failed: T = blocked, work: Open.() -> T): T =
+    private fun <T> onRemoteThread(
+        context: Context, blocked: T, failed: T = blocked, resumeMode: Boolean = true, work: Open.() -> T
+    ): T =
         PolicyReconciliationCoordinator.callOnPolicyThread {
             try {
                 val app = context.applicationContext
@@ -126,6 +142,7 @@ internal object RemotePolicyRuntime {
                 current.engine.checkStores()
                 // Whatever the caller came for, an exposed package is hidden again first.
                 current.engine.revokeReleases()
+                if (resumeMode && !commitRemoteMode(app, current.engine)) return@callOnPolicyThread failed
                 current.work()
             } catch (_: Exception) {
                 failed
@@ -135,6 +152,11 @@ internal object RemotePolicyRuntime {
     private fun remoteEnabled(context: Context): Boolean =
         RemoteEnrolmentGate.permits() && ManagementModeStore.hasCommittedRemoteIntent(context) &&
             !ManagementModeStore.read(context).usesLocalPolicy()
+
+    /** A restart between the journal commit and the mode commit can finish the transition. */
+    private fun commitRemoteMode(context: Context, engine: RemoteEngine): Boolean =
+        engine.lost || engine.state.binding == null || engine.state.trust == null ||
+            ManagementModeStore.commitRemote(context)
 
     private fun now(context: Context) = RemoteTime(
         Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1).toLong(),
@@ -157,7 +179,7 @@ internal object RemotePolicyRuntime {
         return RemoteJournal(
             context.getSharedPreferences(JOURNAL_PREFS, Context.MODE_PRIVATE),
             context.getSharedPreferences(JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE),
-            RemoteJournalGuardFile(File(context.noBackupFilesDir, JOURNAL_GUARD_FILE)),
+            RemoteJournalGuardFile(File(context.noBackupFilesDir, JOURNAL_GUARD_FILE), guardMac),
             journalFileAbsent = { preferencesFilesAbsent(context, JOURNAL_PREFS) },
             markerFileAbsent = { preferencesFilesAbsent(context, JOURNAL_MARKER_PREFS) },
             remoteCommitted = { ManagementModeStore.read(context) == ManagementMode.REMOTE }
@@ -175,6 +197,10 @@ internal object RemotePolicyRuntime {
         open = null
     }
 
+    internal fun setGuardMacForTests(mac: ((ByteArray, Boolean) -> ByteArray)?) {
+        guardMac = mac ?: ::keystoreGuardMac
+    }
+
     const val JOURNAL_PREFS = "remote_policy_journal"
     const val JOURNAL_MARKER_PREFS = "remote_policy_journal_marker"
     const val JOURNAL_GUARD_FILE = "remote-policy-guard"
@@ -182,10 +208,15 @@ internal object RemotePolicyRuntime {
     private fun failed(failure: RemoteFailure) =
         LockdownPolicyController.PolicyResult(false, false, 0, 0, listOf(failure.code))
 
-    private fun recoveryMac(data: ByteArray, create: Boolean): ByteArray {
+    private fun recoveryMac(data: ByteArray, create: Boolean): ByteArray =
+        keystoreMac("remote_recovery_hmac", data, create)
+
+    private fun keystoreGuardMac(data: ByteArray, create: Boolean): ByteArray =
+        keystoreMac("remote_journal_guard_hmac", data, create)
+
+    private fun keystoreMac(alias: String, data: ByteArray, create: Boolean): ByteArray {
         val store = KeyStore.getInstance("AndroidKeyStore")
         store.load(null)
-        val alias = "remote_recovery_hmac"
         val key = if (store.containsAlias(alias)) {
             store.getKey(alias, null) as SecretKey
         } else {

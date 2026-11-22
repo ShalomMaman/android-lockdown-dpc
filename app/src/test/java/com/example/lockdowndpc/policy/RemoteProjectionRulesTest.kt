@@ -17,6 +17,7 @@ import com.example.lockdowndpc.remote.RemoteOverride
 import java.io.File
 import java.security.KeyPairGenerator
 import java.security.spec.ECGenParameterSpec
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -27,6 +28,10 @@ import org.robolectric.Shadows
 
 /** What the remote pass refuses to take on trust: kiosk state, languages, hidden packages and a damaged journal. */
 class RemoteProjectionRulesTest : RemotePassFixture() {
+
+    @After fun restoreGuardMac() {
+        RemotePolicyRuntime.setGuardMacForTests(null)
+    }
 
     /** A kiosk state in the store is never fleet intent. The pass does not enter lock task on it. */
     @Test fun storedKioskIsNeverEnteredAndProjectionKeepsItOff() {
@@ -204,9 +209,8 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
     }
 
     @Test fun runtimeWritesTheGuardAndSurfacesCorruptionBeforeAndAfterReopening() {
-        val root = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
-            .generateKeyPair().public
-        val spki = RemoteCrypto.encode(root.encoded)
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val spki = newRoot()
         val pinnedId = RemoteCrypto.keyId(spki)
         val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
         assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
@@ -222,6 +226,51 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
                 context, binding.copy(fleetId = "another-fleet"), pinnedId, spki)?.code)
             assertEquals(listOf("journal-guard-unreadable"), onPolicyThread { RemotePolicyRuntime.reconcile(context) }.errors())
         }
+    }
+
+    @Test fun successfulBindingCommitsRemoteModeAndRefusesRebindingAfterAllJournalStoresAreLost() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        val spki = newRoot()
+        assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, RemoteCrypto.keyId(spki), spki))
+        assertEquals(ManagementMode.REMOTE, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.journalFailure(context))
+
+        RemotePolicyRuntime.closeForTests()
+        assertTrue(context.deleteSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS))
+        assertTrue(context.deleteSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS))
+        val guard = File(context.noBackupFilesDir, RemotePolicyRuntime.JOURNAL_GUARD_FILE)
+        assertTrue(guard.delete())
+        val otherRoot = newRoot()
+        assertEquals("journal-lost", RemotePolicyRuntime.bindFleet(
+            context, binding, RemoteCrypto.keyId(otherRoot), otherRoot)?.code)
+        assertFalse(guard.exists())
+        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE).all.isEmpty())
+    }
+
+    @Test fun sameBindingCanFinishAnInterruptedRemoteModeCommit() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        val spki = newRoot()
+        val pinnedId = RemoteCrypto.keyId(spki)
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
+        assertTrue(context.deleteSharedPreferences(ManagementModeStore.MODE_PREFS))
+        RemotePolicyRuntime.closeForTests()
+
+        val otherRoot = newRoot()
+        assertEquals("doc-version-rollback", RemotePolicyRuntime.bindFleet(
+            context, binding, RemoteCrypto.keyId(otherRoot), otherRoot)?.code)
+        assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
+        assertEquals(ManagementMode.REMOTE, ManagementModeStore.read(context))
+        assertEquals("doc-version-rollback", RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki)?.code)
+    }
+
+    private fun newRoot(): String {
+        val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
+            .generateKeyPair().public
+        return RemoteCrypto.encode(key.encoded)
     }
 
     private companion object {

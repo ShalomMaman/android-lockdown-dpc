@@ -91,7 +91,8 @@ internal object RemoteFixtures {
         /** The separate file that records that a journal was ever stored. */
         val marker = MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }
         private var journalFile = memory
-        var journal = RemoteJournal(journalFile.preferences(), marker.preferences(), guardStore)
+        private var damagedFilePresent = false
+        var journal = openJournal()
             private set
         var engine = engineFor(journal)
             private set
@@ -106,15 +107,19 @@ internal object RemoteFixtures {
 
         /** The journal file comes back empty or unreadable, as Android does with a damaged preferences file. */
         fun damageJournal(content: String?) {
+            damagedFilePresent = true
             journalFile = MemoryPreferences(if (content == null) emptyMap() else mapOf("state" to content))
                 .apply { failCommit = false }
             reopen()
         }
 
         private fun reopen() {
-            journal = RemoteJournal(journalFile.preferences(), marker.preferences(), guardStore)
+            journal = openJournal()
             engine = engineFor(journal)
         }
+
+        private fun openJournal() = RemoteJournal(journalFile.preferences(), marker.preferences(), guardStore,
+            journalFileAbsent = { !damagedFilePresent })
 
         fun receive(vararg names: String): RemoteSync.Response {
             val sync = RemoteSync(verifier, binding)
@@ -129,7 +134,7 @@ internal object RemoteFixtures {
     private class MemoryGuardStore : RemoteJournalGuardStore {
         private var guard: JournalGuard? = null
         override fun read() = guard
-        override fun write(guard: JournalGuard) { this.guard = guard }
+        override fun write(guard: JournalGuard, createKey: Boolean) { this.guard = guard }
     }
 
     fun policy(name: String): CommittedPolicy = if (name == "baseline") {

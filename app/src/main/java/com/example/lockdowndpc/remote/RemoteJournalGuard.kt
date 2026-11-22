@@ -21,6 +21,13 @@ internal data class JournalGuard(
         require(rootFingerprint == null || RemoteCrypto.decode(rootFingerprint).size == 32)
     }
 
+    fun covers(journal: JournalGuard): Boolean =
+        bindingFingerprint == journal.bindingFingerprint && rootFingerprint == journal.rootFingerprint &&
+            DocumentType.entries.all { floors.getValue(it) >= journal.floors.getValue(it) }
+
+    fun isInitialBinding(): Boolean =
+        bindingFingerprint != null && rootFingerprint != null && floors.values.all { it == 0L }
+
     companion object {
         // Canonicalize the fleet ID and device key fingerprint together. The
         // wire contract allows long fleet IDs, so store a fixed-size digest.
@@ -35,42 +42,46 @@ internal data class JournalGuard(
 internal interface RemoteJournalGuardStore {
     /** Returns null only when the file is absent. Unreadable or invalid contents throw. */
     fun read(): JournalGuard?
-    fun write(guard: JournalGuard)
+    fun write(guard: JournalGuard, createKey: Boolean = false)
 }
 
-/** One checksummed record in no-backup storage, replaced on the same filesystem. */
-internal class RemoteJournalGuardFile(private val file: File) : RemoteJournalGuardStore {
+/** One authenticated record in no-backup storage, replaced on the same filesystem. */
+internal class RemoteJournalGuardFile(
+    private val file: File, private val mac: (ByteArray, Boolean) -> ByteArray
+) : RemoteJournalGuardStore {
     override fun read(): JournalGuard? {
         if (Files.notExists(file.toPath(), NOFOLLOW_LINKS)) return null
         val record = FileInputStream(file).use { input ->
             val size = input.channel.size()
-            require(size in (CHECKSUM_SIZE + 1L)..MAX_RECORD_SIZE)
+            require(size in (MAC_SIZE + 1L)..MAX_RECORD_SIZE)
             ByteArray(size.toInt()).also {
                 DataInputStream(input).readFully(it)
                 require(input.read() == -1)
             }
         }
-        val payload = record.copyOfRange(CHECKSUM_SIZE, record.size)
-        require(MessageDigest.isEqual(record.copyOf(CHECKSUM_SIZE), RemoteCrypto.sha256(payload)))
+        val payload = record.copyOfRange(MAC_SIZE, record.size)
+        require(MessageDigest.isEqual(record.copyOf(MAC_SIZE), mac(payload, false)))
         val json = WireJson.parse(payload).asObject()
-        require(json.number("format") == 1L)
+        require(json.number("format") == FORMAT)
         val floors = json.obj("floors")
         return JournalGuard(json.getValue("bindingFingerprint") as String?, json.getValue("rootFingerprint") as String?,
             DocumentType.entries.associateWith { floors.number(it.wire) })
     }
 
-    override fun write(guard: JournalGuard) {
+    override fun write(guard: JournalGuard, createKey: Boolean) {
         val payload = WireJson.canonical(mapOf(
-            "format" to 1L,
+            "format" to FORMAT,
             "bindingFingerprint" to guard.bindingFingerprint,
             "rootFingerprint" to guard.rootFingerprint,
             "floors" to guard.floors.mapKeys { it.key.wire }
         ))
-        require(CHECKSUM_SIZE + payload.size <= MAX_RECORD_SIZE)
+        require(MAC_SIZE + payload.size <= MAX_RECORD_SIZE)
+        val tag = mac(payload, createKey)
+        require(tag.size == MAC_SIZE)
         val staged = File.createTempFile(file.name, ".pending", file.parentFile)
         try {
             FileOutputStream(staged).use {
-                it.write(RemoteCrypto.sha256(payload))
+                it.write(tag)
                 it.write(payload)
                 it.fd.sync()
             }
@@ -82,7 +93,8 @@ internal class RemoteJournalGuardFile(private val file: File) : RemoteJournalGua
     }
 
     companion object {
-        private const val CHECKSUM_SIZE = 32
+        private const val FORMAT = 2L
+        private const val MAC_SIZE = 32
         private const val MAX_RECORD_SIZE = 4096L
     }
 }

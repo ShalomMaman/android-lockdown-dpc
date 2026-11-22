@@ -86,6 +86,23 @@ public final class ManagementModeStore {
         return readMarker(context) == Marker.PRESENT;
     }
 
+    /** Called once the fleet binding has been stored by the remote journal. */
+    static synchronized boolean commitRemote(Context context) {
+        if (!RemoteEnrolmentGate.permits() || readMarker(context) != Marker.PRESENT) {
+            return false;
+        }
+        try {
+            SharedPreferences prefs = modePreferences(context);
+            if (ManagementMode.REMOTE.name().equals(prefs.getAll().get(MODE_KEY))) {
+                return true;
+            }
+            return DurablePreferences.commit(prefs,
+                    prefs.edit().putString(MODE_KEY, ManagementMode.REMOTE.name()), MODE_KEY);
+        } catch (RuntimeException unreadable) {
+            return false;
+        }
+    }
+
     private static boolean storeLocalMode(Context context) {
         try {
             SharedPreferences prefs = modePreferences(context);
