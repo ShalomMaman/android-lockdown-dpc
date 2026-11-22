@@ -44,8 +44,10 @@ internal class RemoteEngine(
     private val ledger = ReleaseLedger { packages -> save(state.copy(releases = state.releases + packages)) == null }
     private var reconciling = false
     val state: JournalState get() = journal.state
-    /** The journal existed and cannot be read. Every entry point refuses with `journal-lost`. */
+    val failure: RemoteFailure? get() = journal.failure
     val lost: Boolean get() = journal.lost
+
+    fun checkStores(): RemoteFailure? = journal.checkStores()
 
     data class Pass(val verified: Boolean, val failure: RemoteFailure? = null)
     enum class RecoveryOutcome { UNCHANGED, REFUSED, COMMITTED }
@@ -58,7 +60,7 @@ internal class RemoteEngine(
     fun bindFleet(
         verifier: RemoteVerifier, binding: RemoteBinding, pinnedId: String, rootSpki: String, sdk: Int
     ): RemoteFailure? {
-        if (journal.lost) return LOST
+        failure?.let { return it }
         // Below Android 10 the default controls cannot all be enforced, so no generation could verify.
         if (sdk < MIN_SDK) return RemoteFailure("enrolment-sdk-unsupported")
         if (state.trust != null || state.binding != null) return RemoteFailure("doc-version-rollback")
@@ -73,7 +75,7 @@ internal class RemoteEngine(
     }
 
     fun commitBaseline(policy: JsonObject): RemoteFailure? {
-        if (journal.lost) return LOST
+        failure?.let { return it }
         if (state.policy != null) return RemoteFailure("doc-version-rollback")
         return try {
             schema.requireValid("policy", policy)
@@ -96,11 +98,12 @@ internal class RemoteEngine(
 
     fun receive(sync: RemoteSync, exchange: RemoteSync.Exchange, nonce: String, now: RemoteTime,
                 documents: List<RemoteDocument>): RemoteSync.Response {
-        if (journal.lost) return RemoteSync.Response(LOST)
-        return sync.respond(exchange, nonce, now, documents, { requireNotNull(state.trust) }, { state.floor(it) }, ::accept)
+        failure?.let { return RemoteSync.Response(it) }
+        return sync.respond(exchange, nonce, now, documents, { requireNotNull(state.trust) }, journal::floor, ::accept)
     }
 
     private fun accept(doc: RemoteVerifier.Authenticated, exchange: RemoteSync.Exchange): RemoteFailure? {
+        failure?.let { return it }
         val next = when (doc.type) {
             DocumentType.KEY_SET -> state.copy(trust = doc.rotatedTrust())
             DocumentType.POLICY -> {
@@ -136,14 +139,14 @@ internal class RemoteEngine(
      * a journal that refuses writes cannot keep a package visible.
      */
     fun reconcile(): Pass {
-        if (journal.lost) return Pass(false, LOST)
+        failure?.let { return Pass(false, it) }
         revokeReleases()
         settleInterruptedCommands()?.let { return Pass(false, it) }
         return ensureProjected()
     }
 
     fun ensureProjected(): Pass {
-        if (journal.lost) return Pass(false, LOST)
+        failure?.let { return Pass(false, it) }
         if (reconciling) return Pass(false)
         reconciling = true
         return try {
@@ -205,7 +208,7 @@ internal class RemoteEngine(
     }
 
     fun recover(choices: Set<RemoteOverride>, code: String, now: RemoteTime): RecoveryResult {
-        if (journal.lost) return RecoveryResult(RecoveryOutcome.REFUSED, LOST)
+        failure?.let { return RecoveryResult(RecoveryOutcome.REFUSED, it) }
         val stored = state.recovery ?: return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (choices.isEmpty()) return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (!now.known) return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = false)
@@ -229,6 +232,7 @@ internal class RemoteEngine(
         } catch (_: Exception) {
             return RecoveryResult(RecoveryOutcome.REFUSED, RECOVERY_WRITE_FAILED, false)
         }
+        failure?.let { return RecoveryResult(RecoveryOutcome.REFUSED, it, false) }
         if (!matches) {
             return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = true, remainingMillis = counted.penaltyMillis())
         }
@@ -257,7 +261,7 @@ internal class RemoteEngine(
     }
 
     fun dispatch(sequence: Long, clock: () -> RemoteTime, platform: CommandPlatform): RemoteFailure? {
-        if (journal.lost) return LOST
+        failure?.let { return it }
         if (sequence !in liveDispatches || sequence in unsaved) {
             return settleInterruptedCommands() ?: state.commands[sequence]?.code?.let { RemoteFailure(it) }
         }
@@ -275,6 +279,7 @@ internal class RemoteEngine(
         }
         // A recovery may run re-entrantly before this final check. Re-read the entry and override.
         val now = clock()
+        failure?.let { return it }
         val current = state.commands.getValue(sequence)
         if (current.state != CommandState.DISPATCHING) return current.code?.let { RemoteFailure(it) }
         if (RemoteOverride.COMMANDS_OFF in state.overrides) {
@@ -313,7 +318,7 @@ internal class RemoteEngine(
     }
 
     fun settleInterruptedCommands(): RemoteFailure? {
-        if (journal.lost) return LOST
+        failure?.let { return it }
         val next = state.commands.mapValues { (sequence, entry) ->
             unsaved[sequence] ?: when {
                 sequence in liveDispatches -> entry
@@ -335,12 +340,11 @@ internal class RemoteEngine(
     }
 
     private fun saveCommand(entry: CommandEntry) = save(state.copy(commands = state.commands + (entry.sequence to entry)))
-    private fun save(next: JournalState) = if (journal.save(next)) null else WRITE_FAILED
+    private fun save(next: JournalState) = if (journal.save(next)) null else failure ?: WRITE_FAILED
 
     companion object {
         /** Android 10: the first release that can enforce every default control and the home filter. */
         const val MIN_SDK = 29
-        private val LOST = RemoteFailure("journal-lost")
         private val WRITE_FAILED = RemoteFailure("journal-write-failed")
         private val RECOVERY_WRITE_FAILED = RemoteFailure("recovery-commit-failed")
     }

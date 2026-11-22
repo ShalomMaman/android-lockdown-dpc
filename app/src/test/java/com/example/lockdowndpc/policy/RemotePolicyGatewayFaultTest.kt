@@ -212,7 +212,7 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
         assertEquals(unavailable, recovery.failure?.code)
         assertEquals(unavailable, RemotePolicyRuntime.dispatch(context, 1)?.code)
         assertEquals(listOf(unavailable), RemotePolicyRuntime.reconcile(context).errors())
-        assertFalse(RemotePolicyRuntime.journalLost(context))
+        assertNull(RemotePolicyRuntime.journalFailure(context))
         assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE).all.isEmpty())
         assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE)
             .all.isEmpty())

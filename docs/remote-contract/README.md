@@ -196,13 +196,21 @@ Other device rules:
 - **Kiosk.** A kiosk left in the store of a device with remote intent is not
   restored at boot, and its HOME screen neither locks the task nor starts the
   target. The journal pass turns it off.
-- **Lost journal.** A second file records that this device writes a journal. It
-  is stored before the first journal write and never taken back, and nothing
-  is written to the journal until it is stored. An enrolled device whose
-  journal reads back empty or damaged answers `journal-lost` everywhere, runs
-  no pass and accepts nothing. It keeps the restrictions of its last pass until
-  it is provisioned again. The same answer follows a first journal write that
-  fails after the marker was stored: the device fails closed.
+- **Journal protection.** The journal creation marker is stored first. The
+  guard in no-backup storage is atomically replaced before the journal whenever
+  its protected fields change. A device-specific Android Keystore HMAC
+  authenticates its fleet and device binding fingerprint, active root fingerprint,
+  and key-set, policy, recovery and command floors. Remote mode is committed
+  after the first successful bind. If only the guard write completes, matching
+  identities let the previous policy continue with the higher replay floors.
+- **Storage refusals.** A missing or damaged committed journal reports
+  `journal-lost`, even when all three journal stores are missing. A missing
+  guard reports `journal-guard-missing`. A corrupt guard or unusable MAC key
+  reports `journal-guard-unreadable`. An identity mismatch or a journal floor
+  ahead of the guard reports `journal-guard-mismatch`. These failures leave
+  existing restrictions in force. Before remote mode is committed, a creation
+  marker and a valid guard with initial floors can resume an interrupted first
+  bind to the same fleet, device and root when the journal file is absent.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 

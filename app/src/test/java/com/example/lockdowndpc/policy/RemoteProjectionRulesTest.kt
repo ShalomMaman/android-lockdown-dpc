@@ -11,8 +11,13 @@ import com.example.lockdowndpc.kiosk.KioskHostActivity
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
 import com.example.lockdowndpc.remote.JournalState
 import com.example.lockdowndpc.remote.Refused
+import com.example.lockdowndpc.remote.RemoteCrypto
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
+import java.io.File
+import java.security.KeyPairGenerator
+import java.security.spec.ECGenParameterSpec
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -23,6 +28,10 @@ import org.robolectric.Shadows
 
 /** What the remote pass refuses to take on trust: kiosk state, languages, hidden packages and a damaged journal. */
 class RemoteProjectionRulesTest : RemotePassFixture() {
+
+    @After fun restoreGuardMac() {
+        RemotePolicyRuntime.setGuardMacForTests(null)
+    }
 
     /** A kiosk state in the store is never fleet intent. The pass does not enter lock task on it. */
     @Test fun storedKioskIsNeverEnteredAndProjectionKeepsItOff() {
@@ -158,7 +167,7 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean("journal_created", true).commit())
 
-        assertTrue(RemotePolicyRuntime.journalLost(context))
+        assertEquals(RemoteFailure("journal-lost"), RemotePolicyRuntime.journalFailure(context))
         val result = onPolicyThread { RemotePolicyRuntime.reconcile(context) }
         assertEquals(listOf("journal-lost"), result.errors())
         assertFalse(result.applied())
@@ -173,10 +182,95 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
 
         // A device that never stored a journal is not lost. Before the baseline it stays contained.
         RemotePolicyRuntime.closeForTests()
-        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE)
-            .edit().clear().commit())
-        assertFalse(RemotePolicyRuntime.journalLost(context))
+        assertTrue(context.deleteSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS))
+        assertNull(RemotePolicyRuntime.journalFailure(context))
         assertFalse("journal-lost" in onPolicyThread { RemotePolicyRuntime.reconcile(context) }.errors())
+    }
+
+    @Test fun malformedMarkerFileDoesNotLookLikeFreshEnrolment() {
+        val marker = File(context.dataDir, "shared_prefs/${RemotePolicyRuntime.JOURNAL_MARKER_PREFS}.xml")
+        marker.parentFile?.mkdirs()
+        marker.writeText("<map>")
+
+        val root = f.keys.getValue("root") as Map<*, *>
+        assertEquals("journal-lost", RemotePolicyRuntime.journalFailure(context)?.code)
+        assertEquals("journal-lost", RemotePolicyRuntime.bindFleet(
+            context, f.binding, root["keyId"] as String, root["spki"] as String)?.code)
+    }
+
+    @Test fun committedRemoteModeWithNoJournalOrGuardRefusesBinding() {
+        assertTrue(context.getSharedPreferences(ManagementModeStore.MODE_PREFS, Context.MODE_PRIVATE)
+            .edit().putString(ManagementModeStore.MODE_KEY, ManagementMode.REMOTE.name).commit())
+
+        val root = f.keys.getValue("root") as Map<*, *>
+        assertEquals("journal-lost", RemotePolicyRuntime.journalFailure(context)?.code)
+        assertEquals("journal-lost", RemotePolicyRuntime.bindFleet(
+            context, f.binding, root["keyId"] as String, root["spki"] as String)?.code)
+    }
+
+    @Test fun runtimeWritesTheGuardAndSurfacesCorruptionBeforeAndAfterReopening() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val spki = newRoot()
+        val pinnedId = RemoteCrypto.keyId(spki)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
+        assertNull(RemotePolicyRuntime.journalFailure(context))
+
+        val file = File(context.noBackupFilesDir, RemotePolicyRuntime.JOURNAL_GUARD_FILE)
+        assertTrue(file.isFile)
+        file.writeText("corrupt")
+        for (reopened in listOf(false, true)) {
+            if (reopened) RemotePolicyRuntime.closeForTests()
+            assertEquals("journal-guard-unreadable", RemotePolicyRuntime.journalFailure(context)?.code)
+            assertEquals("journal-guard-unreadable", RemotePolicyRuntime.bindFleet(
+                context, binding.copy(fleetId = "another-fleet"), pinnedId, spki)?.code)
+            assertEquals(listOf("journal-guard-unreadable"), onPolicyThread { RemotePolicyRuntime.reconcile(context) }.errors())
+        }
+    }
+
+    @Test fun successfulBindingCommitsRemoteModeAndRefusesRebindingAfterAllJournalStoresAreLost() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        val spki = newRoot()
+        assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, RemoteCrypto.keyId(spki), spki))
+        assertEquals(ManagementMode.REMOTE, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.journalFailure(context))
+
+        RemotePolicyRuntime.closeForTests()
+        assertTrue(context.deleteSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS))
+        assertTrue(context.deleteSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS))
+        val guard = File(context.noBackupFilesDir, RemotePolicyRuntime.JOURNAL_GUARD_FILE)
+        assertTrue(guard.delete())
+        val otherRoot = newRoot()
+        assertEquals("journal-lost", RemotePolicyRuntime.bindFleet(
+            context, binding, RemoteCrypto.keyId(otherRoot), otherRoot)?.code)
+        assertFalse(guard.exists())
+        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE).all.isEmpty())
+    }
+
+    @Test fun sameBindingCanFinishAnInterruptedRemoteModeCommit() {
+        RemotePolicyRuntime.setGuardMacForTests(f::mac)
+        val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
+        val spki = newRoot()
+        val pinnedId = RemoteCrypto.keyId(spki)
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
+        assertTrue(context.deleteSharedPreferences(ManagementModeStore.MODE_PREFS))
+        RemotePolicyRuntime.closeForTests()
+
+        val otherRoot = newRoot()
+        assertEquals("doc-version-rollback", RemotePolicyRuntime.bindFleet(
+            context, binding, RemoteCrypto.keyId(otherRoot), otherRoot)?.code)
+        assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
+        assertNull(RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki))
+        assertEquals(ManagementMode.REMOTE, ManagementModeStore.read(context))
+        assertEquals("doc-version-rollback", RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki)?.code)
+    }
+
+    private fun newRoot(): String {
+        val key = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
+            .generateKeyPair().public
+        return RemoteCrypto.encode(key.encoded)
     }
 
     private companion object {

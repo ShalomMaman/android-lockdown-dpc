@@ -326,12 +326,17 @@ private fun AdminConsole(
         SideEffect { onSecureScreen(false) }
         // A damaged policy record is named, with what restores the device, instead
         // of leaving whoever holds it with a message that explains nothing.
-        val journalLost = remember { RemotePolicyRuntime.journalLost(context) }
+        var journalFailureCode by remember(context) { mutableStateOf<String?>(null) }
+        LaunchedEffect(context) {
+            journalFailureCode = withContext(Dispatchers.IO) { RemotePolicyRuntime.journalFailure(context)?.code }
+        }
         LockdownScreen(
             title = stringResource(R.string.app_name),
-            subtitle = stringResource(
-                if (journalLost) R.string.remote_policy_journal_lost else R.string.remote_policy_unavailable
-            ),
+            subtitle = when (val code = journalFailureCode) {
+                null -> stringResource(R.string.remote_policy_unavailable)
+                "journal-lost" -> stringResource(R.string.remote_policy_journal_lost)
+                else -> stringResource(R.string.remote_policy_guard_blocked, code)
+            },
         ) {}
         return
     }

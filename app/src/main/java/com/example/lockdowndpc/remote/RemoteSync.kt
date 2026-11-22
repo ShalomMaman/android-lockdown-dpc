@@ -55,7 +55,8 @@ internal class RemoteSync(private val verifier: RemoteVerifier, private val bind
                     continue
                 }
                 val failure = try {
-                    verifier.checkFloorsAndBinding(doc, trust().version, floor(type), binding.deviceId, exchange.nonce)
+                    val keySetFloor = maxOf(trust().version, floor(DocumentType.KEY_SET))
+                    verifier.checkFloorsAndBinding(doc, keySetFloor, floor(type), binding.deviceId, exchange.nonce)
                     accept(doc, exchange)
                 } catch (error: Refused) {
                     error.failure

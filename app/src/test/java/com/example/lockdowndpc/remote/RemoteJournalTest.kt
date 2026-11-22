@@ -127,7 +127,7 @@ class RemoteJournalTest {
         }
     }
 
-    @Test fun failedNewestPolicyWritePreservesPolicyFloorAndDoesNotBlockCommandStep() {
+    @Test fun failedNewestPolicyWritePreservesThePolicyAndDoesNotBlockCommandStep() {
         val old = f.generation("policy-1")
         val harness = f.harness(JournalState(trust = f.trust("keyset-2", "successor"),
             policy = f.policy("policy-1"), verified = old))
@@ -140,6 +140,7 @@ class RemoteJournalTest {
         assertEquals(old, harness.engine.state.generation())
         assertEquals(old, harness.engine.state.verified)
         assertEquals(1L, harness.engine.state.floor(DocumentType.POLICY))
+        assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
         assertEquals(2L, harness.engine.state.floor(DocumentType.COMMAND))
     }
 
@@ -227,6 +228,12 @@ class RemoteJournalTest {
             }
             f.check(case, dispatchResult(harness.engine.state.commands[sequence], failure?.code, calls,
                 harness.engine.state.commandFloor, case))
+            if (fault == "accept-write") {
+                harness.restart()
+                assertNull(harness.engine.failure)
+                assertEquals(sequence, harness.journal.floor(DocumentType.COMMAND))
+                assertNull(harness.engine.state.commands[sequence])
+            }
         }
     }
 
@@ -351,18 +358,41 @@ class RemoteJournalTest {
         assertEquals(choice, harness.engine.state.overrides)
     }
 
-    @Test fun failedKeySetOrRecoveryWriteLeavesTrustFloorsAndVerifierUnchanged() {
-        for ((trust, document) in listOf(f.trust() to "keyset-2", f.trust("keyset-2", "successor") to "recovery-2")) {
-            val initial = JournalState(trust = trust)
-            val harness = f.harness(initial)
-            harness.memory.failCommit = true
-            assertEquals(document, "journal-write-failed", harness.receive(document).decisions.single().failure?.code)
-            assertEquals(document, initial, harness.engine.state)
-            harness.restart()
-            assertEquals(document, initial, harness.engine.state)
-            // The same document is still acceptable once the store works again.
-            assertNull(document, harness.receive(document).decisions.single().failure)
-        }
+    @Test fun failedJournalWriteDuringRootRotationFailsClosedInProcessAndAfterRestart() {
+        val initial = JournalState(trust = f.trust())
+        val harness = f.harness(initial)
+        harness.memory.failCommit = true
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.receive("keyset-2").decisions.single().failure)
+        assertEquals(initial, harness.engine.state)
+        harness.restart()
+        assertEquals(initial, harness.engine.state)
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.receive("keyset-2").failure)
+        assertEquals(2L, harness.journal.floor(DocumentType.KEY_SET))
+    }
+
+    @Test fun failedRecoveryWriteKeepsTheVerifierUnchangedAndRetainsTheGuardedFloor() {
+        val initial = JournalState(trust = f.trust("keyset-2", "successor"))
+        val harness = f.harness(initial)
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", harness.receive("recovery-2").decisions.single().failure?.code)
+        assertEquals(initial, harness.engine.state)
+        harness.restart()
+        assertEquals(initial, harness.engine.state)
+        assertEquals(2L, harness.journal.floor(DocumentType.RECOVERY))
+        assertEquals("doc-version-rollback", harness.receive("recovery-2").decisions.single().failure?.code)
+    }
+
+    @Test fun failedSameRootKeySetWriteKeepsTheOldKeysButRejectsHeadersBelowTheGuardedFloor() {
+        val initial = JournalState(trust = f.trust(), binding = f.binding)
+        val harness = f.harness(initial)
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", harness.receive("keyset-2-current-root").decisions.single().failure?.code)
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertEquals(initial.trust, harness.engine.state.trust)
+        assertEquals(2L, harness.journal.floor(DocumentType.KEY_SET))
+        assertEquals("doc-version-rollback", harness.receive("lock-1").decisions.single().failure?.code)
     }
 
     /** A5: a recovery that lands after the DISPATCHING commit still cancels the command. */
@@ -498,8 +528,8 @@ class RemoteJournalTest {
         assertEquals("journal-lost", bind()?.code)
     }
 
-    /** The marker is stored and the very first journal write fails. The device fails closed: it reads as lost. */
-    @Test fun failedFirstJournalWriteAfterTheMarkerReadsAsLostNotNew() {
+    /** The first journal write failed after the marker and guard were stored. */
+    @Test fun failedFirstJournalWriteCanResumeOnlyTheRecordedBinding() {
         val root = f.keys.obj("root")
         val harness = RemoteFixtures.Harness(MemoryPreferences(emptyMap<String, Any>()), f.noProjection)
         fun bind() = harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)
@@ -507,9 +537,13 @@ class RemoteJournalTest {
         harness.memory.failCommit = true
         assertEquals("journal-write-failed", bind()?.code)
         harness.restart()
-        assertTrue(harness.engine.lost)
-        assertEquals("journal-lost", bind()?.code)
+        assertFalse(harness.engine.lost)
+        assertEquals("journal-write-failed", harness.engine.bindFleet(f.verifier, f.binding.copy(fleetId = "other-fleet"),
+            root.text("keyId"), root.text("spki"), 35)?.code)
         assertNull(harness.engine.state.binding)
+        assertNull(bind())
+        harness.restart()
+        assertEquals(f.binding, harness.engine.state.binding)
     }
 
     @Test fun enrolmentIsRefusedBelowAndroid10() {
