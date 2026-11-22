@@ -2,16 +2,18 @@
 
 import argparse
 import base64
+import io
 import json
 import os
-from pathlib import Path
+import secrets
 import stat
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from unittest import mock
 
 import provisioning_payload
-
 
 COMPONENT = "il.co.shalommaman.deviceguard/com.example.lockdowndpc.admin.LockdownAdminReceiver"
 SIGNER_HEX = "25507e47f49cbacc8cad66ee4967b2bae3f22bbd26fbb4587e9326626669014b"
@@ -38,9 +40,23 @@ def _namespace(**overrides: object) -> argparse.Namespace:
         "aapt2": None,
         "apksigner": None,
         "force": False,
+        "remote_server": None,
+        "remote_root": None,
+        "remote_tls_pin": None,
+        "remote_fleet": None,
+        "enrolment_ticket_env": None,
+        "enrolment_tickets_file_env": None,
     }
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
+
+
+def _remote_options() -> dict[str, object]:
+    return {
+        "remote_server": "https://127.0.0.1/fleet",
+        "remote_root": provisioning_payload.publish_update.base64url(bytes(range(32))),
+        "remote_fleet": "Synthetic fleet",
+    }
 
 
 class ProvisioningPayloadTest(unittest.TestCase):
@@ -242,6 +258,114 @@ class ProvisioningPayloadTest(unittest.TestCase):
 
             self.assertEqual("skipped-by-operator", summary["apkVerification"])
             self.assertNotIn("versionCode", summary)
+            self.assertNotIn("enrolmentTicketEmbedded", summary)
+            self.assertNotIn(provisioning_payload.EXTRA_ADMIN_EXTRAS_BUNDLE, json.loads(output.read_bytes()))
+
+    def test_remote_payload_uses_dedicated_string_extras_and_never_echoes_the_ticket(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "remote.json"
+            ticket = secrets.token_urlsafe(24)
+            root = _remote_options()["remote_root"]
+            pin1 = provisioning_payload.publish_update.base64url(bytes([1]) * 32)
+            pin2 = provisioning_payload.publish_update.base64url(bytes([2]) * 32)
+            stdout, stderr = io.StringIO(), io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"TEST_ENROLMENT_TICKET": ticket}),
+                redirect_stdout(stdout),
+                redirect_stderr(stderr),
+            ):
+                result = provisioning_payload.main([
+                    "--admin-component", COMPONENT, "--download-location", DOWNLOAD_LOCATION,
+                    "--signer-sha256", SIGNER_HEX, "--skip-apk-verification", "--output", str(output),
+                    "--remote-server", "https://127.0.0.1/fleet", "--remote-root", root,
+                    "--remote-fleet", "Synthetic fleet", "--remote-tls-pin", pin1,
+                    "--remote-tls-pin", pin2, "--enrolment-ticket-env", "TEST_ENROLMENT_TICKET",
+                ])
+            self.assertEqual(result, 0, stderr.getvalue())
+            self.assertNotIn(ticket, stdout.getvalue() + stderr.getvalue())
+            summary = json.loads(stdout.getvalue())
+            self.assertTrue(summary["enrolmentTicketEmbedded"])
+            self.assertIn("umask 077", summary["qrEncodeCommand"])
+            self.assertIn("cmp -s", summary["qrVerifyCommand"])
+            self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+            bundle = json.loads(output.read_bytes())[provisioning_payload.EXTRA_ADMIN_EXTRAS_BUNDLE]
+            self.assertEqual(bundle, {
+                "dg.remote.v": "1", "dg.remote.server": "https://127.0.0.1/fleet",
+                "dg.remote.root": root, "dg.remote.fleet": "Synthetic fleet",
+                "dg.remote.tls": f"{pin1},{pin2}", "dg.remote.ticket": ticket,
+            })
+
+    def test_remote_batch_requires_owner_only_input_and_writes_one_private_payload_per_line(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tickets"
+            output = root / "batch"
+            tickets = [secrets.token_urlsafe(24), secrets.token_urlsafe(24)]
+            source.write_text("\r\n".join(tickets), encoding="ascii")
+            source.chmod(0o640)
+            args = _namespace(output=output, enrolment_tickets_file_env="TEST_ENROLMENT_PATH",
+                              **_remote_options())
+            with mock.patch.dict(os.environ, {"TEST_ENROLMENT_PATH": str(source)}):
+                with self.assertRaisesRegex(provisioning_payload.ProvisioningError, "mode-0600"):
+                    provisioning_payload.create(args)
+                source.chmod(0o600)
+                summary = provisioning_payload.create(args)
+                self.assertTrue(summary["enrolmentTicketEmbedded"])
+                self.assertEqual([item["ticketLine"] for item in summary["payloads"]], [1, 2])
+                self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o700)
+                for item, ticket in zip(summary["payloads"], tickets):
+                    self.assertNotIn(ticket, json.dumps(summary))
+                    payload = output / item["file"]
+                    self.assertEqual(stat.S_IMODE(payload.stat().st_mode), 0o600)
+                    self.assertEqual(json.loads(payload.read_bytes())[
+                        provisioning_payload.EXTRA_ADMIN_EXTRAS_BUNDLE]["dg.remote.ticket"], ticket)
+
+    def test_remote_batch_errors_report_only_line_numbers_and_publish_no_partial_output(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tickets"
+            output = root / "batch"
+            ticket = secrets.token_urlsafe(24)
+            invalid = secrets.token_urlsafe(23)
+            source.write_text(f"{ticket}\n{invalid}\n", encoding="ascii")
+            source.chmod(0o600)
+            args = _namespace(output=output, enrolment_tickets_file_env="TEST_ENROLMENT_PATH",
+                              **_remote_options())
+            with mock.patch.dict(os.environ, {"TEST_ENROLMENT_PATH": str(source)}):
+                for second, error in ((invalid, "invalid"), (ticket, "repeated")):
+                    source.write_text(f"{ticket}\n{second}\n", encoding="ascii")
+                    with self.assertRaisesRegex(provisioning_payload.ProvisioningError,
+                                                f"{error} enrolment ticket on line 2") as raised:
+                        provisioning_payload.create(args)
+                    self.assertFalse(output.exists())
+                    self.assertNotIn(ticket, str(raised.exception))
+                    self.assertNotIn(invalid, str(raised.exception))
+
+    def test_remote_options_refuse_partial_settings_and_unsafe_urls_and_pins(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "remote.json"
+            ticket = secrets.token_urlsafe(24)
+            defaults = {**_remote_options(), "enrolment_ticket_env": "TEST_ENROLMENT_TICKET"}
+            attempts = (
+                {"remote_root": None}, {"remote_root": "bad-fingerprint"},
+                {"enrolment_ticket_env": None}, {"enrolment_ticket_env": "TEST_MISSING_TICKET"},
+                {"enrolment_ticket_env": "TEST_BAD_TICKET"},
+                {"enrolment_tickets_file_env": "TEST_ENROLMENT_TICKET"},
+                {"remote_server": "https://127.0.0.1/api?query"},
+                {"remote_server": "https://127.0.0.1/api#fragment"},
+                {"remote_server": "https://user@127.0.0.1/api"},
+                {"remote_server": "https://127.0.0.1:65536/api"},
+                {"remote_tls_pin": ["bad-fingerprint"]},
+                {"remote_tls_pin": [defaults["remote_root"]] * 3},
+            )
+            with mock.patch.dict(os.environ, {"TEST_ENROLMENT_TICKET": ticket,
+                                             "TEST_BAD_TICKET": ticket[:-1]}):
+                for overrides in attempts:
+                    with self.subTest(overrides=overrides):
+                        with self.assertRaises(provisioning_payload.ProvisioningError) as raised:
+                            provisioning_payload.create(_namespace(output=output, **(defaults | overrides)))
+                        self.assertNotIn(ticket[:-1], str(raised.exception))
+                        self.assertFalse(output.exists())
 
     def test_wifi_passphrase_is_read_only_from_the_named_environment_variable(self) -> None:
         secret = "provisioning-network-passphrase"
@@ -314,6 +438,9 @@ class ProvisioningPayloadTest(unittest.TestCase):
             ["site=north", "site=south"],
             ["admin_pin=1234"],
             ["recoveryCode=abcd"],
+            ["dg.remote.server=yes"],
+            ["DG.Remote.fleet=yes"],
+            ["anotherTicket=abcd"],
             ["kiosk_password=hunter2"],
             [f"note={'x' * 513}"],
         )
