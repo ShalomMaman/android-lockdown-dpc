@@ -2,7 +2,6 @@ package com.example.lockdowndpc.policy;
 
 import android.app.admin.DevicePolicyManager;
 import android.content.Intent;
-import android.os.Build;
 import android.os.PersistableBundle;
 
 import androidx.core.content.IntentCompat;
@@ -12,22 +11,15 @@ import com.example.lockdowndpc.BuildConfig;
 public final class RemoteEnrolmentGate {
     private RemoteEnrolmentGate() {}
 
-    private static volatile boolean openedByTest;
+    /**
+     * Nothing in this application writes this field, so in a shipped build the
+     * gate is the build constant alone. The JVM tests set it by reflection, from
+     * the test tree, to run the gated code. A source test keeps it that way.
+     */
+    private static boolean openedByTest;
 
     public static boolean permits() {
         return BuildConfig.REMOTE_ENROLMENT_ENABLED || openedByTest;
-    }
-
-    /**
-     * Lets JVM tests run the gated code. It refuses to work on a device: only
-     * the Robolectric runtime reports this build fingerprint, and a source test
-     * keeps every caller in the test tree.
-     */
-    static void openForTests(boolean open) {
-        if (!"robolectric".equals(Build.FINGERPRINT)) {
-            throw new IllegalStateException("The enrolment gate is a build constant");
-        }
-        openedByTest = open;
     }
 
     /** Only local provisioning is implemented. Unreadable extras are refused. */

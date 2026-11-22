@@ -38,6 +38,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.security.AppLabelSanitizer;
@@ -139,6 +140,14 @@ public final class KioskHostActivity extends AppCompatActivity {
             // screen was in the background. Release and step aside.
             releaseLockTask();
             finish();
+            return;
+        }
+        if (ManagementModeStore.hasCommittedRemoteIntent(this)) {
+            // A stored kiosk on a remote-managed device is not fleet intent. This
+            // screen neither locks the task nor starts the target on it; the
+            // journal pass turns the stored kiosk off and removes this screen.
+            releaseLockTask();
+            showError(getString(R.string.remote_policy_unavailable));
             return;
         }
 

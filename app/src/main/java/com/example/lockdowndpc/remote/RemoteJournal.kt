@@ -85,10 +85,13 @@ internal const val MAX_FINISHED_COMMANDS = 16
 /**
  * One credential-protected file and one live instance on the policy thread.
  *
- * [marker] is a second file that only ever records that a journal was stored.
- * It is written after the first successful journal commit and never taken back,
- * so an empty or unreadable journal on an enrolled device is told apart from a
- * device that has never had one.
+ * [marker] is a second file that only ever records that this device writes a
+ * journal. It is stored before the first journal write and never taken back,
+ * and no journal write is attempted until it is stored. A journal therefore
+ * never exists without its marker, so an empty or unreadable journal is told
+ * apart from a device that has never had one. The price is paid on the safe
+ * side: if the marker is stored and the very first journal write then fails,
+ * the device reads as lost and has to be provisioned again.
  */
 internal class RemoteJournal(private val preferences: SharedPreferences, private val marker: SharedPreferences) {
     /** A journal that existed and cannot be read. Its floors and trust are unknown, so nothing is accepted. */
@@ -106,25 +109,26 @@ internal class RemoteJournal(private val preferences: SharedPreferences, private
     }
 
     internal fun save(next: JournalState): Boolean {
-        if (lost) return false
+        if (lost || !mark()) return false
         val bounded = next.bounded()
         if (!write(STATE, JournalCodec.encode(bounded))) return false
         state = bounded
-        mark()
         return true
     }
 
-    fun stamp(target: Generation): Boolean = !lost && write(STAMP, target.sha256)
+    fun stamp(target: Generation): Boolean = !lost && mark() && write(STAMP, target.sha256)
     fun stamped(target: Generation): Boolean = !lost && preferences.getString(STAMP, null) == target.sha256
 
-    /** Set once, after the journal itself is stored. A failed attempt is repeated on the next save. */
-    private fun mark() {
-        if (marked) return
-        marked = try {
-            marker.edit().putBoolean(CREATED, true).commit()
-        } catch (_: RuntimeException) {
-            false
+    /** Stored once, before any journal write. Until it is, nothing is written to the journal. */
+    private fun mark(): Boolean {
+        if (!marked) {
+            marked = try {
+                DurablePreferences.commit(marker, marker.edit().putBoolean(CREATED, true), CREATED)
+            } catch (_: RuntimeException) {
+                false
+            }
         }
+        return marked
     }
 
     private fun write(key: String, value: String): Boolean = try {

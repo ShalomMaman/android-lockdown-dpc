@@ -1,9 +1,15 @@
 package com.example.lockdowndpc.policy
 
+import android.app.ActivityManager
+import android.app.Application
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import com.example.lockdowndpc.kiosk.KioskConfigStore
 import com.example.lockdowndpc.kiosk.KioskController
+import com.example.lockdowndpc.kiosk.KioskHostActivity
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState
+import com.example.lockdowndpc.remote.JournalState
 import com.example.lockdowndpc.remote.Refused
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
@@ -12,6 +18,8 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.robolectric.Robolectric
+import org.robolectric.Shadows
 
 /** What the remote pass refuses to take on trust: kiosk state, languages, hidden packages and a damaged journal. */
 class RemoteProjectionRulesTest : RemotePassFixture() {
@@ -32,10 +40,45 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertFalse(dpm.isLockTaskPermitted(context.packageName))
     }
 
+    /**
+     * A device with remote intent and a kiosk left in its store starts: nothing
+     * restores that kiosk, and the kiosk HOME screen neither locks the task nor
+     * starts the target, ahead of the journal pass that turns the kiosk off.
+     */
+    @Test fun storedKioskIsNotReEnteredAtBootWhileRemoteIntentIsSet() {
+        assertTrue(context.getSharedPreferences("kiosk_policy", Context.MODE_PRIVATE).edit()
+            .putString("kiosk_state", "ACTIVE").putString("kiosk_mode", "SINGLE_SITE")
+            .putString("kiosk_site_url", "https://example.com/").commit())
+        val activityManager = context.getSystemService(ActivityManager::class.java)
+
+        // What the boot receiver queues on the policy thread.
+        val restored = onPolicyThread { KioskController.restoreAfterBoot(context) }
+        assertFalse(restored.allowed())
+        assertEquals("remote-kiosk-unsupported", restored.reason())
+        assertFalse(dpm.isLockTaskPermitted(context.packageName))
+
+        // What the system does at boot when the kiosk screen is HOME.
+        context.packageManager.setComponentEnabledSetting(ComponentName(context, KioskHostActivity::class.java),
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP)
+        Robolectric.buildActivity(KioskHostActivity::class.java).setup().use { host ->
+            assertEquals(ActivityManager.LOCK_TASK_MODE_NONE, activityManager.lockTaskModeState)
+            assertNull(Shadows.shadowOf(context as Application).nextStartedActivity)
+            assertFalse(host.get().isFinishing)
+        }
+        assertFalse(dpm.isLockTaskPermitted(context.packageName))
+        assertEquals(KioskState.ACTIVE, KioskConfigStore.readState(context))
+
+        // The journal pass is what removes it.
+        commit(policy())
+        assertVerified()
+        assertEquals(KioskState.OFF, KioskConfigStore.readState(context))
+    }
+
     /** A value outside what this build knows is refused. It is never read as the default. */
     @Test fun unknownLanguageOrKioskModeIsRefusedNotDefaulted() {
+        val android13 = RemotePolicyProjection(context, sdk = 33)
         fun refusal(extra: Map<String, Any?>): RemoteFailure? = try {
-            projection.validate(policy(extra = extra))
+            android13.validate(policy(extra = extra))
             null
         } catch (refused: Refused) {
             refused.failure
@@ -46,17 +89,29 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertNull(refusal(mapOf("locale" to "iw", "kiosk" to mapOf("mode" to "OFF"))))
     }
 
-    /** Before Android 13 only AppCompat holds the language, and it can only repeat what it was asked. */
-    @Test fun languageThatCannotBeReadBackLeavesTheGenerationUnverified() {
-        commit(policy(extra = mapOf("locale" to "en")))
-        assertFalse(pass().verified)
-        assertEquals(listOf("remote-locale-unverified"), errors())
-        assertEquals(previous, verified())
+    /**
+     * Before Android 13 only AppCompat holds the language, and it can only repeat
+     * what it was asked. A policy with a language is refused there, so it can
+     * never hold a device on an unverifiable generation.
+     */
+    @Test fun languageIsRefusedBeforeAndroid13AndAPolicyWithoutOneVerifies() {
+        val fresh = f.harness(JournalState(), projection)
+        for (language in listOf("en", "he", "iw")) {
+            assertEquals(RemoteFailure("doc-field-invalid", "/policy/locale"),
+                fresh.engine.commitBaseline(policy(extra = mapOf("locale" to language))))
+        }
+        assertNull(fresh.engine.state.policy)
+        assertNull(f.harness(JournalState(), RemotePolicyProjection(context, sdk = 33)).engine
+            .commitBaseline(policy(extra = mapOf("locale" to "iw"))))
 
-        // Asking for the device default afterwards cannot be read back either.
+        // A journal that already holds such a policy does not project it, and the next policy verifies.
+        commit(policy(extra = mapOf("locale" to "en")))
+        assertEquals(RemoteFailure("doc-field-invalid", "/policy/locale"), pass().failure)
+        assertNull(projection.lastResult)
         replace(policy())
-        assertFalse(pass().verified)
-        assertEquals(listOf("remote-locale-unverified"), errors())
+        assertVerified()
+        assertEquals(setOf("choice"),
+            context.getSharedPreferences("remote_policy_locale", Context.MODE_PRIVATE).all.keys)
     }
 
     /** A system package the fleet accepted by signer and version can be hidden, verified again and shown again. */

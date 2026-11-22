@@ -163,31 +163,46 @@ never verify or safely leave:
   remote console has no recovery entry yet. Remote kiosk comes back with that
   console;
 - a `locale` or kiosk mode this build does not know. Nothing unknown is read as
-  the default.
+  the default;
+- any `locale` on Android 10–12. Only Android 13 and later keep the application
+  language where a pass can read it back, so the admin tool must not set
+  `locale` for older devices.
 
 Other device rules:
 
 - **Android 10 or later.** `bindFleet` answers `enrolment-sdk-unsupported`
   below API 29, where the default controls cannot all be enforced.
-- **Language.** Android 13 and later read the application language back from
-  the platform. On Android 10–12 only a policy without `locale`, on a device
-  that was never given one, verifies. The admin tool should not set `locale`
-  for those devices.
 - **No local extras.** The strict remote pass applies only what the fleet
   policy carries. It does not apply night or work schedules, built-in block
   exemptions, the Chrome exemption or the credentials lock
   (`DISALLOW_CONFIG_CREDENTIALS`) that belongs to it. A fleet that needs the
   credentials lock has no field for it in v1.
-- **Filter changes.** The VPN lockdown in force, and the application behind it,
-  stay until a pass has verified the replacement. A teardown removes the PAC
-  proxy and the certificates first and releases the VPN last.
+- **Filter changes.** The device is never left with less than it had. A new
+  filter is brought up and read back before anything older is removed. If any
+  part fails after the VPN lockdown or the proxy already moved, the previous
+  lockdown and proxy are put back and read back, and a certificate that the
+  attempt added is withdrawn. The application behind the VPN in force is not
+  hidden until the replacement is verified. A teardown removes the PAC proxy
+  and the certificates, then the uninstall block, the routing settings and the
+  profile restrictions, each read back, and releases the VPN lockdown as its
+  last Android call. The cleanup list is capped at 16 superseded filters. The
+  cap refuses another replacement and never refuses turning the filter off.
 - **Releases.** A pass records in the journal which hidden packages it is about
-  to show. If that pass does not end verified, they are hidden again, at once
-  or by the next pass after a crash.
-- **Lost journal.** A second file records that a journal was ever stored. An
-  enrolled device whose journal reads back empty or damaged answers
-  `journal-lost` everywhere, runs no pass and accepts nothing. It keeps the
-  restrictions of its last pass until it is provisioned again.
+  to show, including a hidden filter application it needs for the VPN
+  read-back. If that pass does not end verified, they are hidden again, at once
+  or at the next start, before any command is handled. The application behind
+  the VPN lockdown in force is the one exception: it stays visible, and
+  recorded, until a pass verifies.
+- **Kiosk.** A kiosk left in the store of a device with remote intent is not
+  restored at boot, and its HOME screen neither locks the task nor starts the
+  target. The journal pass turns it off.
+- **Lost journal.** A second file records that this device writes a journal. It
+  is stored before the first journal write and never taken back, and nothing
+  is written to the journal until it is stored. An enrolled device whose
+  journal reads back empty or damaged answers `journal-lost` everywhere, runs
+  no pass and accepts nothing. It keeps the restrictions of its last pass until
+  it is provisioned again. The same answer follows a first journal write that
+  fails after the marker was stored: the device fails closed.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 

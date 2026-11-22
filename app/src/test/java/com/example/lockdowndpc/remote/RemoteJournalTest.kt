@@ -468,21 +468,48 @@ class RemoteJournalTest {
         }
     }
 
-    @Test fun deviceThatNeverStoredAJournalIsNewEvenAfterAFailedFirstWrite() {
+    /** No journal write happens before its marker is stored, so a journal can never be lost without leaving one. */
+    @Test fun journalIsNeverWrittenBeforeItsMarkerIsStored() {
         val root = f.keys.obj("root")
-        val harness = RemoteFixtures.Harness(MemoryPreferences(emptyMap<String, Any>()), f.noProjection)
-        assertFalse(harness.engine.lost)
-        harness.memory.failCommit = true
-        assertEquals("journal-write-failed", harness.engine.bindFleet(
-            f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)?.code)
+        val harness = RemoteFixtures.Harness(
+            MemoryPreferences(emptyMap<String, Any>()).apply { failCommit = false }, f.noProjection)
+        fun bind() = harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)
+
+        // The marker cannot be stored. The save reports failure and the journal file is never touched.
+        harness.marker.failCommit = true
+        assertEquals("journal-write-failed", bind()?.code)
+        assertFalse(harness.journal.save(JournalState(commandFloor = 5)))
+        assertFalse(harness.journal.stamp(f.generation("policy-1")))
+        assertTrue(harness.memory.preferences().all.isEmpty())
+        assertEquals(JournalState(), harness.engine.state)
+        // There is no journal to lose, so a device that reads as new here is new.
         harness.restart()
         assertFalse(harness.engine.lost)
-        assertEquals(JournalState(), harness.engine.state)
-        assertNull(harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35))
+        assertTrue(harness.memory.preferences().all.isEmpty())
+
+        // With the marker stored the journal is written, and from then on an empty journal is a lost one.
+        harness.marker.failCommit = false
+        assertNull(bind())
+        assertTrue(harness.marker.preferences().getBoolean("journal_created", false))
         harness.restart()
         assertEquals(f.binding, harness.engine.state.binding)
         harness.damageJournal(null)
         assertTrue(harness.engine.lost)
+        assertEquals("journal-lost", bind()?.code)
+    }
+
+    /** The marker is stored and the very first journal write fails. The device fails closed: it reads as lost. */
+    @Test fun failedFirstJournalWriteAfterTheMarkerReadsAsLostNotNew() {
+        val root = f.keys.obj("root")
+        val harness = RemoteFixtures.Harness(MemoryPreferences(emptyMap<String, Any>()), f.noProjection)
+        fun bind() = harness.engine.bindFleet(f.verifier, f.binding, root.text("keyId"), root.text("spki"), 35)
+        assertFalse(harness.engine.lost)
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", bind()?.code)
+        harness.restart()
+        assertTrue(harness.engine.lost)
+        assertEquals("journal-lost", bind()?.code)
+        assertNull(harness.engine.state.binding)
     }
 
     @Test fun enrolmentIsRefusedBelowAndroid10() {

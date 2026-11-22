@@ -50,9 +50,7 @@ internal object RemotePolicyRuntime {
             if (current.engine.state.policy == null) {
                 return LockdownPolicyController.applyRemoteContainment(context)
             }
-            val failure = current.engine.settleInterruptedCommands()
-            if (failure != null) return failed(failure)
-            val pass = current.engine.ensureProjected()
+            val pass = current.engine.reconcile()
             if (pass.failure != null) return failed(pass.failure)
             val result = current.projection.lastResult
             if (pass.verified && result != null) result
@@ -118,7 +116,11 @@ internal object RemotePolicyRuntime {
         PolicyReconciliationCoordinator.callOnPolicyThread {
             try {
                 val app = context.applicationContext
-                if (remoteEnabled(app)) open(app).work() else blocked
+                if (!remoteEnabled(app)) return@callOnPolicyThread blocked
+                val current = open(app)
+                // Whatever the caller came for, an exposed package is hidden again first.
+                current.engine.revokeReleases()
+                current.work()
             } catch (_: Exception) {
                 failed
             }

@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
+import android.net.ConnectivityManager
 import com.example.lockdowndpc.admin.LockdownAdminReceiver
 import com.example.lockdowndpc.remote.CommittedPolicy
 import com.example.lockdowndpc.remote.Generation
@@ -16,6 +17,7 @@ import com.example.lockdowndpc.remote.RemoteEngine
 import com.example.lockdowndpc.remote.RemoteFixtures
 import com.example.lockdowndpc.remote.WireJson
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.function.Supplier
 import org.junit.After
 import org.junit.Assert.assertTrue
@@ -54,7 +56,7 @@ abstract class RemotePassFixture {
         assertTrue(context.createDeviceProtectedStorageContext()
             .getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit())
-        RemoteEnrolmentGate.openForTests(true)
+        RemoteTestGate.open(true)
         AdminAuthority.CommittedPolicy.bindJournal {
             if (::harness.isInitialized) harness.engine.state.generation()?.sha256 else null
         }
@@ -63,7 +65,7 @@ abstract class RemotePassFixture {
     }
 
     @After fun leaveRemoteMode() {
-        RemoteEnrolmentGate.openForTests(false)
+        RemoteTestGate.open(false)
         AdminAuthority.CommittedPolicy.bindJournal(null)
         RemotePolicyRuntime.closeForTests()
     }
@@ -84,6 +86,10 @@ abstract class RemotePassFixture {
     internal fun pass(): RemoteEngine.Pass = onPolicyThread { harness.engine.ensureProjected() }
     internal fun errors(): List<String> = projection.lastResult?.errors().orEmpty()
     internal fun hidden(name: String): Boolean = dpm.isApplicationHidden(admin, name)
+    internal fun hasCa(certificate: String): Boolean =
+        dpm.hasCaCertInstalled(admin, Base64.getDecoder().decode(certificate))
+    internal fun pacUrl(): String =
+        context.getSystemService(ConnectivityManager::class.java).defaultProxy?.pacFileUrl?.toString().orEmpty()
 
     internal fun <T> onPolicyThread(work: () -> T): T =
         PolicyReconciliationCoordinator.callOnPolicyThread(Supplier { work() })
@@ -101,14 +107,14 @@ abstract class RemotePassFixture {
         "apps" to mapOf("mode" to "ALLOW_SELECTED", "allowed" to allowed)
     ) + (if (filter == null) emptyMap() else mapOf("homeFilter" to filter)) + extra
 
-    internal fun filter(vpn: String, pac: String = PAC): JsonObject = mapOf(
+    internal fun filter(vpn: String, pac: String = PAC, ca: String? = null): JsonObject = mapOf(
         "enabled" to true,
         "vpnPackage" to vpn,
         "vpnSignerSha256" to SIGNER_DIGEST,
         "pacUrl" to pac,
         "routing" to mapOf("tailnetId" to "Ttest1", "loginUrl" to "https://routing.example.org",
             "exitNodeId" to "test-exit", "organizationName" to "TEST ONLY")
-    )
+    ) + (if (ca == null) emptyMap() else mapOf("caCertificate" to ca))
 
     internal fun install(name: String, system: Boolean = false, versionCode: Long = 1) {
         val application = ApplicationInfo()
@@ -133,6 +139,21 @@ abstract class RemotePassFixture {
         const val READER = "com.example.reader"
         const val SECOND_READER = "com.example.secondreader"
         const val PAC = "https://filter.example.org/proxy.pac"
+        const val OTHER_PAC = "https://other.example.org/proxy.pac"
+
+        // TEST ONLY: two self-signed CA certificates made for these tests. Their private keys were never kept.
+        const val CA_A = "MIIBdTCCARygAwIBAgIUUnEsv7lxtf2nv40iRrS7ThCQDIIwCgYIKoZIzj0EAwIwIDEeMBwGA1UEAwwVVEVTVCBPTkxZIGZp" +
+            "bHRlciBDQSBBMCAXDTI2MTEyMjE1MTU0NloYDzIxMjYxMDI5MTUxNTQ2WjAgMR4wHAYDVQQDDBVURVNUIE9OTFkgZmlsdGVy" +
+            "IENBIEEwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAATMeSI2tE43m+kMWfIzxRKWuJgOByPUxcL4m0Ihp9RSNGpaP2YEhnb6" +
+            "ie8sHHtNwt1pOj4YJpd+4IpAXSN6ygxwozIwMDAdBgNVHQ4EFgQU9WFdZAt0i05RaeEnY3d8R8F89CMwDwYDVR0TAQH/BAUw" +
+            "AwEB/zAKBggqhkjOPQQDAgNHADBEAiBjM6NjPsMw/TIBVGlvDDq92BDQylaT2oss7vgHKjbSnwIgVGVQXGKDMstL+Ih8UND/" +
+            "/wR3bQG8wUJzddr/bg0ZLNo="
+        const val CA_B = "MIIBdjCCARygAwIBAgIUIF4Q9mzGM3sw6NMuQ94JXBfa/AMwCgYIKoZIzj0EAwIwIDEeMBwGA1UEAwwVVEVTVCBPTkxZIGZp" +
+            "bHRlciBDQSBCMCAXDTI2MTEyMjE1MTU0NloYDzIxMjYxMDI5MTUxNTQ2WjAgMR4wHAYDVQQDDBVURVNUIE9OTFkgZmlsdGVy" +
+            "IENBIEIwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAS2y01LUlqbspxqTXVyzcM2yC6Ri2QAiMzooTputw1Fh/joZqtvGyi5" +
+            "led6E2WNpiqwaFhzZzdPritKleoQWA7HozIwMDAdBgNVHQ4EFgQUDNvE1JO6OnCdwqQagECZIbPApsYwDwYDVR0TAQH/BAUw" +
+            "AwEB/zAKBggqhkjOPQQDAgNIADBFAiBP9MsZYf5upE9x7S4hUlr5IFGnZpi06C26Gtd4SlmLtQIhANh26WstqqqvjIHCP2ZS" +
+            "fhkmXShmMY2Mu+GqBKFw0fTa"
         val SIGNER = byteArrayOf(1, 2, 3)
         val SIGNER_DIGEST: String = MessageDigest.getInstance("SHA-256").digest(SIGNER)
             .joinToString("") { "%02x".format(it.toInt() and 255) }

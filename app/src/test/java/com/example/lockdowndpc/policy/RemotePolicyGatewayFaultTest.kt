@@ -1,6 +1,8 @@
 package com.example.lockdowndpc.policy
 
 import android.content.Context
+import com.example.lockdowndpc.remote.CommandEntry
+import com.example.lockdowndpc.remote.CommandState
 import com.example.lockdowndpc.remote.JournalState
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
@@ -113,6 +115,45 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
         assertNextPassVerifiesAndReleases()
     }
 
+    /**
+     * The next start has more to deal with than the exposed package: a command the
+     * dead process left mid-dispatch, and a journal that refuses every write. The
+     * package is hidden again first, before any of that can stop the pass.
+     */
+    @Test fun exposedPackageIsHiddenAgainBeforeCommandHandlingEvenWhenTheJournalRefusesWrites() {
+        device.afterUnhide = Consumer { throw ProcessDeath() }
+        try {
+            pass()
+            fail("The pass must reach the first release")
+        } catch (_: ProcessDeath) {
+            // One package is visible.
+        }
+        assertEquals(1, listOf(READER, SECOND_READER).count { !hidden(it) })
+        harness.restart()
+        assertTrue(harness.journal.save(harness.engine.state.copy(commands = mapOf(
+            7L to CommandEntry(7, "lock_now", RemoteTime(1, 1), CommandState.DISPATCHING)))))
+        harness.restart()
+        device.afterUnhide = Consumer { }
+        harness.memory.failCommit = true
+
+        val refused = onPolicyThread { harness.engine.reconcile() }
+
+        assertEquals("journal-write-failed", refused.failure?.code)
+        assertTrue(hidden(READER))
+        assertTrue(hidden(SECOND_READER))
+        // Nothing could be written: the command is still unsettled and the record still names the packages.
+        assertEquals(CommandState.DISPATCHING, harness.engine.state.commands[7]?.state)
+        assertEquals(setOf(READER, SECOND_READER), harness.engine.state.releases)
+        assertEquals(previous, verified())
+
+        harness.memory.failCommit = false
+        assertTrue(onPolicyThread { harness.engine.reconcile() }.verified)
+        assertFalse(hidden(READER))
+        assertFalse(hidden(SECOND_READER))
+        assertEquals(CommandState.OUTCOME_UNKNOWN, harness.engine.state.commands[7]?.state)
+        assertTrue(harness.engine.state.releases.isEmpty())
+    }
+
     /** Every release succeeded and the verified hash could not be stored: nothing stays visible on the old hash. */
     @Test fun failedVerifiedWriteHidesWhatThePassReleased() {
         var journalCommits = 0
@@ -160,7 +201,7 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
 
     /** The build gate is off: with a marker present, no runtime entry point reaches the journal. */
     @Test fun gateOffRefusesEveryRuntimeEntryPointAndWritesNothing() {
-        RemoteEnrolmentGate.openForTests(false)
+        RemoteTestGate.open(false)
         assertFalse(RemoteEnrolmentGate.permits())
         val unavailable = RemotePolicyApplier.UNAVAILABLE
         assertEquals(unavailable, RemotePolicyRuntime.bindFleet(context, f.binding, f.binding.deviceId, "")?.code)
@@ -197,7 +238,7 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
         // A closed authority.
         assertFalse(onPolicyThread { withAuthority { it }.let { AdminAuthority.CommittedPolicy.permits(context, it) } })
         // The gate off: no authority, no projection and no pass.
-        RemoteEnrolmentGate.openForTests(false)
+        RemoteTestGate.open(false)
         assertFalse(onPolicyThread { permitted() })
         val refused = onPolicyThread {
             withAuthority {

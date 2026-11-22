@@ -130,6 +130,18 @@ internal class RemoteEngine(
         return failure
     }
 
+    /**
+     * The lifecycle entry point. What an unverified pass exposed is hidden again
+     * before anything else is looked at, so a command that cannot be settled or
+     * a journal that refuses writes cannot keep a package visible.
+     */
+    fun reconcile(): Pass {
+        if (journal.lost) return Pass(false, LOST)
+        revokeReleases()
+        settleInterruptedCommands()?.let { return Pass(false, it) }
+        return ensureProjected()
+    }
+
     fun ensureProjected(): Pass {
         if (journal.lost) return Pass(false, LOST)
         if (reconciling) return Pass(false)
@@ -176,8 +188,12 @@ internal class RemoteEngine(
         }
     }
 
-    /** A package stays in the record until it is proven hidden or a pass verifies. */
-    private fun revokeReleases() {
+    /**
+     * A package stays in the record until it is proven hidden or a pass verifies.
+     * The device call does not depend on the journal taking the write that follows it.
+     */
+    fun revokeReleases() {
+        if (journal.lost) return
         val exposed = state.releases
         if (exposed.isEmpty()) return
         val stuck = try {

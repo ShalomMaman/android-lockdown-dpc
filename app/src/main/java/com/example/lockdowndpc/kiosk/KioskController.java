@@ -18,6 +18,7 @@ import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.policy.BuiltInExemptionsController;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 import com.example.lockdowndpc.policy.AdminAuthority;
 import com.example.lockdowndpc.policy.AuthorizedPolicyWriter;
@@ -196,6 +197,12 @@ public final class KioskController {
         KioskConfigStore.Settings settings = KioskConfigStore.read(app);
         if (settings.state() == KioskState.OFF) {
             return Result.denied(KioskState.OFF, "kiosk-off");
+        }
+        if (ManagementModeStore.hasCommittedRemoteIntent(app)) {
+            // A remote-managed device has no kiosk: a fleet policy cannot start
+            // one, so a stored one is not fleet intent. It is not entered again
+            // here, ahead of the journal pass that turns it off.
+            return Result.denied(settings.state(), "remote-kiosk-unsupported");
         }
         KioskConfigValidator.Validation validation = validate(app);
         KioskStateMachine.Outcome outcome = KioskStateMachine.transition(new KioskStateMachine.Request(

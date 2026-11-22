@@ -19,7 +19,10 @@ import com.example.lockdowndpc.ui.LanguageChoice
 import java.util.function.BooleanSupplier
 import java.util.function.Predicate
 
-internal class RemotePolicyProjection(private val context: Context) : RemoteProjection {
+internal class RemotePolicyProjection(
+    private val context: Context,
+    private val sdk: Int = Build.VERSION.SDK_INT
+) : RemoteProjection {
     var lastResult: LockdownPolicyController.PolicyResult? = null
         private set
 
@@ -86,8 +89,8 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
             filter = filter,
             locale = when (policy["locale"]) {
                 null -> LanguageChoice.SYSTEM
-                "en" -> LanguageChoice.ENGLISH
-                "he", "iw" -> LanguageChoice.HEBREW
+                "en" -> languageOnThisRelease(LanguageChoice.ENGLISH)
+                "he", "iw" -> languageOnThisRelease(LanguageChoice.HEBREW)
                 else -> refuse("doc-field-invalid", "/policy/locale")
             }
         )
@@ -138,25 +141,22 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
         LockdownPolicyController.revokeRemoteReleases(context, packages)
 
     /**
-     * Android 13 and later keep the application locale in the platform, where it
-     * can be read back. Earlier releases keep it only inside AppCompat, which
-     * reports what was asked of it and not what is on screen. There, only a
-     * device that was never given a language counts as verified.
+     * Android 13 and later keep the application language in the platform, where
+     * a pass can read it back. Earlier releases keep it only inside AppCompat,
+     * which reports what was asked of it and not what is on screen. A language
+     * there could be stored and never verified, so the policy is refused instead.
      */
+    private fun languageOnThisRelease(choice: LanguageChoice): LanguageChoice {
+        if (sdk < Build.VERSION_CODES.TIRAMISU) refuse("doc-field-invalid", "/policy/locale")
+        return choice
+    }
+
+    /** Before Android 13 the only choice a policy can carry is the device default, which needs no call. */
     private fun applyLocale(): Boolean {
         val prefs = context.getSharedPreferences(LOCALE_PREFS, Context.MODE_PRIVATE)
         val locale = LanguageChoice.valueOf(requireNotNull(prefs.getString(LOCALE, null)))
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            return AppLocales.applyPolicyChoice(context, locale)
-        }
-        val everRequested = prefs.getBoolean(LEGACY_LOCALE_REQUESTED, false)
-        if (locale == LanguageChoice.SYSTEM && !everRequested) return true
-        if (!everRequested && !DurablePreferences.commit(
-                prefs, prefs.edit().putBoolean(LEGACY_LOCALE_REQUESTED, true), LEGACY_LOCALE_REQUESTED)) {
-            return false
-        }
-        AppLocales.applyPolicyChoice(context, locale)
-        return false
+        if (sdk < Build.VERSION_CODES.TIRAMISU) return locale == LanguageChoice.SYSTEM
+        return AppLocales.applyPolicyChoice(context, locale)
     }
 
     private fun filterSettings(filter: JsonObject?): HomeFilterPolicy.Settings {
@@ -175,6 +175,5 @@ internal class RemotePolicyProjection(private val context: Context) : RemoteProj
     private companion object {
         const val LOCALE_PREFS = "remote_policy_locale"
         const val LOCALE = "choice"
-        const val LEGACY_LOCALE_REQUESTED = "legacy_locale_requested"
     }
 }

@@ -144,7 +144,11 @@ final class HomeFilterStore {
         if (target.configured()) retiredFilters.remove(encodeConfig(target.config()));
         // Each entry is a cleanup this device still owes, so none is dropped. A
         // fleet that keeps replacing an unverified filter is stopped here instead.
-        if (retired.size() > MAX_RETIRED || retiredFilters.size() > MAX_RETIRED) return false;
+        // Turning the filter off is never stopped: that is the way out, and the
+        // recovery path, and its one extra entry is cleared by the same teardown.
+        if (target.enabled() && (retired.size() > MAX_RETIRED || retiredFilters.size() > MAX_RETIRED)) {
+            return false;
+        }
         // Keep the configuration that could still be live across projection and process failures.
         HomeFilterPolicy.Settings settings = !target.enabled() && previous.configured()
                 ? new HomeFilterPolicy.Settings(previous.config(), false, null, false) : target;

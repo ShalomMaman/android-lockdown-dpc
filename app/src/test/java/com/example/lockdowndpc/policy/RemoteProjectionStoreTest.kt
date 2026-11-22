@@ -40,11 +40,11 @@ class RemoteProjectionStoreTest {
         assertTrue(device.getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit())
         assertFalse(RemoteEnrolmentGate.permits())
-        RemoteEnrolmentGate.openForTests(true)
+        RemoteTestGate.open(true)
         try {
             everySite(app, sites)
         } finally {
-            RemoteEnrolmentGate.openForTests(false)
+            RemoteTestGate.open(false)
             AdminAuthority.CommittedPolicy.bindJournal(null)
         }
     }
@@ -60,7 +60,8 @@ class RemoteProjectionStoreTest {
                 override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
                     stores[name]?.preferences() ?: super.getSharedPreferences(name, mode)
             }
-            val writer = RemotePolicyProjection(wrapper)
+            // The fixture policy carries a language, which only Android 13 and later can read back.
+            val writer = RemotePolicyProjection(wrapper, sdk = 33)
             var passes = 0
             val projection = object : RemoteProjection {
                 override fun project(policy: JsonObject, target: Generation) = writer.project(policy, target)

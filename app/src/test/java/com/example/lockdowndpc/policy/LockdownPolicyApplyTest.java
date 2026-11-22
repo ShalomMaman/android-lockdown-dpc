@@ -271,6 +271,26 @@ public class LockdownPolicyApplyTest {
         boolean refuseVpn;
         Runnable beforeVpnWrite = () -> {};
         boolean refuseProxyChange;
+        boolean refuseCaInstall;
+        boolean refuseUninstallUnblock;
+        boolean refuseManagedConfigChange;
+
+        @Implementation
+        protected void setUninstallBlocked(ComponentName admin, String packageName, boolean blocked) {
+            if (!blocked && refuseUninstallUnblock) {
+                return;
+            }
+            super.setUninstallBlocked(admin, packageName, blocked);
+        }
+
+        @Implementation
+        protected void setApplicationRestrictions(ComponentName admin, String packageName,
+                                                  android.os.Bundle restrictions) {
+            if (refuseManagedConfigChange) {
+                throw new SecurityException("Managed configuration refused");
+            }
+            super.setApplicationRestrictions(admin, packageName, restrictions);
+        }
         /** Packages Android refuses to make visible. */
         final Set<String> refuseUnhide = new HashSet<>();
         /** Runs after a package became visible, to fail or stop a pass between two releases. */
@@ -351,6 +371,9 @@ public class LockdownPolicyApplyTest {
 
         @Implementation
         protected boolean installCaCert(ComponentName admin, byte[] certificate) {
+            if (refuseCaInstall) {
+                return false;
+            }
             return caCertificates.add(HexFormat.of().formatHex(certificate));
         }
 

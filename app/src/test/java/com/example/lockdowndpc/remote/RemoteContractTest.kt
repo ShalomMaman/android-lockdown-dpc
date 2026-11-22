@@ -189,14 +189,16 @@ class RemoteContractTest {
         assertTrue(f.contractSchema.readBytes().contentEquals(f.packagedSchema.readBytes()))
     }
 
-    /** The build gate can be opened only from the test tree, and only under Robolectric. */
+    /** Nothing in the application can open the build gate: the test switch is declared, read once and never written. */
     @Test fun productionCodeNeverOpensTheEnrolmentGate() {
-        val callers = f.mainSources.walkTopDown().filter { it.isFile && it.readText().contains("openForTests") }
+        val mentions = f.mainSources.walkTopDown().filter { it.isFile && it.readText().contains("openedByTest") }
             .map { it.name }.toList()
-        assertEquals(listOf("RemoteEnrolmentGate.java"), callers)
+        assertEquals(listOf("RemoteEnrolmentGate.java"), mentions)
         val gate = File(f.mainSources, "com/example/lockdowndpc/policy/RemoteEnrolmentGate.java").readText()
-        assertEquals(1, Regex("openForTests").findAll(gate).count())
-        assertTrue(gate.contains("\"robolectric\".equals(Build.FINGERPRINT)"))
+        assertEquals(listOf("private static boolean openedByTest;",
+            "return BuildConfig.REMOTE_ENROLMENT_ENABLED || openedByTest;"),
+            gate.lines().map { it.trim() }.filter { "openedByTest" in it })
+        assertFalse(gate.contains("setAccessible") || gate.contains("getDeclaredField"))
     }
 
     /** Only tests may trust the published fixture keys: no production caller can switch the refusal off. */

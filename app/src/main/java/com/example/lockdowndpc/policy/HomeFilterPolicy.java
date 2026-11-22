@@ -303,7 +303,8 @@ public final class HomeFilterPolicy {
 
     /** Removes only settings issued for a superseded filter, preserving an active replacement. */
     static boolean reconcileRetiredConfig(Config previous, Config active, Gateway gateway) {
-        return retireProxy(previous, active, gateway) && retireVpn(previous, active, gateway);
+        return retireProxy(previous, active, gateway) && releaseVpnSettings(previous, active, gateway)
+                && clearVpnLockdown(previous, active, gateway);
     }
 
     /** The first half of a teardown: the superseded PAC proxy. The VPN lockdown is untouched. */
@@ -313,14 +314,17 @@ public final class HomeFilterPolicy {
                         () -> gateway.setProxy(null), true) == State.CONFIRMED;
     }
 
-    /** The last half: the superseded VPN lockdown, its uninstall block and its managed settings. */
-    static boolean retireVpn(Config previous, Config active, Gateway gateway) {
+    /**
+     * The second step: the superseded uninstall block and managed routing
+     * settings, each read back. The VPN lockdown is still untouched, so a
+     * refusal here leaves it in force.
+     */
+    static boolean releaseVpnSettings(Config previous, Config active, Gateway gateway) {
         String packageName = previous.vpnPackage();
-        if (active == null || !packageName.equals(active.vpnPackage())) {
-            if (removeIfMatching(packageName, gateway::alwaysOnPackage,
-                    () -> gateway.setVpn(null), true) != State.CONFIRMED) return false;
-            if (verify(() -> gateway.retainVpnUninstallBlock(packageName) || !gateway.uninstallBlocked(packageName),
-                    () -> gateway.setVpnUninstallBlocked(packageName, false), true) != State.CONFIRMED) return false;
+        if ((active == null || !packageName.equals(active.vpnPackage()))
+                && verify(() -> gateway.retainVpnUninstallBlock(packageName) || !gateway.uninstallBlocked(packageName),
+                        () -> gateway.setVpnUninstallBlocked(packageName, false), true) != State.CONFIRMED) {
+            return false;
         }
         if (previous.routing() == null) return true;
         Map<String, Object> retired = new LinkedHashMap<>(previous.routing().restrictions());
@@ -330,6 +334,20 @@ public final class HomeFilterPolicy {
         return retired.isEmpty() || verify(
                 () -> retired.entrySet().stream().noneMatch(gateway.managedConfig(packageName).entrySet()::contains),
                 () -> gateway.setManagedConfig(packageName, retired, false), true) == State.CONFIRMED;
+    }
+
+    /** The filter's profile restrictions, released and read back before the VPN lockdown goes. */
+    static boolean releaseProfileRestrictions(Gateway gateway) {
+        return verify(() -> gateway.restrictionsMatch(false),
+                () -> gateway.setProfileRestrictions(false), true) == State.CONFIRMED;
+    }
+
+    /** The last Android call of a teardown: the superseded VPN lockdown itself. */
+    static boolean clearVpnLockdown(Config previous, Config active, Gateway gateway) {
+        String packageName = previous.vpnPackage();
+        return (active != null && packageName.equals(active.vpnPackage()))
+                || removeIfMatching(packageName, gateway::alwaysOnPackage,
+                        () -> gateway.setVpn(null), true) == State.CONFIRMED;
     }
 
     private static State evaluateVpn(Settings settings, int sdk, Gateway gateway, boolean write) {

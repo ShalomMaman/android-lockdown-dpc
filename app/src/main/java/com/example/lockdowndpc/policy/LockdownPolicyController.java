@@ -102,9 +102,22 @@ public final class LockdownPolicyController {
         }
         ComponentName admin = LockdownAdminReceiver.componentName(context);
         Set<String> exposed = new LinkedHashSet<>();
+        String liveVpn;
+        try {
+            liveVpn = dpm.getAlwaysOnVpnPackage(admin);
+        } catch (RuntimeException unreadable) {
+            return new LinkedHashSet<>(packages);
+        }
         for (String packageName : packages) {
             try {
                 if (!isInstalled(context.getPackageManager(), packageName)) {
+                    continue;
+                }
+                if (packageName.equals(liveVpn)) {
+                    // The application behind the VPN lockdown that is in force. Hiding it
+                    // would take the filter down, so it stays visible and stays recorded
+                    // until a pass verifies or another VPN takes over.
+                    exposed.add(packageName);
                     continue;
                 }
                 if (!dpm.isApplicationHidden(admin, packageName)) {
@@ -303,7 +316,7 @@ public final class LockdownPolicyController {
         boolean networkVerified = false;
         try {
             networkVerified = strictRemote
-                    ? HomeFilterController.reconcileRemote(context, dpm, admin, enforcedFilter, errors)
+                    ? HomeFilterController.reconcileRemote(context, dpm, admin, enforcedFilter, recordReleases, errors)
                     : HomeFilterController.reconcile(context, dpm, admin, errors, passFilter);
         } catch (RuntimeException exception) {
             errors.add("home-filter:reconcile:" + exception.getClass().getSimpleName());
