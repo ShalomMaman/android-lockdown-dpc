@@ -72,6 +72,8 @@ def hash_hex(raw):
 SCHEMA = load(CONTRACT / "v1.schema.json")
 PROTOCOL = load(CONTRACT / "protocol.json")
 DOC_ORDER = PROTOCOL["sync"]["order"]
+REANCHOR_TYPE = PROTOCOL["reanchor"]["type"]
+PAYLOAD_TYPES = [*DOC_ORDER, REANCHOR_TYPE]
 NONCE_LIMIT = PROTOCOL["sync"]["nonce"]["maxAgeMsExclusive"]
 STORES = PROTOCOL["journal"]["projectionWrites"]
 SIGNED = vectors("signed-documents")
@@ -185,7 +187,7 @@ def schema_error(schema, value, path=""):
 
 def payload_error(document):
     kind = document.get("type") if isinstance(document, dict) else None
-    if isinstance(kind, str) and kind not in DOC_ORDER:
+    if isinstance(kind, str) and kind not in PAYLOAD_TYPES:
         return "doc-type-unexpected", "/type"
     if not isinstance(kind, str):
         return FIELD_INVALID, "/type"
@@ -654,7 +656,7 @@ class RemoteContractTest(unittest.TestCase):
         section = design.split("### 5.6 Failure codes", 1)[1].split("## 6. Policy model", 1)[0]
         self.assertEqual(PROTOCOL["failureCodes"]["section5.6"], re.findall(r"`([a-z-]+)`", section))
         self.assertEqual(DOC_ORDER, ["keyset", "fleet-policy", "recovery", "command"])
-        self.assertEqual(SCHEMA["oneOf"], [{"$ref": "#/$defs/" + kind} for kind in DOC_ORDER])
+        self.assertEqual(SCHEMA["oneOf"], [{"$ref": "#/$defs/" + kind} for kind in PAYLOAD_TYPES])
         self.assertEqual(PROTOCOL["dispatch"]["kinds"], SCHEMA["$defs"]["command"]["properties"]["kind"]["enum"])
         codes = PROTOCOL["hashes"]["generationSha256"]["overrideCodes"]
         self.assertEqual(codes, sorted(set(codes)))
@@ -696,6 +698,39 @@ class RemoteContractTest(unittest.TestCase):
                 self.assertEqual(envelope["keyId"], key["keyId"])
                 self.assertTrue(signature_valid(key["spki"], payload, decode(envelope["signature"])))
                 self.assertEqual(payload == canonical(document), case["canonicalPayload"])
+
+    def test_reanchor_vectors(self):
+        vector = vectors("re-anchor")
+        envelope = vector["envelope"]
+        key = KEYS[vector["signer"]]
+        self.assertIsNone(envelope_error(canonical(envelope)))
+        self.assertLessEqual(len(canonical(envelope)), PROTOCOL["reanchor"]["maxEncodedBytes"])
+        raw = decode(envelope["payload"])
+        document = parse_wire(raw)
+        self.assertIsNone(payload_error(document))
+        self.assertIsNone(schema_error(SCHEMA, document))
+        self.assertEqual(document["type"], REANCHOR_TYPE)
+        self.assertEqual(document["rootSpki"], key["spki"])
+        self.assertEqual(document["rootFingerprint"], envelope["keyId"])
+        self.assertEqual(envelope["keyId"], key["keyId"])
+        self.assertTrue(signature_valid(key["spki"], raw, decode(envelope["signature"])))
+        self.assertEqual(set(document["floors"]), set(DOC_ORDER))
+        self.assertEqual(document["floorPayloadSha256"]["fleet-policy"], hash_hex(PAYLOADS["policy-6"]))
+        sync = vectors("sync")
+        for case in vector["cases"]:
+            with self.subTest(vector=case["id"]):
+                pin = KEYS[case.get("key", vector["signer"])]["keyId"]
+                binding = (case.get("fleetId", sync["fleetId"]),
+                           KEYS[case.get("deviceKey", sync["deviceKey"])]["keyId"])
+                expected_nonce = case.get("nonce", sync["nonces"]["a"])
+                failure = None
+                if envelope["keyId"] != pin:
+                    failure = "re-anchor-root-mismatch"
+                elif (document["fleetId"], document["deviceId"]) != binding:
+                    failure = "re-anchor-binding-mismatch"
+                elif document["nonce"] != expected_nonce:
+                    failure = "re-anchor-nonce-invalid"
+                self.assertEqual(failure, case["expectedFailure"])
 
     def test_document_shapes(self):
         cases = vectors("document-shapes")

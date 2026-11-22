@@ -41,6 +41,7 @@ when a vector file or section is added without a Kotlin test that replays it.
 | `review-successor` | `bBiF1hHDuE3iZhUHVRdArxFAUamsy29m94F8d7jc000` |
 | `review-policy` | `Wt5dqGUiOGEOmQnsjREkEhaDTi-Gwutlowxos8oCfYw` |
 | `review-server` | `GcH_iCSKuBg3eIxngwpuYtYDy-GlCwjyfzHejbgNCZg` |
+| `reanchor-root` | `zFpgccW8b2hDsgIYtmCFrf3OcBrhtx8ahFN8skRU-Pg` |
 
 ## Wire decisions for review
 
@@ -205,14 +206,15 @@ Other device rules:
   before any policy, including the version-zero baseline, is committed.
   `stateSha256` digests the canonical persisted journal state, including full
   trust, recovery verifier and usage, lockout, overrides and pending app
-  releases. It excludes exactly two top-level fields:
+  releases. The seal treats two top-level fields specially:
 
   - `commands` contains command entries and outcomes that are updated and
     trimmed independently. A platform call requires a live acceptance in the
     current process, and the durable sequence floor stays sealed.
   - `verified` supplies the last verified generation for reapply command
-    reports. Every projection still requires its own live read-back, and the
-    release ledger stays sealed.
+    reports. Ordinary journals exclude it, and rebuilt journals seal it
+    because it also gates commands and local recovery. Every projection still
+    requires live read-back.
 - **Pending writes and rotation.** The guard is atomically replaced before a
   protected journal write. The `pending` map is keyed by document type and
   records the version and SHA-256 of the canonical signed payload. For key sets
@@ -237,12 +239,10 @@ Other device rules:
   durable journal matches the guard's `current` snapshot and cleanup resumes.
   Remote mode is committed after the first successful bind.
 - **Storage refusals.** A missing or damaged committed journal reports
-  `journal-lost`, even when all three journal stores are missing. A missing
+  `journal-lost`, even when all journal files are missing. A missing
   guard reports `journal-guard-missing`. A corrupt guard or unusable MAC key
-  reports `journal-guard-unreadable`. The loss of the Keystore HMAC key fails
-  closed permanently for that enrolment. The key cannot be recreated for an
-  existing guard, and the device must be reset and re-enrolled. Guard formats
-  1 through 3 fail closed with `journal-guard-reenrolment-needed`. A journal that
+  reports `journal-guard-unreadable`. Guard formats 1 through 3 fail closed
+  with `journal-guard-reenrolment-needed`. A journal that
   matches neither authenticated snapshot reports `journal-guard-mismatch`.
   These failures leave existing restrictions in force. Before remote mode
   is committed, a creation marker and a valid guard with initial floors can
@@ -254,17 +254,74 @@ Other device rules:
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 
+## Console re-anchor
+
+A re-anchor is a local signed recovery document for the five storage refusals
+above. It is separate from the four sync document types and has no sync version
+or response slot. The console displays a copyable 32-byte random nonce,
+encoded as unpadded base64url. The challenge exists only in the device process
+and expires after 15 minutes of elapsed time or on a reboot. The device consumes
+it before attempting any authorized write. After an interrupted write the
+operator requests a new document for the new challenge.
+
+The operator looks up the device and fleet in the existing fleet inventory.
+The original binding root signs a standard `dg-signed/1` envelope no larger
+than 65,536 bytes. The closed payload contains these fields.
+
+- `schemaVersion: 1`, `type: "re-anchor"`, `fleetId`, `deviceId`, `nonce`,
+  `rootFingerprint` and `rootSpki`. The root fingerprint is the key ID of
+  the original binding SPKI. The device verifies its independently stored
+  binding fingerprint, `base64url(SHA-256(canonical([fleetId, deviceId])))`.
+- `floors` with the latest issued versions for `keyset`, `fleet-policy`,
+  `recovery` and `command`, including issued versions the device may never
+  have received. Use zero for a type with no issuance. The device refuses
+  any lower value than it can recover locally, including a reserved version.
+  When local floors are unreadable the fleet's issuance inventory is required.
+- Optional `floorPayloadSha256` with `keyset` and/or `fleet-policy` entries.
+  These are lowercase hex SHA-256 digests of the exact decoded payload bytes.
+  To resend the latest keyset or policy at its floor, its digest must be in
+  this root-signed object. Without the digest, issue a version above the floor.
+  A recovery code and a command always need versions above their floors.
+  This preserves strict replay protection when two signed payloads share a version.
+
+At bind, a third 96-byte no-backup record stores the original root fingerprint,
+binding fingerprint and an HMAC under an independent Android Keystore alias.
+The journal also carries the binding's HMAC proof and the authenticated guard
+records the original root fingerprint separately from the current rotation
+root. A readable authenticated guard or a journal with a valid binding proof
+is sufficient. With only the third record, the operator also enters the
+original root fingerprint and the device compares it with the recorded value.
+Unreadable or missing evidence requires a factory reset and re-enrolment.
+Readable legacy guards can contribute higher floors. A legacy version-zero
+authenticated binding still proves the original root and a healthy one can
+save the third record on upgrade. A legacy binding that has already advanced
+its keyset may lack proof of the original root. A public checksum or a plain
+journal cannot authenticate a root.
+
+After verification, a durable mode record puts the device in `ENROLLING` and
+the fresh guard reserves every floor before writing the new journal. A missing
+guard HMAC key can be created at this point. An interruption keeps the device
+locked down and preserves any floors already reserved. The rebuild discards
+the old policy, recovery verifier, overrides, and command history. A verifiable
+pending package-release ledger is retained for the next policy pass, so an
+interrupted release can still be reversed. Recovery and the waiting period make
+no policy or restriction writes. The original root must sign the next keyset
+even if the old live trust had rotated. Recovery codes and command processing
+resume after the first replacement policy passes live read-back. The device
+then returns to `REMOTE`.
+
 ## Fixture layout
 
 | File | Coverage |
 | --- | --- |
-| `vectors/signed-documents.json` | Signed instances for all document types and key roles, including distinct exact encodings of the same policy |
+| `vectors/signed-documents.json` | Signed sync documents and key roles, including distinct exact encodings of the same policy |
 | `vectors/document-shapes.json` | Valid and invalid decoded shapes, one mutation per vector, Later sections 14.1–14.9, malformed JSON and signed-envelope limits |
 | `vectors/hashes.json` | The two section 5.3 goldens, override hash input order and wire order, canonical bytes, baseline, exact signed payloads and an older verified generation |
 | `vectors/sync.json` | Nonce lifecycle and exact cutoff, order, current and successor roots, signer/device/version refusals and progression after a refusal |
 | `vectors/dispatch.json` | Dispatch commits, crashes, recovery before and after the call, secure lock evidence and reapply outcomes |
 | `vectors/journal.json` | The eight section 5.5 crash scenarios, each projection checkpoint, write failures and section 15 read-back requirements |
 | `vectors/recovery.json` | Code derivation, lockout, atomic-use outcomes, replay, in-flight commands and override lifetime |
+| `vectors/re-anchor.json` | Original-root signature, fleet and device binding, console nonce and replay floors |
 
 Shape fixtures apply a JSON Pointer mutation to a decoded signed document.
 Their outcomes describe schema and decoder validation. `device-id-range`

@@ -1,0 +1,35 @@
+{
+  "signer": "reanchor-root",
+  "envelope": {
+    "format": "dg-signed/1",
+    "keyId": "zFpgccW8b2hDsgIYtmCFrf3OcBrhtx8ahFN8skRU-Pg",
+    "payload": "eyJkZXZpY2VJZCI6IjBON1VkcFpHU3l3cW9MQ1phOWRjSTVCRTdRdFRCMDRTYUV5a1Btd2U3NEkiLCJmbGVldElkIjoidGVzdC1mbGVldCIsImZsb29yUGF5bG9hZFNoYTI1NiI6eyJmbGVldC1wb2xpY3kiOiIzZTIzNjY1ZGEwN2EzOGEwYjFhZWZmZDEwY2MwY2RiNGY4ZTMxODY2MTRhMWE0MjAwMGQ0ZDI3MzQ3ODJkMWFhIn0sImZsb29ycyI6eyJjb21tYW5kIjo3LCJmbGVldC1wb2xpY3kiOjYsImtleXNldCI6MiwicmVjb3ZlcnkiOjR9LCJub25jZSI6IkFBRUNBd1FGQmdjSUNRb0xEQTBPRHhBUkVoTVVGUllYR0JrYUd4d2RIaDgiLCJyb290RmluZ2VycHJpbnQiOiJ6RnBnY2NXOGIyaERzZ0lZdG1DRnJmM09jQnJodHg4YWhGTjhza1JVLVBnIiwicm9vdFNwa2kiOiJNRmt3RXdZSEtvWkl6ajBDQVFZSUtvWkl6ajBEQVFjRFFnQUVpeFNFQVA5QU93dHl0cGsxRDdHMmwwbDZiMDVTV25TVWtycU5nZ3I4cERDaUZOb2dSYktUYTFSSlNoLXZsMUgtcW5XOE5PNExkOFRiOEU3NjJHY29FUSIsInNjaGVtYVZlcnNpb24iOjEsInR5cGUiOiJyZS1hbmNob3IifQ",
+    "signature": "MEUCIQDXJH3i-RmUGrJ9YWpdx7r5XfBoQYQd8p3uN-FM5CnmIQIgdEFGpF-HY3v9iowcKJrjfH6pq2jXnZDDY4PvPBAr4yI"
+  },
+  "cases": [
+    {
+      "id": "pinned-root-and-binding",
+      "expectedFailure": null
+    },
+    {
+      "id": "foreign-root",
+      "key": "root",
+      "expectedFailure": "re-anchor-root-mismatch"
+    },
+    {
+      "id": "wrong-device",
+      "deviceKey": "other-device",
+      "expectedFailure": "re-anchor-binding-mismatch"
+    },
+    {
+      "id": "wrong-fleet",
+      "fleetId": "other-fleet",
+      "expectedFailure": "re-anchor-binding-mismatch"
+    },
+    {
+      "id": "wrong-challenge",
+      "nonce": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+      "expectedFailure": "re-anchor-nonce-invalid"
+    }
+  ]
+}

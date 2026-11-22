@@ -192,6 +192,7 @@ class RemoteContractTest {
             "sync" to setOf("fleetId", "deviceKey", "nonces", "nonceCases", "batches"),
             "journal" to setOf("cases", "readBackCases"),
             "dispatch" to setOf("initial", "cases"),
+            "re-anchor" to setOf("signer", "envelope", "cases"),
             "recovery" to setOf("testCode", "boot", "elapsedMs", "callsMadeOnPolicyThread", "initial", "cases")
         )
         assertEquals(replayed.keys.map { "$it.json" }.toSet(), f.vectorFiles())
@@ -222,7 +223,7 @@ class RemoteContractTest {
         assertEquals(listOf("RemoteVerifier.kt"), mentions)
         val verifier = File(f.mainSources, "com/example/lockdowndpc/remote/RemoteVerifier.kt").readText()
         assertTrue(verifier.contains("private val allowFixtureKeys: Boolean = false"))
-        assertEquals(12, RemoteVerifier.TEST_KEY_IDS.size)
+        assertEquals(13, RemoteVerifier.TEST_KEY_IDS.size)
         val readme = f.readme
         for (id in RemoteVerifier.TEST_KEY_IDS) assertTrue(id, readme.contains("`$id`"))
     }

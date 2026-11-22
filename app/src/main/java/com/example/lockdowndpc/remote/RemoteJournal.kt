@@ -65,7 +65,11 @@ internal data class JournalState(
     val commands: Map<Long, CommandEntry> = emptyMap(),
     val verified: Generation? = null,
     /** Packages a pass made visible before its generation was verified. */
-    val releases: Set<String> = emptySet()
+    val releases: Set<String> = emptySet(),
+    val recoveryPin: JournalRecoveryPin? = null,
+    /** A nonempty map marks a rebuilt journal and retains its independent minimum versions. */
+    val reanchorFloors: Map<DocumentType, Long> = emptyMap(),
+    val floorPayloadSha256: Map<DocumentType, String> = emptyMap()
 ) {
     /** Replay protection needs only the floor. A short tail of outcomes is kept for the next report. */
     fun bounded(): JournalState {
@@ -75,7 +79,14 @@ internal data class JournalState(
     }
 
     fun generation() = policy?.let { Generation(it.version, it.hash, overrides) }
-    fun floor(type: DocumentType): Long = when (type) {
+    val reanchored: Boolean get() = reanchorFloors.isNotEmpty()
+
+    fun floor(type: DocumentType): Long {
+        val applied = appliedFloor(type)
+        return reanchorFloors[type]?.let { maxOf(applied, it) } ?: applied
+    }
+
+    fun appliedFloor(type: DocumentType): Long = when (type) {
         DocumentType.KEY_SET -> trust?.version ?: 0
         DocumentType.POLICY -> policy?.version ?: 0
         DocumentType.RECOVERY -> recoveryVersion
@@ -92,11 +103,13 @@ internal class RemoteJournal(
     private val guardStore: RemoteJournalGuardStore,
     private val journalFileAbsent: () -> Boolean = { true },
     private val markerFileAbsent: () -> Boolean = { true },
-    private val remoteCommitted: () -> Boolean = { false }
+    private val remoteCommitted: () -> Boolean = { false },
+    private val recoveryPinFile: RecoveryPinFile? = null
 ) {
     private var marked: Boolean
     private var stateSeal: JournalSeal?
     private var guard: JournalGuard?
+    private val legacyPin: RecoveryPin?
     private var floors: Map<DocumentType, Long>
     var state: JournalState
         private set
@@ -109,6 +122,7 @@ internal class RemoteJournal(
         marked = initial.marked
         stateSeal = initial.seal
         guard = initial.secondary
+        legacyPin = initial.legacy?.pin
         floors = DocumentType.entries.associateWith(initial::floor)
         state = initial.state ?: JournalState()
         failure = initial.failure
@@ -118,9 +132,13 @@ internal class RemoteJournal(
     fun floor(type: DocumentType): Long = floors.getValue(type)
 
     fun canRetry(doc: RemoteVerifier.Authenticated): Boolean {
-        val pending = guard?.pending?.get(doc.type) ?: return false
-        return state.floor(doc.type) < doc.version && doc.version == floor(doc.type) &&
-            pending == PendingDocument.from(doc)
+        if (state.appliedFloor(doc.type) >= doc.version || doc.version != floor(doc.type)) return false
+        val pending = guard?.pending?.get(doc.type)
+        // At the rebuilt floor, only the exact bytes authorized by the root may be resent.
+        if (doc.version == state.reanchorFloors[doc.type] &&
+            state.floorPayloadSha256[doc.type] != doc.committedSha256) return false
+        return if (pending != null) pending == PendingDocument.from(doc)
+        else doc.version == state.reanchorFloors[doc.type]
     }
 
     /** Refresh at runtime entry points, keeping every observed floor and any prior failure. */
@@ -133,6 +151,83 @@ internal class RemoteJournal(
             else -> null
         }
         return failure
+    }
+
+    fun bindPin(binding: RemoteBinding, root: String): JournalRecoveryPin? =
+        recoveryPinFile?.write(RecoveryPin(root, binding.fingerprint()))
+
+    /** A healthy pre-upgrade binding at version zero still proves its original root. */
+    fun preserveLegacyPin() {
+        val binding = state.binding ?: return
+        val trust = state.trust ?: return
+        if (lost || state.recoveryPin != null || trust.version != 0L || stateSeal == null) return
+        runCatching { bindPin(binding, RemoteCrypto.keyId(trust.root)) }
+    }
+
+    data class ReanchorPin(val pin: RecoveryPin, val needsRootFingerprint: Boolean)
+
+    fun reanchorPin(): ReanchorPin? {
+        val stored = read()
+        fun JournalSeal.pin(): RecoveryPin? {
+            val binding = bindingFingerprint ?: return null
+            // In a legacy seal, version zero proves that no root rotation has taken place.
+            val root = bindingRootFingerprint ?: rootFingerprint?.takeIf {
+                floors.getValue(DocumentType.KEY_SET) == 0L
+            } ?: return null
+            return RecoveryPin(root, binding)
+        }
+        fun JournalState.pin(): RecoveryPin? = runCatching {
+            val proof = recoveryPin ?: return null
+            val pin = RecoveryPin(proof.rootFingerprint, requireNotNull(binding).fingerprint())
+            pin.takeIf { recoveryPinFile?.verifies(pin, proof.tag) == true }
+        }.getOrNull()
+        val known = listOfNotNull(guard?.current?.pin(), stored.secondary?.current?.pin(),
+            legacyPin, stored.legacy?.pin, state.pin(), stored.state?.pin()).distinct()
+        if (known.size > 1) return null
+        known.singleOrNull()?.let { return ReanchorPin(it, false) }
+        return runCatching { recoveryPinFile?.read() }.getOrNull()?.let { ReanchorPin(it, true) }
+    }
+
+    /** The guard reserves the recovered floors before the new journal can authorize anything. */
+    fun reanchor(verified: RemoteVerifier.AuthenticatedReanchor, enterEnrolling: () -> Boolean): Boolean {
+        if (!RemoteReanchor.supports(failure)) return false
+        return try {
+            val minFloors = DocumentType.entries.associateWith { maxOf(floor(it), verified.floors.getValue(it)) }
+            if (!writeMarker() || !enterEnrolling()) return false
+            val pin = RecoveryPin(RemoteCrypto.keyId(verified.trust.root), verified.binding.fingerprint())
+            val proof = requireNotNull(recoveryPinFile).write(pin, restoring = true)
+            val (releases, source) = authenticatedReleases()
+            val next = JournalState(trust = verified.trust, binding = verified.binding,
+                recoveryPin = proof, reanchorFloors = minFloors, floorPayloadSha256 = verified.floorPayloadSha256,
+                releases = releases)
+            val seal = JournalSeal.from(next)
+            val nextGuard = JournalGuard(seal, reanchorSource = source)
+            guardStore.write(nextGuard, createKey = true)
+            guard = nextGuard
+            floors = nextGuard.floors
+            val update = preferences.edit().putString(STATE, JournalCodec.encode(next)).remove(STAMP)
+            if (!DurablePreferences.commit(preferences, update, STATE, STAMP)) return false
+            state = next
+            stateSeal = seal
+            failure = null
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun authenticatedReleases(): Pair<Set<String>, JournalSeal?> {
+        val stored = read()
+        fun JournalGuard?.authenticates(seal: JournalSeal): Boolean =
+            this != null && (covers(seal) || reanchorSource == seal)
+
+        val source = stored.seal?.takeIf {
+            stored.state?.releases?.isNotEmpty() == true &&
+                (stored.secondary.authenticates(it) || guard.authenticates(it))
+        }
+        val disk = if (source != null) stored.state?.releases.orEmpty() else emptySet()
+        val memory = if (stateSeal?.let { guard.authenticates(it) } == true) state.releases else emptySet()
+        return (disk + memory) to source
     }
 
     internal fun save(next: JournalState, doc: RemoteVerifier.Authenticated? = null): Boolean {
@@ -174,7 +269,7 @@ internal class RemoteJournal(
             val binding = existing.current.bindingFingerprint
             require(binding == null || binding == next.bindingFingerprint)
         }
-        val pending = if (before != null) existing?.outstanding(before).orEmpty() else emptyMap()
+        val pending = if (before != null) existing?.outstanding(state).orEmpty() else emptyMap()
         val reservations = if (doc == null) {
             require(before == null || next.floors == before.floors)
             pending
@@ -191,7 +286,7 @@ internal class RemoteJournal(
     private fun finishGuardCommit(): Boolean {
         val current = guard ?: return true
         if (current.current != stateSeal) return true
-        return writeGuard(current.copy(previous = null, pending = current.outstanding(current.current)))
+        return writeGuard(current.copy(previous = null, pending = current.outstanding(state), reanchorSource = null))
     }
 
     private fun writeGuard(next: JournalGuard): Boolean {
@@ -216,12 +311,14 @@ internal class RemoteJournal(
 
     /** Stored once, before any journal write. Until it is, nothing is written to the journal. */
     private fun mark(): Boolean {
-        if (!marked) {
-            marked = try {
-                DurablePreferences.commit(marker, marker.edit().putBoolean(CREATED, true), CREATED)
-            } catch (_: RuntimeException) {
-                false
-            }
+        return marked || writeMarker()
+    }
+
+    private fun writeMarker(): Boolean {
+        marked = try {
+            DurablePreferences.commit(marker, marker.edit().putBoolean(CREATED, true), CREATED)
+        } catch (_: RuntimeException) {
+            false
         }
         return marked
     }
@@ -234,11 +331,11 @@ internal class RemoteJournal(
 
     private class Read(
         val marked: Boolean, val state: JournalState?, val seal: JournalSeal?,
-        val secondary: JournalGuard?, val failure: RemoteFailure?
+        val secondary: JournalGuard?, val legacy: LegacyJournalGuardFormat?, val failure: RemoteFailure?
     ) {
         fun floor(type: DocumentType): Long {
             val journalFloor = state?.floor(type)?.takeIf { it in 0..WireJson.MAX_INTEGER } ?: 0L
-            return maxOf(journalFloor, secondary?.floors?.getValue(type) ?: 0L)
+            return maxOf(journalFloor, secondary?.floors?.getValue(type) ?: 0L, legacy?.floors?.get(type) ?: 0L)
         }
     }
 
@@ -264,18 +361,20 @@ internal class RemoteJournal(
         val primary = runCatching { state?.let(JournalSeal::from) }
         val expected = primary.getOrNull()
         val copy = secondary.getOrNull()
+        val legacy = secondary.exceptionOrNull() as? LegacyJournalGuardFormat
         val hasMarker = marked.getOrDefault(false)
         val failure = when {
-            secondary.exceptionOrNull() is LegacyJournalGuardFormat -> GUARD_REENROLMENT_NEEDED
+            legacy != null -> GUARD_REENROLMENT_NEEDED
             marked.isFailure || journal.isFailure || primary.isFailure -> JOURNAL_LOST
             !hasMarker && (expected != null || copy != null) -> JOURNAL_LOST
             secondary.isFailure -> GUARD_UNREADABLE
-            expected == null && hasMarker && copy?.isInitialBinding() != true -> JOURNAL_LOST
+            expected == null && copy?.isInitialBinding() != true &&
+                (hasMarker || recoveryPinFile?.exists() == true) -> JOURNAL_LOST
             expected != null && copy == null -> GUARD_MISSING
             expected != null && copy?.covers(expected) != true -> GUARD_MISMATCH
             else -> null
         }
-        return Read(hasMarker, state, expected, copy, failure)
+        return Read(hasMarker, state, expected, copy, legacy, failure)
     }
 
     companion object {
@@ -311,9 +410,9 @@ internal object JournalCodec {
     fun sealBytes(state: JournalState): ByteArray =
         // Command history is updated and trimmed independently. Commands can
         // dispatch only with a live acceptance in this process.
-        // The last verified generation is used only in reapply command reports.
+        // A rebuilt journal also uses verified to gate commands and code recovery.
         // Use the persisted fields so new durable fields are sealed by default.
-        WireJson.canonical(fields(state) - listOf("commands", "verified"))
+        WireJson.canonical((fields(state) - "commands").let { if (state.reanchored) it else it - "verified" })
 
     fun encode(state: JournalState): String = WireJson.canonical(fields(state)).toString(Charsets.UTF_8)
 
@@ -328,7 +427,9 @@ internal object JournalCodec {
         "lockout" to state.lockout.run {
             mapOf("failures" to failures().toLong(), "bootKind" to armedBoot().kind().name,
                 "boot" to armedBoot().value(), "until" to armedElapsedDeadline(),
-                "penalty" to penaltyMillis())
+                "penalty" to penaltyMillis()) + listOfNotNull(
+                wallDeadline().takeIf { it != 0L }?.let { "wallDeadline" to it }
+            )
         },
         "floor" to state.commandFloor,
         "commands" to state.commands.values.map {
@@ -338,6 +439,12 @@ internal object JournalCodec {
         },
         "verified" to encodeGeneration(state.verified),
         "releases" to state.releases.sorted()
+    ) + listOfNotNull(
+        state.recoveryPin?.let { "recoveryPin" to mapOf("rootFingerprint" to it.rootFingerprint, "tag" to it.tag) },
+        state.reanchorFloors.takeIf { it.isNotEmpty() }?.let { floors -> "reanchorFloors" to floors.mapKeys { it.key.wire } },
+        state.floorPayloadSha256.takeIf { it.isNotEmpty() }?.let { hashes ->
+            "floorPayloadSha256" to hashes.mapKeys { it.key.wire }
+        }
     )
 
     fun decode(value: String): JournalState {
@@ -360,7 +467,7 @@ internal object JournalCodec {
             lockout = PinLockoutPolicy.LockoutState(
                 Math.toIntExact(lockout.number("failures")),
                 PinLockoutPolicy.BootId(PinLockoutPolicy.BootKind.valueOf(lockout.text("bootKind")), lockout.number("boot")),
-                lockout.number("until"), lockout.number("penalty"), 0
+                lockout.number("until"), lockout.number("penalty"), lockout["wallDeadline"] as? Long ?: 0L
             ),
             commandFloor = json.number("floor"),
             commands = json.items("commands").map { it.asObject() }.associate {
@@ -370,7 +477,18 @@ internal object JournalCodec {
                     it.getValue("secure") as Boolean?, it.getValue("reapply") as Boolean?, decodeGeneration(it.getValue("verified")))
             },
             verified = decodeGeneration(json.getValue("verified")),
-            releases = (json["releases"] as List<*>?).orEmpty().map { it as String }.toSet()
+            releases = (json["releases"] as List<*>?).orEmpty().map { it as String }.toSet(),
+            recoveryPin = json["recoveryPin"]?.asObject()?.let {
+                JournalRecoveryPin(it.text("rootFingerprint"), it.text("tag"))
+            },
+            reanchorFloors = json["reanchorFloors"]?.asObject()?.let { floors ->
+                require(floors.keys == DocumentType.entries.map { it.wire }.toSet())
+                DocumentType.entries.associateWith { floors.number(it.wire).also { value -> require(value >= 0) } }
+            }.orEmpty(),
+            floorPayloadSha256 = json["floorPayloadSha256"]?.asObject()?.map { (wire, value) ->
+                val type = RemoteReanchor.resendableTypes.single { it.wire == wire }
+                type to (value as String).also { RemoteCrypto.unhex(it) }
+            }?.toMap().orEmpty()
         )
     }
 }

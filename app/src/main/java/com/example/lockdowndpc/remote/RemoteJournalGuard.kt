@@ -16,29 +16,33 @@ internal data class JournalSeal(
     val rootFingerprint: String?,
     val floors: Map<DocumentType, Long>,
     val policySha256: String?,
-    val stateSha256: String
+    val stateSha256: String,
+    val bindingRootFingerprint: String? = null,
+    val reanchored: Boolean = false
 ) {
     init {
         require(floors.keys == DocumentType.entries.toSet())
         require(floors.values.all { it in 0..WireJson.MAX_INTEGER })
         require(bindingFingerprint == null || RemoteCrypto.decode(bindingFingerprint).size == 32)
         require(rootFingerprint == null || RemoteCrypto.decode(rootFingerprint).size == 32)
+        require(bindingRootFingerprint == null ||
+            (bindingFingerprint != null && RemoteCrypto.decode(bindingRootFingerprint).size == 32))
         policySha256?.let(RemoteCrypto::unhex)
         RemoteCrypto.unhex(stateSha256)
     }
 
     companion object {
-        // Canonicalize the fleet ID and device key fingerprint together. The
-        // wire contract allows long fleet IDs, so store a fixed-size digest.
-        fun from(state: JournalState) = JournalSeal(state.binding?.let {
-            require(it.fleetId.isNotEmpty() && RemoteCrypto.decode(it.deviceId).size == 32)
-            RemoteCrypto.encode(RemoteCrypto.sha256(WireJson.canonical(listOf(it.fleetId, it.deviceId))))
-        }, state.trust?.root?.let(RemoteCrypto::keyId),
-            DocumentType.entries.associateWith(state::floor),
+        fun from(state: JournalState) = JournalSeal(state.binding?.fingerprint(),
+            state.trust?.root?.let(RemoteCrypto::keyId),
+            DocumentType.entries.associateWith {
+                require(state.appliedFloor(it) in 0..WireJson.MAX_INTEGER)
+                state.floor(it)
+            },
             state.policy?.let {
                 it.verifiedBytes()
                 it.hash
-            }, RemoteCrypto.hex(RemoteCrypto.sha256(JournalCodec.sealBytes(state))))
+            }, RemoteCrypto.hex(RemoteCrypto.sha256(JournalCodec.sealBytes(state))),
+            state.recoveryPin?.rootFingerprint, state.reanchored)
     }
 }
 
@@ -61,12 +65,17 @@ internal data class PendingDocument(val version: Long, val sha256: String, val k
 internal data class JournalGuard(
     val current: JournalSeal,
     val previous: JournalSeal? = null,
-    val pending: Map<DocumentType, PendingDocument> = emptyMap()
+    val pending: Map<DocumentType, PendingDocument> = emptyMap(),
+    /** Evidence for retaining unfinished releases across an interrupted re-anchor. Never covers a journal. */
+    val reanchorSource: JournalSeal? = null
 ) {
     val isBindingTransition: Boolean get() = previous != null && previous.bindingFingerprint == null &&
         current.bindingFingerprint != null
 
     init {
+        require(reanchorSource == null ||
+            (current.reanchored && previous == null && pending.isEmpty() &&
+                reanchorSource.bindingFingerprint == current.bindingFingerprint))
         require(pending.all { (type, doc) ->
             (doc.keySetSigner != null) == (type == DocumentType.KEY_SET) &&
                 doc.version >= current.floors.getValue(type)
@@ -79,6 +88,8 @@ internal data class JournalGuard(
                     previous.policySha256 == current.policySha256 && pending.isEmpty())
             } else {
                 require(previous.bindingFingerprint == current.bindingFingerprint)
+                require(previous.bindingRootFingerprint == current.bindingRootFingerprint)
+                require(previous.reanchored == current.reanchored)
                 require(previous.rootFingerprint == current.rootFingerprint ||
                     (pending[DocumentType.KEY_SET]?.version == current.floors.getValue(DocumentType.KEY_SET) &&
                         pending[DocumentType.KEY_SET]?.keySetSigner == current.rootFingerprint))
@@ -96,11 +107,11 @@ internal data class JournalGuard(
     // Require one whole protected snapshot, including during a root transition.
     fun covers(journal: JournalSeal): Boolean = journal == current || journal == previous
 
-    fun outstanding(journal: JournalSeal): Map<DocumentType, PendingDocument> =
-        pending.filter { (type, doc) -> journal.floors.getValue(type) < doc.version }
+    fun outstanding(journal: JournalState): Map<DocumentType, PendingDocument> =
+        pending.filter { (type, doc) -> journal.appliedFloor(type) < doc.version }
 
     fun isInitialBinding(): Boolean =
-        previous == null && pending.isEmpty() && current.bindingFingerprint != null &&
+        !current.reanchored && previous == null && pending.isEmpty() && current.bindingFingerprint != null &&
             current.rootFingerprint != null && current.policySha256 == null && current.floors.values.all { it == 0L }
 
     companion object {
@@ -108,7 +119,10 @@ internal data class JournalGuard(
     }
 }
 
-internal class LegacyJournalGuardFormat : IllegalArgumentException()
+internal class LegacyJournalGuardFormat(
+    val floors: Map<DocumentType, Long> = emptyMap(),
+    val pin: RecoveryPin? = null
+) : IllegalArgumentException()
 
 internal interface RemoteJournalGuardStore {
     /** Returns null only when the file is absent. Unreadable or invalid contents throw. */
@@ -138,14 +152,15 @@ internal class RemoteJournalGuardFile(
         // protected state, so recognized legacy records require re-enrolment.
         val tag = if (format == 1L) RemoteCrypto.sha256(payload) else mac(payload, false)
         require(MessageDigest.isEqual(record.copyOf(MAC_SIZE), tag))
-        if (format != FORMAT) throw LegacyJournalGuardFormat()
+        if (format != FORMAT) throw legacyEvidence(format, json)
         val pending = json.obj("pending").map { (wire, value) ->
             val type = DocumentType.entries.single { it.wire == wire }
             val doc = value.asObject()
             type to PendingDocument(doc.number("version"), doc.text("sha256"), doc.getValue("keySetSigner") as String?)
         }.toMap()
         return JournalGuard(decodeSeal(json.obj("current")),
-            json.getValue("previous")?.asObject()?.let(::decodeSeal), pending)
+            json.getValue("previous")?.asObject()?.let(::decodeSeal), pending,
+            json["reanchorSource"]?.asObject()?.let(::decodeSeal))
     }
 
     override fun write(guard: JournalGuard, createKey: Boolean) {
@@ -156,7 +171,7 @@ internal class RemoteJournalGuardFile(
             "pending" to guard.pending.entries.associate { (type, doc) ->
                 type.wire to mapOf("version" to doc.version, "sha256" to doc.sha256, "keySetSigner" to doc.keySetSigner)
             }
-        ))
+        ) + listOfNotNull(guard.reanchorSource?.let { "reanchorSource" to encodeSeal(it) }))
         require(MAC_SIZE + payload.size <= MAX_RECORD_SIZE)
         val tag = mac(payload, createKey)
         require(tag.size == MAC_SIZE)
@@ -174,17 +189,44 @@ internal class RemoteJournalGuardFile(
         }
     }
 
+    private fun legacyEvidence(format: Long, json: JsonObject): LegacyJournalGuardFormat {
+        // Readable floors can only raise the lower bound. The public v1
+        // checksum cannot prove identity, and no legacy guard covers a journal.
+        return runCatching {
+            val current = if (format < 3L) json else json.obj("current")
+            val versions = current.obj("floors")
+            val pending = if (format == 3L) json.obj("pending") else emptyMap()
+            val floors = DocumentType.entries.associateWith { type ->
+                val version = versions.number(type.wire)
+                val reserved = pending[type.wire]?.asObject()?.number("version") ?: 0L
+                require(version >= 0 && reserved >= 0)
+                maxOf(version, reserved)
+            }
+            val root = current["rootFingerprint"] as String?
+            val binding = current["bindingFingerprint"] as String?
+            val pin = if (format >= 2L && root != null && binding != null &&
+                versions.number(DocumentType.KEY_SET.wire) == 0L) {
+                RecoveryPin(root, binding)
+            } else null
+            LegacyJournalGuardFormat(floors, pin)
+        }.getOrElse { LegacyJournalGuardFormat() }
+    }
+
     private fun encodeSeal(seal: JournalSeal) = mapOf(
         "bindingFingerprint" to seal.bindingFingerprint, "rootFingerprint" to seal.rootFingerprint,
         "floors" to seal.floors.mapKeys { it.key.wire }, "policySha256" to seal.policySha256,
         "stateSha256" to seal.stateSha256
+    ) + listOfNotNull(
+        seal.bindingRootFingerprint?.let { "bindingRootFingerprint" to it },
+        if (seal.reanchored) "reanchored" to true else null
     )
 
     private fun decodeSeal(seal: JsonObject): JournalSeal {
         val floors = seal.obj("floors")
         return JournalSeal(seal.getValue("bindingFingerprint") as String?, seal.getValue("rootFingerprint") as String?,
             DocumentType.entries.associateWith { floors.number(it.wire) },
-            seal.getValue("policySha256") as String?, seal.text("stateSha256"))
+            seal.getValue("policySha256") as String?, seal.text("stateSha256"),
+            seal["bindingRootFingerprint"] as String?, seal["reanchored"] == true)
     }
 
     companion object {

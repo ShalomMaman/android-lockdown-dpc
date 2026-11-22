@@ -85,6 +85,23 @@
       ]
     }
   },
+  "reanchor": {
+    "type": "re-anchor",
+    "schema": "v1.schema.json#/$defs/re-anchor",
+    "maxEncodedBytes": 65536,
+    "signer": "original-binding-root",
+    "binding": "fleetId-and-deviceId-and-console-nonce",
+    "bindingFingerprint": "base64url(SHA-256(canonical([fleetId, deviceId])))",
+    "nonce": {
+      "bytes": 32,
+      "maxAgeMsExclusive": 900000,
+      "storage": "memory",
+      "clock": "elapsedRealtime",
+      "sameBoot": true,
+      "consumeBeforeAuthorizedWrite": true
+    },
+    "floorEquality": "keyset-and-fleet-policy-only-with-root-signed-exact-payload-digest"
+  },
   "hashes": {
     "algorithm": "SHA-256",
     "digestBytes": 32,

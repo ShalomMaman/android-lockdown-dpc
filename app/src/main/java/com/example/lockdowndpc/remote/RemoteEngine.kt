@@ -29,7 +29,8 @@ internal class RemoteEngine(
     private val schema: RemoteSchema,
     private val projection: RemoteProjection,
     private val recoveryMac: (ByteArray, Boolean) -> ByteArray,
-    private val commandProcess: CommandProcess = CommandProcess()
+    private val commandProcess: CommandProcess = CommandProcess(),
+    private val recoveredModeReady: () -> Boolean = { true }
 ) {
     internal class CommandProcess {
         val liveDispatches = mutableSetOf<Long>()
@@ -43,9 +44,12 @@ internal class RemoteEngine(
     private val unsaved get() = commandProcess.unsaved
     private val ledger = ReleaseLedger { packages -> save(state.copy(releases = state.releases + packages)) == null }
     private var reconciling = false
+    private var reanchorChallenge: RemoteReanchor.Challenge? = null
     val state: JournalState get() = journal.state
     val failure: RemoteFailure? get() = journal.failure
     val lost: Boolean get() = journal.lost
+    private val recoveryConverged: Boolean
+        get() = !state.reanchored || (state.verified != null && recoveredModeReady())
 
     fun checkStores(): RemoteFailure? = journal.checkStores()
 
@@ -66,7 +70,12 @@ internal class RemoteEngine(
         if (state.trust != null || state.binding != null) return RemoteFailure("doc-version-rollback")
         return try {
             val trust = verifier.bootstrap(pinnedId, rootSpki, binding)
-            save(state.copy(trust = trust, binding = binding))
+            val pin = try {
+                journal.bindPin(binding, pinnedId)
+            } catch (_: Exception) {
+                return WRITE_FAILED
+            }
+            save(state.copy(trust = trust, binding = binding, recoveryPin = pin))
         } catch (error: Refused) {
             error.failure
         } catch (_: Exception) {
@@ -74,9 +83,49 @@ internal class RemoteEngine(
         }
     }
 
+    fun reanchorStatus(now: RemoteTime): RemoteReanchor.Status {
+        val reason = failure ?: return RemoteReanchor.Status(awaitingPolicy = !recoveryConverged)
+        if (!RemoteReanchor.supports(reason)) return RemoteReanchor.Status(reason)
+        val pin = journal.reanchorPin()
+            ?: return RemoteReanchor.Status(reason, error = RemoteFailure("re-anchor-pin-unavailable"))
+        if (!now.known) return RemoteReanchor.Status(reason, error = RemoteFailure("re-anchor-clock-unavailable"))
+        val challenge = reanchorChallenge?.takeIf { it.fresh(now) } ?: RemoteReanchor.issue(now).also {
+            reanchorChallenge = it
+        }
+        return RemoteReanchor.Status(reason, challenge.nonce, pin.needsRootFingerprint)
+    }
+
+    fun reanchor(
+        verifier: RemoteVerifier, input: ByteArray, enteredRootFingerprint: String?, now: RemoteTime,
+        enterEnrolling: () -> Boolean
+    ): RemoteFailure? {
+        val challenge = reanchorChallenge?.takeIf { it.fresh(now) }
+            ?: return RemoteFailure("re-anchor-nonce-invalid")
+        if (!RemoteReanchor.supports(failure)) return RemoteFailure("re-anchor-unavailable")
+        val pin = journal.reanchorPin() ?: return RemoteFailure("re-anchor-pin-unavailable")
+        if (pin.needsRootFingerprint && enteredRootFingerprint != pin.pin.rootFingerprint) {
+            return RemoteFailure("re-anchor-root-mismatch")
+        }
+        val verified = try {
+            verifier.authenticateReanchor(input, pin.pin, challenge.nonce)
+        } catch (error: Refused) {
+            return error.failure
+        }
+        if (DocumentType.entries.any { verified.floors.getValue(it) < journal.floor(it) }) {
+            return RemoteFailure("re-anchor-floor-rollback")
+        }
+        // Consume before writing. A failed write requires a fresh signed challenge.
+        reanchorChallenge = null
+        if (!journal.reanchor(verified, enterEnrolling)) return WRITE_FAILED
+        liveDispatches.clear()
+        callsStarted.clear()
+        unsaved.clear()
+        return null
+    }
+
     fun commitBaseline(policy: JsonObject): RemoteFailure? {
         failure?.let { return it }
-        if (state.policy != null) return RemoteFailure("doc-version-rollback")
+        if (state.policy != null || state.reanchored) return RemoteFailure("doc-version-rollback")
         return try {
             schema.requireValid("policy", policy)
             unprojectable(policy)
@@ -106,6 +155,9 @@ internal class RemoteEngine(
 
     private fun accept(doc: RemoteVerifier.Authenticated, exchange: RemoteSync.Exchange): RemoteFailure? {
         failure?.let { return it }
+        if ((doc.type == DocumentType.RECOVERY || doc.type == DocumentType.COMMAND) && !recoveryConverged) {
+            return POLICY_UNAVAILABLE
+        }
         val next = when (doc.type) {
             DocumentType.KEY_SET -> state.copy(trust = doc.rotatedTrust())
             DocumentType.POLICY -> {
@@ -154,7 +206,7 @@ internal class RemoteEngine(
         return try {
             // Nothing an earlier, unverified pass exposed survives into this one.
             revokeReleases()
-            val target = state.generation() ?: return Pass(false, RemoteFailure("remote-policy-unavailable"))
+            val target = state.generation() ?: return Pass(false, POLICY_UNAVAILABLE)
             val body = try {
                 requireNotNull(state.policy).body(schema)
             } catch (error: Refused) {
@@ -198,7 +250,7 @@ internal class RemoteEngine(
      * The device call does not depend on the journal taking the write that follows it.
      */
     fun revokeReleases() {
-        if (journal.lost) return
+        if (journal.lost || (state.reanchored && state.policy == null)) return
         val exposed = state.releases
         if (exposed.isEmpty()) return
         val stuck = try {
@@ -211,6 +263,7 @@ internal class RemoteEngine(
 
     fun recover(choices: Set<RemoteOverride>, code: String, now: RemoteTime): RecoveryResult {
         failure?.let { return RecoveryResult(RecoveryOutcome.REFUSED, it) }
+        if (!recoveryConverged) return RecoveryResult(RecoveryOutcome.REFUSED, POLICY_UNAVAILABLE)
         val stored = state.recovery ?: return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (choices.isEmpty()) return RecoveryResult(RecoveryOutcome.UNCHANGED)
         if (!now.known) return RecoveryResult(RecoveryOutcome.REFUSED, codeChecked = false)
@@ -264,6 +317,7 @@ internal class RemoteEngine(
 
     fun dispatch(sequence: Long, clock: () -> RemoteTime, platform: CommandPlatform): RemoteFailure? {
         failure?.let { return it }
+        if (!recoveryConverged) return POLICY_UNAVAILABLE
         if (sequence !in liveDispatches || sequence in unsaved) {
             return settleInterruptedCommands() ?: state.commands[sequence]?.code?.let { RemoteFailure(it) }
         }
@@ -282,7 +336,7 @@ internal class RemoteEngine(
         // A recovery may run re-entrantly before this final check. Re-read the entry and override.
         val now = clock()
         failure?.let { return it }
-        val current = state.commands.getValue(sequence)
+        val current = state.commands[sequence] ?: return RemoteFailure("command-expired")
         if (current.state != CommandState.DISPATCHING) return current.code?.let { RemoteFailure(it) }
         if (RemoteOverride.COMMANDS_OFF in state.overrides) {
             return close(current.copy(state = CommandState.CANCELLED, code = "cancelled-by-recovery"))
@@ -348,6 +402,7 @@ internal class RemoteEngine(
     companion object {
         /** Android 10: the first release that can enforce every default control and the home filter. */
         const val MIN_SDK = 29
+        private val POLICY_UNAVAILABLE = RemoteFailure("remote-policy-unavailable")
         private val WRITE_FAILED = RemoteFailure("journal-write-failed")
         private val RECOVERY_WRITE_FAILED = RemoteFailure("recovery-commit-failed")
     }

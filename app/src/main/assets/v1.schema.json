@@ -13,6 +13,9 @@
     },
     {
       "$ref": "#/$defs/command"
+    },
+    {
+      "$ref": "#/$defs/re-anchor"
     }
   ],
   "$defs": {
@@ -564,6 +567,88 @@
         "deviceId",
         "salt",
         "verifier"
+      ]
+    },
+    "re-anchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "type": {
+          "const": "re-anchor"
+        },
+        "fleetId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deviceId": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "nonce": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "rootFingerprint": {
+          "$ref": "#/$defs/base64url32"
+        },
+        "rootSpki": {
+          "$ref": "#/$defs/p256Spki"
+        },
+        "floorPayloadSha256": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keyset": {
+              "$ref": "#/$defs/sha256Hex"
+            },
+            "fleet-policy": {
+              "$ref": "#/$defs/sha256Hex"
+            }
+          }
+        },
+        "floors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keyset": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "fleet-policy": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "recovery": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "command": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "keyset",
+            "fleet-policy",
+            "recovery",
+            "command"
+          ]
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "type",
+        "fleetId",
+        "deviceId",
+        "nonce",
+        "rootFingerprint",
+        "rootSpki",
+        "floors"
       ]
     },
     "command": {

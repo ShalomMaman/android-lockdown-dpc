@@ -52,7 +52,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -94,7 +93,6 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.HomeFilterController
 import com.example.lockdowndpc.policy.LockdownPolicyController
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
-import com.example.lockdowndpc.policy.RemotePolicyRuntime
 import com.example.lockdowndpc.security.AdminPinStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
@@ -323,22 +321,7 @@ private fun AdminConsole(
     var recoveryGrant by remember { mutableStateOf(AdminPinStore.getRecoveryGrant(context)) }
     var screen by remember { mutableStateOf(initialScreen(context, recoveryGrant)) }
     if (screen == ConsoleScreen.REMOTE_STATUS) {
-        SideEffect { onSecureScreen(false) }
-        // A damaged policy record is named, with what restores the device, instead
-        // of leaving whoever holds it with a message that explains nothing.
-        var journalFailureCode by remember(context) { mutableStateOf<String?>(null) }
-        LaunchedEffect(context) {
-            journalFailureCode = withContext(Dispatchers.IO) { RemotePolicyRuntime.journalFailure(context)?.code }
-        }
-        LockdownScreen(
-            title = stringResource(R.string.app_name),
-            subtitle = when (val code = journalFailureCode) {
-                null -> stringResource(R.string.remote_policy_unavailable)
-                "journal-lost" -> stringResource(R.string.remote_policy_journal_lost)
-                "journal-guard-reenrolment-needed" -> stringResource(R.string.remote_policy_reenrolment_needed)
-                else -> stringResource(R.string.remote_policy_guard_blocked, code)
-            },
-        ) {}
+        RemoteConsole(onSecureScreen)
         return
     }
     var pinSetupMode by remember {
