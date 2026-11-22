@@ -84,9 +84,11 @@ internal class RemoteVerifier(private val schema: RemoteSchema, private val allo
     }
 
     fun checkFloorsAndBinding(
-        doc: Authenticated, activeVersion: Long, floor: Long, deviceId: String, nonce: String?
+        doc: Authenticated, activeVersion: Long, floor: Long, deviceId: String, nonce: String?, canRetry: Boolean
     ) {
-        if (doc.keySetVersion < activeVersion || doc.version <= floor) refuse("doc-version-rollback")
+        if (doc.keySetVersion < activeVersion || doc.version < floor || (doc.version == floor && !canRetry)) {
+            refuse("doc-version-rollback")
+        }
         when (doc.type) {
             DocumentType.KEY_SET -> return
             DocumentType.POLICY -> if (deviceId !in doc.body.items("deviceIds")) refuse("doc-device-not-listed")

@@ -14,9 +14,12 @@ internal data class Generation(
 }
 
 internal data class CommittedPolicy(val encodedPayload: String, val hash: String, val version: Long) {
+    fun verifiedBytes(): ByteArray = RemoteCrypto.decode(encodedPayload).also {
+        require(RemoteCrypto.hex(RemoteCrypto.sha256(it)) == hash)
+    }
+
     fun body(schema: RemoteSchema): JsonObject {
-        val bytes = RemoteCrypto.decode(encodedPayload)
-        require(RemoteCrypto.hex(RemoteCrypto.sha256(bytes)) == hash)
+        val bytes = verifiedBytes()
         val json = schema.decode(bytes).asObject()
         if (version == 0L) {
             schema.requireValid("policy", json)
@@ -92,7 +95,7 @@ internal class RemoteJournal(
     private val remoteCommitted: () -> Boolean = { false }
 ) {
     private var marked: Boolean
-    private var hasJournal: Boolean
+    private var stateSeal: JournalSeal?
     private var guard: JournalGuard?
     private var floors: Map<DocumentType, Long>
     var state: JournalState
@@ -104,67 +107,102 @@ internal class RemoteJournal(
     init {
         val initial = read()
         marked = initial.marked
-        hasJournal = initial.state != null
+        stateSeal = initial.seal
         guard = initial.secondary
         floors = DocumentType.entries.associateWith(initial::floor)
         state = initial.state ?: JournalState()
         failure = initial.failure
+        if (!lost) finishGuardCommit()
     }
 
     fun floor(type: DocumentType): Long = floors.getValue(type)
+
+    fun canRetry(doc: RemoteVerifier.Authenticated): Boolean {
+        val pending = guard?.pending?.get(doc.type) ?: return false
+        return state.floor(doc.type) < doc.version && doc.version == floor(doc.type) &&
+            pending == PendingDocument.from(doc)
+    }
 
     /** Refresh at runtime entry points, keeping every observed floor and any prior failure. */
     fun checkStores(): RemoteFailure? {
         val stored = read()
         floors = DocumentType.entries.associateWith { maxOf(floor(it), stored.floor(it)) }
         if (!lost) failure = stored.failure ?: when {
-            hasJournal && stored.state == null -> JOURNAL_LOST
-            stored.secondary != guard -> GUARD_MISMATCH
+            stateSeal != null && stored.seal == null -> JOURNAL_LOST
+            stored.secondary != guard || stored.seal != stateSeal -> GUARD_MISMATCH
             else -> null
         }
         return failure
     }
 
-    internal fun save(next: JournalState): Boolean {
+    internal fun save(next: JournalState, doc: RemoteVerifier.Authenticated? = null): Boolean {
         if (lost) return false
-        val (bounded, nextGuard, encoded) = try {
-            val bounded = next.bounded()
-            val nextRecord = JournalGuard.from(bounded)
-            val binding = guard?.bindingFingerprint
-            require(binding == null || binding == nextRecord.bindingFingerprint)
-            // Before the first journal commit an existing guard pins the whole bootstrap identity.
-            require(hasJournal || guard == null || guard == nextRecord)
-            // Unchanged journal channels can keep running beneath a reserved floor.
-            require(DocumentType.entries.all {
-                bounded.floor(it) == state.floor(it) || bounded.floor(it) >= floor(it)
-            })
-            val nextGuard = nextRecord.copy(floors = DocumentType.entries.associateWith {
-                maxOf(floor(it), bounded.floor(it))
-            })
-            Triple(bounded, nextGuard, JournalCodec.encode(bounded))
+        val bounded = next.bounded()
+        val nextSeal = try {
+            JournalSeal.from(bounded)
         } catch (_: Exception) {
             return false
         }
-        // Publish the independent floors before the full journal. They remain in
-        // force even when the second write fails and the old policy stays active.
-        if (!mark()) return false
-        val changesRoot = hasJournal && guard?.rootFingerprint != nextGuard.rootFingerprint
-        if (guard != nextGuard) {
-            try {
-                guardStore.write(nextGuard, createKey = guard == null)
-            } catch (_: Exception) {
-                failure = GUARD_WRITE_FAILED
-                return false
-            }
-            guard = nextGuard
-        }
-        floors = nextGuard.floors
-        if (!write(STATE, encoded)) {
-            if (changesRoot) failure = GUARD_MISMATCH
+        val (nextGuard, encoded) = try {
+            guardFor(nextSeal, doc) to JournalCodec.encode(bounded)
+        } catch (_: Exception) {
             return false
         }
-        hasJournal = true
+        // Reserve floors before the journal write. A failed write leaves the
+        // old snapshot usable and the exact authenticated document retryable.
+        if (!mark() || !writeGuard(nextGuard) || !write(STATE, encoded)) return false
         state = bounded
+        stateSeal = nextSeal
+        return finishGuardCommit()
+    }
+
+    private fun guardFor(next: JournalSeal, doc: RemoteVerifier.Authenticated?): JournalGuard {
+        val before = stateSeal
+        val existing = guard
+        if (existing != null) {
+            // A failed first bind pins the bootstrap identity whether it was
+            // preceded by a version-zero baseline or by an empty journal.
+            if (before == null) {
+                require(doc == null && existing == JournalGuard(next))
+                return existing
+            }
+            if (existing.isBindingTransition && before == existing.previous) {
+                require(doc == null && (next == before || next == existing.current))
+                return existing
+            }
+            val binding = existing.current.bindingFingerprint
+            require(binding == null || binding == next.bindingFingerprint)
+        }
+        val pending = if (before != null) existing?.outstanding(before).orEmpty() else emptyMap()
+        val reservations = if (doc == null) {
+            require(before == null || next.floors == before.floors)
+            pending
+        } else {
+            require(before != null && next.floors.getValue(doc.type) == doc.version)
+            require(doc.version > floor(doc.type) || canRetry(doc))
+            require(DocumentType.entries.all { it == doc.type || next.floors.getValue(it) == state.floor(it) })
+            pending + (doc.type to PendingDocument.from(doc))
+        }
+        return JournalGuard(next, before?.takeUnless { it == next }, reservations)
+    }
+
+    /** If the journal did commit, remove the old snapshot before using the new one. */
+    private fun finishGuardCommit(): Boolean {
+        val current = guard ?: return true
+        if (current.current != stateSeal) return true
+        return writeGuard(current.copy(previous = null, pending = current.outstanding(current.current)))
+    }
+
+    private fun writeGuard(next: JournalGuard): Boolean {
+        if (guard == next) return true
+        try {
+            guardStore.write(next, createKey = guard == null)
+        } catch (_: Exception) {
+            failure = GUARD_WRITE_FAILED
+            return false
+        }
+        guard = next
+        floors = next.floors
         return true
     }
 
@@ -194,7 +232,8 @@ internal class RemoteJournal(
     }
 
     private class Read(
-        val marked: Boolean, val state: JournalState?, val secondary: JournalGuard?, val failure: RemoteFailure?
+        val marked: Boolean, val state: JournalState?, val seal: JournalSeal?,
+        val secondary: JournalGuard?, val failure: RemoteFailure?
     ) {
         fun floor(type: DocumentType): Long {
             val journalFloor = state?.floor(type)?.takeIf { it in 0..WireJson.MAX_INTEGER } ?: 0L
@@ -221,11 +260,12 @@ internal class RemoteJournal(
         }
         val secondary = runCatching(guardStore::read)
         val state = journal.getOrNull()
-        val primary = runCatching { state?.let(JournalGuard::from) }
+        val primary = runCatching { state?.let(JournalSeal::from) }
         val expected = primary.getOrNull()
         val copy = secondary.getOrNull()
         val hasMarker = marked.getOrDefault(false)
         val failure = when {
+            secondary.exceptionOrNull() is LegacyJournalGuardFormat -> GUARD_REENROLMENT_NEEDED
             marked.isFailure || journal.isFailure || primary.isFailure -> JOURNAL_LOST
             !hasMarker && (expected != null || copy != null) -> JOURNAL_LOST
             secondary.isFailure -> GUARD_UNREADABLE
@@ -234,7 +274,7 @@ internal class RemoteJournal(
             expected != null && copy?.covers(expected) != true -> GUARD_MISMATCH
             else -> null
         }
-        return Read(hasMarker, state, copy, failure)
+        return Read(hasMarker, state, expected, copy, failure)
     }
 
     companion object {
@@ -246,8 +286,15 @@ internal class RemoteJournal(
         val GUARD_MISSING = RemoteFailure("journal-guard-missing")
         val GUARD_MISMATCH = RemoteFailure("journal-guard-mismatch")
         val GUARD_WRITE_FAILED = RemoteFailure("journal-guard-write-failed")
+        val GUARD_REENROLMENT_NEEDED = RemoteFailure("journal-guard-reenrolment-needed")
     }
 }
+
+/** Shared by the journal encoding and the guard's canonical trust digest. */
+internal fun RemoteTrust.journalFields() = mapOf(
+    "root" to root, "successor" to successor, "version" to version,
+    "policies" to policyKeys, "server" to server, "serverUrl" to serverUrl
+)
 
 private object JournalCodec {
     private fun overrides(values: Set<RemoteOverride>) = values.map { it.code }.sorted()
@@ -262,10 +309,7 @@ private object JournalCodec {
     }
 
     fun encode(state: JournalState): String = WireJson.canonical(mapOf(
-        "trust" to state.trust?.let {
-            mapOf("root" to it.root, "successor" to it.successor, "version" to it.version,
-                "policies" to it.policyKeys, "server" to it.server, "serverUrl" to it.serverUrl)
-        },
+        "trust" to state.trust?.journalFields(),
         "binding" to state.binding?.let { mapOf("fleet" to it.fleetId, "device" to it.deviceId) },
         "policy" to state.policy?.let { mapOf("bytes" to it.encodedPayload, "hash" to it.hash, "version" to it.version) },
         "overrides" to overrides(state.overrides),

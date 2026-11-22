@@ -3,6 +3,9 @@ package com.example.lockdowndpc.remote
 import com.example.lockdowndpc.testing.MemoryPreferences
 import java.io.File
 import java.io.IOException
+import java.security.KeyPairGenerator
+import java.security.Signature
+import java.security.spec.ECGenParameterSpec
 import java.util.function.Consumer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -34,6 +37,13 @@ class RemoteJournalGuardTest {
         val root = f.keys.obj(key)
         return harness.engine.bindFleet(f.verifier, binding, root.text("keyId"), root.text("spki"), 35)
     }
+
+    private fun persistedJournal(harness: RemoteFixtures.Harness): JsonObject =
+        WireJson.parse(requireNotNull(harness.memory.preferences().getString("state", null))
+            .toByteArray(Charsets.UTF_8)).asObject()
+
+    private fun replaceJournal(harness: RemoteFixtures.Harness, contents: JsonObject) =
+        harness.damageJournal(WireJson.canonical(contents).toString(Charsets.UTF_8))
 
     @Test fun damagedOrEmptyJournalCannotBeTakenOverAndRetainsAllFloors() {
         val harness = harness()
@@ -92,6 +102,34 @@ class RemoteJournalGuardTest {
         assertFalse(keyPresent)
     }
 
+    @Test fun legacyGuardFormatsRequireReenrolmentWithoutRewritingEitherStore() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial))
+        val current = requireNotNull(fileStore().read()).current
+        val journal = persistedJournal(harness)
+        for (format in listOf(1L, 2L)) {
+            val payload = WireJson.canonical(mapOf(
+                "format" to format, "bindingFingerprint" to current.bindingFingerprint,
+                "rootFingerprint" to current.rootFingerprint, "floors" to current.floors.mapKeys { it.key.wire }
+            ))
+            val tag = if (format == 1L) RemoteCrypto.sha256(payload) else f.mac(payload)
+            val record = tag + payload
+            file.writeBytes(record)
+            harness.restart()
+
+            assertEquals(RemoteJournal.GUARD_REENROLMENT_NEEDED, bind(harness))
+            assertEquals(RemoteJournal.GUARD_REENROLMENT_NEEDED, harness.engine.reconcile().failure)
+            assertFalse(harness.journal.save(initial))
+            assertTrue(file.readBytes().contentEquals(record))
+            assertEquals(journal, persistedJournal(harness))
+
+            record[0] = (record[0].toInt() xor 1).toByte()
+            file.writeBytes(record)
+            harness.restart()
+            assertEquals(RemoteJournal.GUARD_UNREADABLE, bind(harness))
+        }
+    }
+
     @Test fun absentStoresPermitBindingAndPersistTheIdentity() {
         val harness = harness()
         val longBinding = f.binding.copy(fleetId = "fleet/\"".repeat(800))
@@ -108,10 +146,10 @@ class RemoteJournalGuardTest {
         val harness = harness(store)
         assertTrue(harness.journal.save(initial))
         val original = requireNotNull(store.read())
-        store.write(original.copy(floors = mapOf(
+        store.write(original.copy(current = original.current.copy(floors = mapOf(
             DocumentType.KEY_SET to 1L, DocumentType.POLICY to 6L,
             DocumentType.RECOVERY to 3L, DocumentType.COMMAND to 9L
-        )))
+        ))))
         harness.restart()
 
         assertEquals("journal-guard-mismatch", bind(harness)?.code)
@@ -131,6 +169,37 @@ class RemoteJournalGuardTest {
             harness.restart()
             assertEquals("journal-guard-mismatch", bind(harness)?.code)
         }
+    }
+
+    @Test fun trustDigestPinsDelegatedKeysSuccessorAndServerUrl() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial))
+        val journal = persistedJournal(harness)
+        val trust = journal.obj("trust")
+        for (change in listOf(
+            "policies" to listOf(f.keys.obj("policy").text("spki")),
+            "server" to f.keys.obj("server").text("spki"),
+            "successor" to f.keys.obj("root").text("spki"),
+            "serverUrl" to "https://other.example/"
+        )) {
+            replaceJournal(harness, journal + ("trust" to (trust + change)))
+            assertEquals(change.first, RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
+        }
+    }
+
+    @Test fun rewrittenPolicyBytesAreRefusedEvenWithARecomputedHash() {
+        val harness = harness()
+        assertTrue(harness.journal.save(initial))
+        val journal = persistedJournal(harness)
+        val policy = journal.obj("policy")
+        val newBytes = WireJson.canonical(f.doc("policy-5") + ("auditNote" to "TEST ONLY"))
+        val changed = policy + ("bytes" to RemoteCrypto.encode(newBytes))
+        replaceJournal(harness, journal + ("policy" to changed))
+        assertEquals(RemoteJournal.JOURNAL_LOST, harness.engine.failure)
+
+        val matchingHash = changed + ("hash" to RemoteCrypto.hex(RemoteCrypto.sha256(newBytes)))
+        replaceJournal(harness, journal + ("policy" to matchingHash))
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.reconcile().failure)
     }
 
     @Test fun anInvalidFloorDoesNotEraseOtherReadableFloors() {
@@ -209,7 +278,8 @@ class RemoteJournalGuardTest {
         assertNull(harness.engine.failure)
     }
 
-    @Test fun crashBeforeJournalFloorRaiseRetainsThePreviousPolicyAndHonorsTheNewFloor() {
+    @Test fun pendingPolicySurvivesCrashAndUnrelatedSavesUntilTheExactDocumentCommits() {
+        val store = fileStore()
         val harness = harness()
         assertTrue(harness.journal.save(initial.copy(commandFloor = 0)))
         harness.memory.beforeCommit = Consumer { throw ProcessDeath() }
@@ -221,11 +291,155 @@ class RemoteJournalGuardTest {
         assertEquals(5L, harness.engine.state.policy?.version)
         assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
         assertTrue(harness.engine.reconcile().verified)
-        assertEquals("doc-version-rollback", harness.receive("policy-6").decisions.single().failure?.code)
+        assertEquals("doc-version-rollback", harness.receive("policy-5").decisions.single().failure?.code)
         assertNull(harness.receive("lock-2").decisions.single().failure)
         harness.restart()
+        assertEquals(6L, store.read()?.pending?.get(DocumentType.POLICY)?.version)
+        assertNull(harness.receive("policy-6").decisions.single().failure)
         assertEquals(6L, harness.journal.floor(DocumentType.POLICY))
         assertEquals(2L, harness.journal.floor(DocumentType.COMMAND))
+        assertTrue(requireNotNull(store.read()).pending.isEmpty())
+        assertEquals("doc-version-rollback", harness.receive("policy-6").decisions.single().failure?.code)
+    }
+
+    @Test fun pendingVersionRejectsDifferentSignedContentAndMatchesCanonicalPolicy() {
+        val pair = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
+            .generateKeyPair()
+        val spki = RemoteCrypto.encode(pair.public.encoded)
+        fun sign(payload: ByteArray): RemoteDocument {
+            val signature = Signature.getInstance("SHA256withECDSA").run {
+                initSign(pair.private)
+                update(payload)
+                sign()
+            }
+            val envelope = f.envelope("policy-5") + mapOf("keyId" to RemoteCrypto.keyId(spki),
+                "payload" to RemoteCrypto.encode(payload), "signature" to RemoteCrypto.encode(signature))
+            return RemoteDocument(DocumentType.POLICY, WireJson.canonical(envelope))
+        }
+        val harness = harness()
+        val trust = requireNotNull(initial.trust).copy(policyKeys = listOf(spki))
+        assertTrue(harness.journal.save(initial.copy(trust = trust, policy = f.policy("policy-1"))))
+        fun receive(document: RemoteDocument): String? {
+            val sync = RemoteSync(f.verifier, f.binding)
+            val now = RemoteTime(1, 100)
+            val exchange = requireNotNull(sync.begin(f.nonce, now))
+            return harness.engine.receive(sync, exchange, f.nonce, now, listOf(document))
+                .decisions.single().failure?.code
+        }
+
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", receive(sign(f.payload("policy-5"))))
+        harness.restart()
+        val different = WireJson.canonical(f.doc("policy-5") + ("auditNote" to "TEST ONLY"))
+        assertEquals("doc-version-rollback", receive(sign(different)))
+        assertEquals(1L, harness.engine.state.policy?.version)
+        assertNull(receive(sign(f.payload("policy-5-spaced"))))
+        assertEquals(f.policy("policy-5-spaced"), harness.engine.state.policy)
+    }
+
+    @Test fun interruptedRotationAuthenticatesTheOldSnapshotAndPinsTheNewSigner() {
+        val store = fileStore()
+        val harness = harness(store)
+        val previous = initial.copy(trust = f.trust(), policy = f.policy("policy-1"))
+        assertTrue(harness.journal.save(previous))
+        val journal = persistedJournal(harness)
+        harness.memory.beforeCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { harness.receive("keyset-2") }
+        harness.memory.beforeCommit = Consumer { }
+
+        assertEquals(RemoteCrypto.keyId(requireNotNull(previous.trust).root), store.read()?.previousRootFingerprint)
+        replaceJournal(harness, journal + ("trust" to (journal.obj("trust") +
+            ("server" to f.keys.obj("server-next").text("spki")))))
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
+
+        replaceJournal(harness, journal)
+        assertNull(harness.engine.failure)
+        assertEquals(previous.trust, harness.engine.state.trust)
+        assertEquals("doc-version-rollback", harness.receive("lock-5-old-key").decisions.single().failure?.code)
+        assertEquals("doc-version-rollback", harness.receive("keyset-2-current-root").decisions.single().failure?.code)
+        assertNull(harness.receive("keyset-2").decisions.single().failure)
+        assertEquals(f.trust("keyset-2", "successor"), harness.engine.state.trust)
+        assertNull(store.read()?.previousRootFingerprint)
+        replaceJournal(harness, journal)
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
+    }
+
+    @Test fun restartFinalizesRotationAfterJournalCommitBeforeDroppingTheOldSnapshot() {
+        val store = fileStore()
+        val harness = harness(store)
+        assertTrue(harness.journal.save(initial.copy(trust = f.trust())))
+        val previous = persistedJournal(harness)
+        harness.memory.afterCommit = Consumer { throw ProcessDeath() }
+        assertThrows(ProcessDeath::class.java) { harness.receive("keyset-2") }
+        harness.memory.afterCommit = Consumer { }
+        assertTrue(store.read()?.previousRootFingerprint != null)
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertEquals(f.trust("keyset-2", "successor"), harness.engine.state.trust)
+        assertNull(store.read()?.previousRootFingerprint)
+        assertTrue(requireNotNull(store.read()).pending.isEmpty())
+        replaceJournal(harness, previous)
+        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.engine.failure)
+    }
+
+    @Test fun baselineWriteCanRetryWithVersionZeroAndPinsItsBytes() {
+        val harness = harness()
+        assertNull(bind(harness))
+        val baseline = f.hashes.obj("baseline").obj("body")
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", harness.engine.commitBaseline(baseline)?.code)
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertNull(harness.engine.state.policy)
+        assertNull(harness.engine.commitBaseline(baseline))
+        harness.restart()
+        assertEquals(f.policy("baseline"), harness.engine.state.policy)
+    }
+
+    @Test fun bindingAfterTheBaselineStaysPinnedThroughFailureAndUnrelatedSaves() {
+        val harness = harness()
+        val baseline = f.hashes.obj("baseline").obj("body")
+        assertNull(harness.engine.commitBaseline(baseline))
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", bind(harness)?.code)
+
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertNull(harness.engine.state.binding)
+        assertTrue(harness.engine.reconcile().verified)
+        assertEquals("journal-write-failed", bind(harness, f.binding.copy(fleetId = "another-fleet"))?.code)
+        assertEquals("journal-write-failed", bind(harness, key = "successor")?.code)
+        assertNull(bind(harness))
+        harness.restart()
+        assertEquals(f.binding, harness.engine.state.binding)
+        assertEquals(f.policy("baseline"), harness.engine.state.policy)
+        assertNull(harness.engine.failure)
+    }
+
+    @Test fun guardCleanupFailureBlocksUseOfTheCommittedRotationUntilRecovery() {
+        val fileStore = fileStore()
+        var failCleanup = false
+        val store = object : RemoteJournalGuardStore by fileStore {
+            override fun write(guard: JournalGuard, createKey: Boolean) {
+                if (failCleanup && guard.previous == null) throw IOException("Simulated cleanup failure")
+                fileStore.write(guard, createKey)
+            }
+        }
+        val harness = harness(store)
+        assertTrue(harness.journal.save(initial.copy(trust = f.trust())))
+        failCleanup = true
+        assertEquals(RemoteJournal.GUARD_WRITE_FAILED, harness.receive("keyset-2").decisions.single().failure)
+        assertEquals(RemoteJournal.GUARD_WRITE_FAILED, harness.engine.reconcile().failure)
+        harness.restart()
+        assertEquals(RemoteJournal.GUARD_WRITE_FAILED, harness.engine.failure)
+
+        failCleanup = false
+        harness.restart()
+        assertNull(harness.engine.failure)
+        assertEquals(f.trust("keyset-2", "successor"), harness.engine.state.trust)
+        assertNull(store.read()?.previousRootFingerprint)
     }
 
     @Test fun aJournalAheadOfTheGuardFailsClosed() {

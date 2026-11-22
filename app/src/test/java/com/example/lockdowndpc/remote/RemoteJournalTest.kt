@@ -358,16 +358,19 @@ class RemoteJournalTest {
         assertEquals(choice, harness.engine.state.overrides)
     }
 
-    @Test fun failedJournalWriteDuringRootRotationFailsClosedInProcessAndAfterRestart() {
+    @Test fun failedJournalWriteDuringRootRotationCanRetryInProcess() {
         val initial = JournalState(trust = f.trust())
         val harness = f.harness(initial)
         harness.memory.failCommit = true
-        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.receive("keyset-2").decisions.single().failure)
+        assertEquals("journal-write-failed", harness.receive("keyset-2").decisions.single().failure?.code)
         assertEquals(initial, harness.engine.state)
-        harness.restart()
-        assertEquals(initial, harness.engine.state)
-        assertEquals(RemoteJournal.GUARD_MISMATCH, harness.receive("keyset-2").failure)
+        assertNull(harness.journal.checkStores())
         assertEquals(2L, harness.journal.floor(DocumentType.KEY_SET))
+
+        harness.memory.failCommit = false
+        assertNull(harness.receive("keyset-2").decisions.single().failure)
+        harness.restart()
+        assertEquals(f.trust("keyset-2", "successor"), harness.engine.state.trust)
     }
 
     @Test fun failedRecoveryWriteKeepsTheVerifierUnchangedAndRetainsTheGuardedFloor() {
@@ -379,6 +382,8 @@ class RemoteJournalTest {
         harness.restart()
         assertEquals(initial, harness.engine.state)
         assertEquals(2L, harness.journal.floor(DocumentType.RECOVERY))
+        assertNull(harness.receive("recovery-2").decisions.single().failure)
+        assertEquals(2L, harness.engine.state.recoveryVersion)
         assertEquals("doc-version-rollback", harness.receive("recovery-2").decisions.single().failure?.code)
     }
 
@@ -393,6 +398,24 @@ class RemoteJournalTest {
         assertEquals(initial.trust, harness.engine.state.trust)
         assertEquals(2L, harness.journal.floor(DocumentType.KEY_SET))
         assertEquals("doc-version-rollback", harness.receive("lock-1").decisions.single().failure?.code)
+        assertNull(harness.receive("keyset-2-current-root").decisions.single().failure)
+        assertEquals(f.trust("keyset-2-current-root", "root"), harness.engine.state.trust)
+    }
+
+    @Test fun aPendingCommandDoesNotBypassTheExchangeNonce() {
+        val harness = f.harness(JournalState(trust = f.trust("keyset-2", "successor")))
+        harness.memory.failCommit = true
+        assertEquals("journal-write-failed", harness.receive("lock-2").decisions.single().failure?.code)
+        harness.restart()
+
+        val otherNonce = f.sync.obj("nonces").text("b")
+        val sync = RemoteSync(f.verifier, f.binding)
+        val now = RemoteTime(1, 100)
+        val exchange = requireNotNull(sync.begin(otherNonce, now))
+        val response = harness.engine.receive(sync, exchange, otherNonce, now, listOf(f.document("lock-2")))
+        assertEquals("command-nonce-mismatch", response.decisions.single().failure?.code)
+        assertEquals(0L, harness.engine.state.commandFloor)
+        assertEquals(2L, harness.journal.floor(DocumentType.COMMAND))
     }
 
     /** A5: a recovery that lands after the DISPATCHING commit still cancels the command. */

@@ -196,21 +196,48 @@ Other device rules:
 - **Kiosk.** A kiosk left in the store of a device with remote intent is not
   restored at boot, and its HOME screen neither locks the task nor starts the
   target. The journal pass turns it off.
-- **Journal protection.** The journal creation marker is stored first. The
-  guard in no-backup storage is atomically replaced before the journal whenever
-  its protected fields change. A device-specific Android Keystore HMAC
-  authenticates its fleet and device binding fingerprint, active root fingerprint,
-  and key-set, policy, recovery and command floors. Remote mode is committed
-  after the first successful bind. If only the guard write completes, matching
-  identities let the previous policy continue with the higher replay floors.
+- **Journal protection.** The creation marker is stored first. The no-backup
+  guard record uses format 3, with a device-specific Android Keystore HMAC-SHA256
+  tag over the canonical JSON fields `format`, `current`, `previous` and
+  `pending`. Each snapshot pins the fleet/device `bindingFingerprint`, the
+  active `rootFingerprint`, and the four durable `floors` (key set, policy,
+  recovery and command). `trustSha256` digests the canonical trust object,
+  including the root, successor, key-set version, policy keys, server key and
+  server URL. `policySha256` pins the committed policy hash, which is checked
+  against the exact stored payload bytes on read. A missing policy has a null
+  hash, including before the version-zero baseline is committed.
+- **Pending writes and rotation.** The guard is atomically replaced before a
+  protected journal write. The `pending` map is keyed by document type and
+  records the version and SHA-256 of the canonical signed payload. For key sets
+  it also records the signer fingerprint, since that signer becomes the active
+  root. A pending version raises the replay floor immediately. At that floor,
+  only the matching document can retry, and only while its version is absent
+  from the journal. Signature, binding and command nonce checks still apply.
+  A command in a new exchange normally needs a higher sequence because the
+  new nonce changes its payload. Unrelated saves preserve outstanding retries.
+  A higher accepted version supersedes a reservation for the same type.
+  During a write, `previous` pins the entire pre-write snapshot and `current`
+  pins the proposed snapshot. During root rotation, `previous.rootFingerprint`
+  is the previous root fingerprint. The journal must match one whole snapshot.
+  The committed trust remains in force until the journal write succeeds, and
+  non-key-set documents wait for the reserved key set to commit. After the
+  journal commits, the guard drops the previous snapshot and any fulfilled
+  reservation. A restart that reads the new snapshot finishes this cleanup
+  before using it. Remote mode is committed after the first successful bind.
 - **Storage refusals.** A missing or damaged committed journal reports
   `journal-lost`, even when all three journal stores are missing. A missing
   guard reports `journal-guard-missing`. A corrupt guard or unusable MAC key
-  reports `journal-guard-unreadable`. An identity mismatch or a journal floor
-  ahead of the guard reports `journal-guard-mismatch`. These failures leave
-  existing restrictions in force. Before remote mode is committed, a creation
-  marker and a valid guard with initial floors can resume an interrupted first
-  bind to the same fleet, device and root when the journal file is absent.
+  reports `journal-guard-unreadable`. The loss of the Keystore HMAC key fails
+  closed permanently for that enrolment. The key cannot be recreated for an
+  existing guard, and the device must be reset and re-enrolled. Guard formats
+  1 and 2 fail closed with `journal-guard-reenrolment-needed`. A journal that
+  matches neither authenticated snapshot reports `journal-guard-mismatch`.
+  These failures leave existing restrictions in force. Before remote mode
+  is committed, a creation marker and a valid guard with initial floors can
+  resume an interrupted first bind to the same fleet, device and root when
+  the journal file is absent. When a version-zero baseline is already in the
+  journal, an interrupted first bind preserves both the baseline and the
+  proposed binding. Only that binding can finish enrolment.
 - **Command history.** The journal keeps the sequence floor and the last 16
   finished commands for the next report. Replay protection needs only the floor.
 
