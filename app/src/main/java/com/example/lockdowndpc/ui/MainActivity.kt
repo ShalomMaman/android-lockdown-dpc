@@ -170,6 +170,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStop() {
+        AdminPinStore.clearRecoveryGrant()
+        super.onStop()
+    }
+
     /**
      * Release builds keep the PIN, lockout and recovery screens out of
      * screenshots and the recents thumbnail. Debug builds deliberately leave the
@@ -501,10 +506,10 @@ private fun AdminConsole(
             }
         } catch (exception: IllegalArgumentException) {
             haptics.reject()
-            val error = if (setupMode == PinSetupMode.RECOVERY) {
-                R.string.pin_error_recovery_reuse
-            } else {
-                R.string.pin_error_save
+            val error = when (exception.message) {
+                AdminPinStore.PIN_FORMAT_ERROR -> R.string.pin_error_format
+                AdminPinStore.PIN_REUSE_ERROR -> R.string.pin_error_recovery_reuse
+                else -> R.string.pin_error_save
             }
             message = UiMessage(resources.getString(error), isError = true)
             return

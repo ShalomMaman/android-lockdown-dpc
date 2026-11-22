@@ -177,7 +177,9 @@ public class AuthorizedPolicyWriterTest {
             case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify",
                     // completeRecoveryPinReset writes credentials without an AdminSession.
                     // It requires a live recovery grant and LOCAL_PIN mode.
-                    "completeRecoveryPinReset")
+                    "completeRecoveryPinReset",
+                    // clearRecoveryGrant only drops the in-memory grant (tightening; writes nothing).
+                    "clearRecoveryGrant")
                     .contains(method);
             case "ManagementModeStore" -> method.equals("selectLocal");
             case "AllowedAppsStore" -> method.equals("rememberPackageLabel");

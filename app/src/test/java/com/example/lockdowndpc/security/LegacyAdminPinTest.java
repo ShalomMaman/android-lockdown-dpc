@@ -18,7 +18,10 @@ import org.robolectric.RuntimeEnvironment;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowSystemClock;
 
+import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -93,15 +96,17 @@ public class LegacyAdminPinTest {
     }
 
     @Test
-    public void grantCannotResetThePinOutsideLocalMode() throws Exception {
-        seedRecoveryCode(pinStore);
-        var grant = verifyRecovery(store, context);
+    public void leavingLocalModeRevokesTheGrantEvenIfLocalModeReturns() throws Exception {
+        startConsoleRecovery(context);
         var before = pinStore.getAll();
-        assertTrue(context.getSharedPreferences("management_mode", Context.MODE_PRIVATE).edit()
-                .putString("mode", ManagementMode.ENROLLING.name()).commit());
+        var mode = context.getSharedPreferences("management_mode", Context.MODE_PRIVATE);
+        assertTrue(mode.edit().putString("mode", ManagementMode.ENROLLING.name()).commit());
+        assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context));
+        assertTrue(mode.edit().putString("mode", ManagementMode.LOCAL_PIN.name()).commit());
 
-        assertNull(store.completeRecoveryPinReset(context, grant, NEW_PIN, () -> KEY));
+        assertNull(AdminPinStore.getRecoveryGrant(context));
         assertEquals(before, pinStore.getAll());
+        assertNotNull(verifyConsoleRecovery(context).recoveryGrant());
     }
 
     @Test
@@ -109,10 +114,14 @@ public class LegacyAdminPinTest {
         seedRecoveryCode(pinStore);
         var before = pinStore.getAll();
         var grant = verifyRecovery(store, context);
-        for (String rejected : new String[]{PIN, RECOVERY_CODE.replace("-", ""), "12345"}) {
-            assertThrows(IllegalArgumentException.class,
+        for (String rejected : new String[]{PIN, RECOVERY_CODE.replace("-", "")}) {
+            var error = assertThrows(IllegalArgumentException.class,
                     () -> store.completeRecoveryPinReset(context, grant, rejected, () -> KEY));
+            assertEquals(AdminPinStore.PIN_REUSE_ERROR, error.getMessage());
         }
+        var formatError = assertThrows(IllegalArgumentException.class,
+                () -> store.completeRecoveryPinReset(context, grant, "12345", () -> KEY));
+        assertEquals(AdminPinStore.PIN_FORMAT_ERROR, formatError.getMessage());
         assertEquals(before, pinStore.getAll());
         assertNotNull(store.completeRecoveryPinReset(context, grant, NEW_PIN, () -> KEY));
     }
@@ -148,13 +157,78 @@ public class LegacyAdminPinTest {
         assertAtomicRecoveryReset(false);
     }
 
+    @Test
+    public void successfulCommitRemovesALeftoverBackupBeforeAcceptingTheReset() throws Exception {
+        seedRecoveryCode(pinStore);
+        Path backup = recoveryPreferencesFile(".bak");
+        AtomicInteger commits = new AtomicInteger();
+        Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, true, commits,
+                () -> Files.createFile(backup)));
+        var grant = verifyRecovery(store, faulted);
+
+        assertNotNull(store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
+        assertTrue(Files.notExists(backup));
+        assertEquals(1, commits.get());
+    }
+
+    @Test
+    public void successfulCommitWithAnUndeletableBackupRollsBackAndKeepsTheGrant() throws Exception {
+        seedRecoveryCode(pinStore);
+        assertTrue(pinStore.edit().putBoolean("recovery_pin_reset_pending", true)
+                .putInt("pin_failures", 2).commit());
+        var before = pinStore.getAll();
+        Path backup = recoveryPreferencesFile(".bak");
+        Path child = backup.resolve("keep");
+        AtomicInteger commits = new AtomicInteger();
+        Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, true, commits,
+                () -> {
+                    Files.createDirectory(backup);
+                    Files.createFile(child);
+                }));
+        var grant = verifyRecovery(store, faulted);
+
+        assertThrows(SecurityException.class,
+                () -> store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
+        assertTrue(Files.exists(child));
+        assertEquals(before, pinStore.getAll());
+        assertEquals(2, commits.get());
+
+        Files.delete(child);
+        Files.delete(backup);
+        assertNotNull(store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
+    }
+
+    @Test
+    public void readbackRejectsDuplicateCredentialKeys() throws Exception {
+        seedRecoveryCode(pinStore);
+        var before = pinStore.getAll();
+        Path file = recoveryPreferencesFile("");
+        AtomicInteger commits = new AtomicInteger();
+        Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, false, commits,
+                () -> {
+                    String xml = Files.readString(file);
+                    String duplicate = "<string name=\"pin_salt\">" + pinStore.getString("pin_salt", "") + "</string>";
+                    Files.writeString(file, xml.replace("</map>", duplicate + "</map>"));
+                }));
+        var grant = verifyRecovery(store, faulted);
+
+        assertThrows(SecurityException.class,
+                () -> store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
+        assertEquals(before, pinStore.getAll());
+        assertEquals(2, commits.get());
+    }
+
+    private Path recoveryPreferencesFile(String suffix) {
+        return context.getDataDir().toPath().resolve("shared_prefs/admin_security.xml" + suffix);
+    }
+
     private void assertAtomicRecoveryReset(boolean commitResult) throws Exception {
         seedRecoveryCode(pinStore);
         assertTrue(pinStore.edit().putBoolean("recovery_pin_reset_pending", true)
                 .putInt("pin_failures", 2).commit());
         var before = pinStore.getAll();
         AtomicInteger commits = new AtomicInteger();
-        Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, commitResult, commits));
+        Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, commitResult, commits, () -> {}));
 
         AdminSession.unlock();
         var grant = verifyRecovery(store, faulted);
@@ -178,7 +252,7 @@ public class LegacyAdminPinTest {
     }
 
     private static SharedPreferences diskWritingPreferences(
-            SharedPreferences prefs, boolean commitResult, AtomicInteger commits) {
+            SharedPreferences prefs, boolean commitResult, AtomicInteger commits, AfterCommit afterFirstCommit) {
         return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),
                 new Class<?>[]{SharedPreferences.class}, (proxy, method, args) -> {
                     if (!method.getName().equals("edit")) {
@@ -188,14 +262,22 @@ public class LegacyAdminPinTest {
                     return Proxy.newProxyInstance(SharedPreferences.Editor.class.getClassLoader(),
                             new Class<?>[]{SharedPreferences.Editor.class}, (wrapper, editMethod, editArgs) -> {
                                 if (editMethod.getName().equals("commit")) {
-                                    commits.incrementAndGet();
+                                    int attempt = commits.incrementAndGet();
                                     assertTrue(editor.commit());
+                                    if (attempt == 1) {
+                                        afterFirstCommit.run();
+                                    }
                                     return commitResult;
                                 }
                                 editMethod.invoke(editor, editArgs);
                                 return wrapper;
                             });
                 });
+    }
+
+    @FunctionalInterface
+    private interface AfterCommit {
+        void run() throws IOException;
     }
 
     private static AdminPinStore.RecoveryGrant verifyRecovery(AdminPinStore store, Context context) {
@@ -217,7 +299,11 @@ public class LegacyAdminPinTest {
     public static void startConsoleRecovery(Context context) throws Exception {
         SharedPreferences prefs = context.getSharedPreferences("admin_security", Context.MODE_PRIVATE);
         seedRecoveryCode(prefs);
-        assertNotNull(AdminPinStore.verify(context, RECOVERY_CODE, () -> KEY).recoveryGrant());
+        assertNotNull(verifyConsoleRecovery(context).recoveryGrant());
+    }
+
+    public static AdminPinStore.Verification verifyConsoleRecovery(Context context) {
+        return AdminPinStore.verify(context, RECOVERY_CODE, () -> KEY);
     }
 
     @Test

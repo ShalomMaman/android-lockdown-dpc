@@ -4,7 +4,7 @@ import android.content.SharedPreferences;
 
 import java.util.Map;
 import java.util.Set;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /** Synchronous preference writes that undo Android's in-memory change on disk failure. */
@@ -15,13 +15,13 @@ public final class DurablePreferences {
     public static boolean commit(
             SharedPreferences prefs, SharedPreferences.Editor update, String... keys
     ) {
-        return commit(prefs, update, () -> false, keys);
+        return commit(prefs, update, committed -> committed, keys);
     }
 
-    /** Confirm an ambiguous commit from disk before attempting to roll it back. */
+    /** Check the commit result and any required disk evidence before accepting a write. */
     static boolean commit(
             SharedPreferences prefs, SharedPreferences.Editor update,
-            BooleanSupplier committedOnDisk, String... keys
+            Predicate<Boolean> isDurable, String... keys
     ) {
         Map<String, ?> before = prefs.getAll();
         return commit(update, () -> {
@@ -30,29 +30,32 @@ public final class DurablePreferences {
                 restore(rollback, key, before.get(key));
             }
             return rollback;
-        }, committedOnDisk);
+        }, isDurable);
     }
 
     /** For a store that already has a typed snapshot of its previous state. */
     public static boolean commit(
             SharedPreferences.Editor update, Supplier<SharedPreferences.Editor> rollback
     ) {
-        return commit(update, rollback, () -> false);
+        return commit(update, rollback, committed -> committed);
     }
 
     private static boolean commit(
             SharedPreferences.Editor update, Supplier<SharedPreferences.Editor> rollback,
-            BooleanSupplier committedOnDisk
+            Predicate<Boolean> isDurable
     ) {
+        boolean committed = false;
         try {
-            if (update.commit()) {
-                return true;
-            }
+            committed = update.commit();
         } catch (RuntimeException failedWrite) {
             // A throwing editor may already have changed the in-memory map.
         }
-        if (committedOnDisk.getAsBoolean()) {
-            return true;
+        try {
+            if (isDurable.test(committed)) {
+                return true;
+            }
+        } catch (RuntimeException unreadable) {
+            // A write without its required disk evidence must also be rolled back.
         }
         // Even if disk is still unwritable, this puts the old values back in memory.
         rollback.get().commit();

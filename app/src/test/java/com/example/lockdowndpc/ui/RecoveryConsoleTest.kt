@@ -19,6 +19,7 @@ import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.security.LegacyAdminPinTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,13 +64,33 @@ class RecoveryConsoleTest {
             assertTrue(consoleText(activity).contains(context.getString(R.string.pin_setup_title_replace)))
 
             assertEquals(ConsoleScreen.PIN_SETUP, initialScreen(context))
+            ShadowSystemClock.advanceBy(Duration.ofMinutes(3))
+            assertNull(AdminPinStore.getRecoveryGrant(context))
+            assertEquals(ConsoleScreen.LOCKED, initialScreen(context))
         }
 
-        ShadowSystemClock.advanceBy(Duration.ofMinutes(3))
-        assertNull(AdminPinStore.getRecoveryGrant(context))
-        assertEquals(ConsoleScreen.LOCKED, initialScreen(context))
         assertEquals(ConsoleScreen.LOCKED,
             ConsoleScreen.PIN_SETUP.afterRecoveryGrantEnds(PinSetupMode.RECOVERY, AdminSession.isUnlocked()))
+    }
+
+    @Test
+    fun stoppingTheActivityRevokesTheGrantAndTheOldRecoveryCodeStillWorks() {
+        val context = seedDeviceOwner()
+        LegacyAdminPinTest.startConsoleRecovery(context)
+
+        Robolectric.buildActivity(MainActivity::class.java).setup().use { controller ->
+            assertTrue(consoleText(controller.get()).contains(context.getString(R.string.pin_setup_title_replace)))
+            controller.pause().stop()
+            assertNull(AdminPinStore.getRecoveryGrant(context))
+        }
+
+        Robolectric.buildActivity(MainActivity::class.java).setup().use { controller ->
+            assertEquals(ConsoleScreen.LOCKED, initialScreen(context))
+            assertTrue(consoleText(controller.get()).contains(context.getString(R.string.locked_title)))
+            val verification = LegacyAdminPinTest.verifyConsoleRecovery(context)
+            assertEquals(AdminPinStore.Status.SUCCESS, verification.status())
+            assertNotNull(verification.recoveryGrant())
+        }
     }
 
     @Test
