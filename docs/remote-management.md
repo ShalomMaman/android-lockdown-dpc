@@ -257,7 +257,7 @@ marker is cleared only by a factory reset.
 | --- | --- | --- |
 | `UNDECIDED` | None | Device Owner set over ADB with no bundle: local PIN setup, or bench enrolment if the device is fresh (4.8). Today's ADB flow. |
 | `LOCAL_PIN` | PIN session | Full console, unchanged |
-| `ENROLLING` | Built-in baseline only | Read-only status and the recovery entry |
+| `ENROLLING` | Built-in baseline on first enrolment. After re-anchor, existing restrictions stay in effect while the device waits for a signed replacement policy. | Read-only status and storage recovery |
 | `REMOTE` | Fleet policies; `lock_now`, `reapply` | Read-only status and the recovery entry |
 
 Mode decision, applied on every start before any screen or reconciliation:
@@ -276,8 +276,8 @@ Mode decision, applied on every start before any screen or reconciliation:
   routes to `PIN_SETUP`.
 - **No legacy writer.** `PolicyRefreshReceiver` and the periodic sweep do not
   choose between apply and pause from the legacy stores. They call the remote
-  path, `RemotePolicyApplier.reconcile()` (5.5), which always applies
-  protection.
+  path, `RemotePolicyApplier.reconcile()` (5.5), which leaves current
+  restrictions in effect during storage refusal and re-anchor.
 - **No maintenance.** Writing the marker also clears `MaintenanceStore` in the
   same flow. `liveMaintenanceWindow` returns no window outside `LOCAL_PIN`, and
   `MaintenanceCoordinator.open` refuses. A fresh device has none anyway; this
@@ -447,14 +447,15 @@ from another app, so it cannot authenticate the bench.
 ```
 
 The envelope is at most 64 KiB. Common header: `schemaVersion` (unknown
-refused), `type`, `fleetId`, `keySetVersion` (at least the floor). The schema
+refused), `type`, and `fleetId`. Sync payloads also carry `keySetVersion`
+(at least the floor). The schema
 is **closed**: unknown fields at any level, and any field or command named in
 section 14 (for example `browserThroughFilter`, `permittedAccessibilityServices`,
 `systemUpdates`, `pause`, `wipe`), are refused with `doc-field-unknown` or
 `command-unknown`. The vectors include one rejection case per Later field and
 command.
 
-### 5.2 Document types (v1 has exactly four)
+### 5.2 Signed document types
 
 | Type | Signer | Binding | Ordering |
 | --- | --- | --- | --- |
@@ -462,6 +463,7 @@ command.
 | `fleet-policy` | Fleet policy key | Lists 1–256 device IDs; the device must be listed | `fleetPolicyVersion` strictly increasing per fleet; no predecessor hash, so a device jumps straight to the newest version it receives |
 | `recovery` | Fleet policy key | Lists exactly one device | `recoveryVersion` per device strictly increasing |
 | `command` | Server key | One device and **the nonce of the sync request it answers** | `sequence` strictly increasing |
+| `re-anchor` | Original fleet root pinned at binding | One fleet, device and console challenge | Single-use, expiring nonce. Restores all four sync floors. |
 
 There are no server-signed policy documents and no time documents. No v1 rule
 depends on wall-clock time.
@@ -619,6 +621,34 @@ between some of them):
 In every case, the next run converges on the committed generation, no pass
 reads a mixed generation, and `verifiedSha256` never names a generation that
 was not read back.
+
+#### Storage re-anchor
+
+When a journal or its guard fails closed, the device console names the problem,
+shows a copyable one-time challenge, and takes the signed document on a
+dedicated screen. For a device bound before the backup pin was introduced,
+the device must still have authenticated evidence of its original binding
+root. Where only the independent backup record survives, the administrator
+also enters the original root fingerprint. If that identity can no longer be
+authenticated, the console says that a factory reset and enrolment are required.
+
+The fleet administrator signs the challenge, device, fleet and latest issued
+version of every sync document type using the original binding root. The
+device refuses smaller values than any locally readable floors. The full
+[wire and storage contract](remote-contract/README.md#console-re-anchor)
+specifies optional payload hashes for resending the exact keyset and policy at
+the same versions. After a rotation the fleet must still use the original root
+to sign the replacement keyset accepted by the rebuilt device.
+
+An authorized re-anchor changes only remote management records and enters
+`ENROLLING`. Existing Android restrictions and projected stores stay in force
+while the device waits. A replacement keyset and policy must pass the normal
+verification path, and projection must read the new policy back before
+returning the device to `REMOTE`. Old command outcomes and recovery codes
+do not carry over. Unverified package releases are retained only when still
+provable, so the next policy pass can undo them. The build gate remains off.
+Signing recovery documents for the console and delivering the replacement keyset
+and policy are responsibilities of the fleet server or offline operator.
 
 ### 5.6 Failure codes
 

@@ -22,6 +22,7 @@ public final class ManagementModeStore {
     static final String MARKER_KEY = "remoteIntent";
     static final String MODE_PREFS = "management_mode";
     static final String MODE_KEY = "mode";
+    private static final String REANCHOR_KEY = "reanchorStarted";
     static final String MARKER_FILE = "remote-intent";
     private static final int MARKER_VERSION = 1;
 
@@ -88,16 +89,34 @@ public final class ManagementModeStore {
 
     /** Called once the fleet binding has been stored by the remote journal. */
     static synchronized boolean commitRemote(Context context) {
+        return commitManagedMode(context, ManagementMode.REMOTE);
+    }
+
+    static synchronized boolean commitReanchorEnrolling(Context context) {
+        return commitManagedMode(context, ManagementMode.ENROLLING);
+    }
+
+    static synchronized boolean hasPreviouslyBound(Context context) {
+        return readMode(context) == ManagementMode.REMOTE
+                || modePreferences(context).getBoolean(REANCHOR_KEY, false);
+    }
+
+    private static boolean commitManagedMode(Context context, ManagementMode mode) {
         if (!RemoteEnrolmentGate.permits() || readMarker(context) != Marker.PRESENT) {
             return false;
         }
         try {
             SharedPreferences prefs = modePreferences(context);
-            if (ManagementMode.REMOTE.name().equals(prefs.getAll().get(MODE_KEY))) {
+            boolean reanchor = mode == ManagementMode.ENROLLING;
+            if (mode.name().equals(prefs.getAll().get(MODE_KEY))
+                    && (!reanchor || prefs.getBoolean(REANCHOR_KEY, false))) {
                 return true;
             }
-            return DurablePreferences.commit(prefs,
-                    prefs.edit().putString(MODE_KEY, ManagementMode.REMOTE.name()), MODE_KEY);
+            var update = prefs.edit().putString(MODE_KEY, mode.name());
+            if (reanchor) {
+                return DurablePreferences.commit(prefs, update.putBoolean(REANCHOR_KEY, true), MODE_KEY, REANCHOR_KEY);
+            }
+            return DurablePreferences.commit(prefs, update, MODE_KEY);
         } catch (RuntimeException unreadable) {
             return false;
         }

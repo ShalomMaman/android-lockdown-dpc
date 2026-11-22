@@ -48,6 +48,10 @@
     "review-server": {
       "keyId": "GcH_iCSKuBg3eIxngwpuYtYDy-GlCwjyfzHejbgNCZg",
       "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERFaH2LrcgszYk5uOLGh2Pv3OdAGZdu0ovAQJ1gDQ5nmgGgqzncfQLC_thyq3mOl5Mlf4DD0qFGQdnGeb1uoZsQ"
+    },
+    "reanchor-root": {
+      "spki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEixSEAP9AOwtytpk1D7G2l0l6b05SWnSUkrqNggr8pDCiFNogRbKTa1RJSh-vl1H-qnW8NO4Ld8Tb8E762GcoEQ",
+      "keyId": "zFpgccW8b2hDsgIYtmCFrf3OcBrhtx8ahFN8skRU-Pg"
     }
   },
   "documents": {

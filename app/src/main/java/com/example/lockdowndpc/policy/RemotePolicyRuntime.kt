@@ -8,6 +8,9 @@ import android.os.SystemClock
 import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.security.keystore.KeyPermanentlyInvalidatedException
+import com.example.lockdowndpc.remote.RecoveryPinFile
+import com.example.lockdowndpc.remote.RemoteReanchor
 import com.example.lockdowndpc.remote.RemoteBinding
 import com.example.lockdowndpc.remote.RemoteCrypto
 import com.example.lockdowndpc.remote.RemoteDocument
@@ -25,6 +28,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.security.UnrecoverableKeyException
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
 import javax.crypto.SecretKey
@@ -38,6 +42,7 @@ internal object RemotePolicyRuntime {
 
     private var open: Open? = null
     private var guardMac: (ByteArray, Boolean) -> ByteArray = ::keystoreGuardMac
+    private var pinMac: (ByteArray, Boolean) -> ByteArray = ::keystorePinMac
 
     @JvmStatic
     fun reconcile(context: Context): LockdownPolicyController.PolicyResult {
@@ -55,11 +60,16 @@ internal object RemotePolicyRuntime {
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
+                // The live restrictions are the baseline after a re-anchor.
+                if (current.engine.state.reanchored) return failed(DISABLED)
                 return LockdownPolicyController.applyRemoteContainment(context)
             }
             val pass = current.engine.reconcile()
             if (pass.failure != null) return failed(pass.failure)
             val result = current.projection.lastResult
+            if (pass.verified && current.engine.state.reanchored && !ManagementModeStore.commitRemote(context)) {
+                return failed(WRITE_FAILED)
+            }
             if (pass.verified && result != null) result
             else if (result != null && !result.applied()) result
             else failed(RemoteFailure("remote-policy-unverified"))
@@ -73,7 +83,7 @@ internal object RemotePolicyRuntime {
             val app = context.applicationContext
             val sdk = Build.VERSION.SDK_INT
             val trust = engine.state.trust
-            val interrupted = !engine.lost && sdk >= RemoteEngine.MIN_SDK && engine.state.binding == binding &&
+            val interrupted = !engine.lost && !engine.state.reanchored && sdk >= RemoteEngine.MIN_SDK && engine.state.binding == binding &&
                 trust != null && trust.version == 0L && trust.root == rootSpki && RemoteCrypto.keyId(rootSpki) == pinnedId &&
                 ManagementModeStore.read(app) == ManagementMode.ENROLLING
             if (!interrupted) {
@@ -93,6 +103,21 @@ internal object RemotePolicyRuntime {
     } catch (_: Exception) {
         RemoteJournal.JOURNAL_LOST
     }
+
+    fun reanchorStatus(context: Context): RemoteReanchor.Status =
+        onRemoteThread(context, RemoteReanchor.Status(), RemoteReanchor.Status(RemoteJournal.JOURNAL_LOST,
+            error = WRITE_FAILED), resumeMode = false, revoke = false) {
+            engine.reanchorStatus(now(context))
+        }
+
+    fun reanchor(context: Context, envelope: ByteArray, rootFingerprint: String?): RemoteFailure? =
+        onRemoteThread(context, DISABLED, WRITE_FAILED, resumeMode = false, revoke = false) {
+            val result = engine.reanchor(verifier, envelope, rootFingerprint, now(context)) {
+                ManagementModeStore.commitReanchorEnrolling(context.applicationContext)
+            }
+            if (result == null) sync = null
+            result
+        }
 
     fun beginExchange(context: Context): RemoteSync.Exchange? = onRemoteThread(context, null) {
         val binding = engine.state.binding ?: return@onRemoteThread null
@@ -132,7 +157,8 @@ internal object RemotePolicyRuntime {
     }
 
     private fun <T> onRemoteThread(
-        context: Context, blocked: T, failed: T = blocked, resumeMode: Boolean = true, work: Open.() -> T
+        context: Context, blocked: T, failed: T = blocked, resumeMode: Boolean = true,
+        revoke: Boolean = true, work: Open.() -> T
     ): T =
         PolicyReconciliationCoordinator.callOnPolicyThread {
             try {
@@ -141,7 +167,7 @@ internal object RemotePolicyRuntime {
                 val current = open(app)
                 current.engine.checkStores()
                 // Whatever the caller came for, an exposed package is hidden again first.
-                current.engine.revokeReleases()
+                if (revoke) current.engine.revokeReleases()
                 if (resumeMode && !commitRemoteMode(app, current.engine)) return@callOnPolicyThread failed
                 current.work()
             } catch (_: Exception) {
@@ -156,6 +182,7 @@ internal object RemotePolicyRuntime {
     /** A restart between the journal commit and the mode commit can finish the transition. */
     private fun commitRemoteMode(context: Context, engine: RemoteEngine): Boolean =
         engine.lost || engine.state.binding == null || engine.state.trust == null ||
+            engine.state.reanchored ||
             ManagementModeStore.commitRemote(context)
 
     private fun now(context: Context) = RemoteTime(
@@ -169,7 +196,10 @@ internal object RemotePolicyRuntime {
     private fun open(context: Context): Open = open ?: run {
         val schema = context.assets.open("v1.schema.json").use { RemoteSchema(it.readBytes()) }
         val projection = RemotePolicyProjection(context)
-        val engine = RemoteEngine(openJournal(context), schema, projection, ::recoveryMac)
+        val journal = openJournal(context).also { it.preserveLegacyPin() }
+        val engine = RemoteEngine(journal, schema, projection, ::recoveryMac, recoveredModeReady = {
+            ManagementModeStore.read(context) == ManagementMode.REMOTE
+        })
         // Store writes are authorized only for the generation this journal holds.
         AdminAuthority.CommittedPolicy.bindJournal { if (engine.lost) null else engine.state.generation()?.sha256 }
         Open(projection, engine, RemoteVerifier(schema)).also { open = it }
@@ -182,7 +212,8 @@ internal object RemotePolicyRuntime {
             RemoteJournalGuardFile(File(context.noBackupFilesDir, JOURNAL_GUARD_FILE), guardMac),
             journalFileAbsent = { preferencesFilesAbsent(context, JOURNAL_PREFS) },
             markerFileAbsent = { preferencesFilesAbsent(context, JOURNAL_MARKER_PREFS) },
-            remoteCommitted = { ManagementModeStore.read(context) == ManagementMode.REMOTE }
+            remoteCommitted = { ManagementModeStore.hasPreviouslyBound(context) },
+            recoveryPinFile = RecoveryPinFile(File(context.noBackupFilesDir, RECOVERY_PIN_FILE), pinMac)
         )
     }
 
@@ -201,6 +232,11 @@ internal object RemotePolicyRuntime {
         guardMac = mac ?: ::keystoreGuardMac
     }
 
+    internal fun setPinMacForTests(mac: ((ByteArray, Boolean) -> ByteArray)?) {
+        pinMac = mac ?: ::keystorePinMac
+    }
+
+    const val RECOVERY_PIN_FILE = "remote-recovery-pin"
     const val JOURNAL_PREFS = "remote_policy_journal"
     const val JOURNAL_MARKER_PREFS = "remote_policy_journal_marker"
     const val JOURNAL_GUARD_FILE = "remote-policy-guard"
@@ -212,24 +248,34 @@ internal object RemotePolicyRuntime {
         keystoreMac("remote_recovery_hmac", data, create)
 
     private fun keystoreGuardMac(data: ByteArray, create: Boolean): ByteArray =
-        keystoreMac("remote_journal_guard_hmac", data, create)
+        keystoreMac("remote_journal_guard_hmac", data, create, replaceInvalidated = true)
 
-    private fun keystoreMac(alias: String, data: ByteArray, create: Boolean): ByteArray {
-        val store = KeyStore.getInstance("AndroidKeyStore")
-        store.load(null)
-        val key = if (store.containsAlias(alias)) {
-            store.getKey(alias, null) as SecretKey
-        } else {
+    private fun keystorePinMac(data: ByteArray, create: Boolean): ByteArray =
+        keystoreMac("remote_reanchor_pin_hmac", data, create, replaceInvalidated = true)
+
+    private fun keystoreMac(
+        alias: String, data: ByteArray, create: Boolean, replaceInvalidated: Boolean = false
+    ): ByteArray {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        fun generate(): SecretKey {
             check(create)
-            KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256, "AndroidKeyStore").run {
+            return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_HMAC_SHA256, "AndroidKeyStore").run {
                 init(KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN)
                     .setDigests(KeyProperties.DIGEST_SHA256).build())
                 generateKey()
             }
         }
-        return Mac.getInstance("HmacSHA256").run {
+        fun sign(key: SecretKey): ByteArray = Mac.getInstance("HmacSHA256").run {
             init(key)
             doFinal(data)
+        }
+        try {
+            return sign((store.getKey(alias, null) as SecretKey?) ?: generate())
+        } catch (failure: Exception) {
+            if (!create || !replaceInvalidated ||
+                (failure !is KeyPermanentlyInvalidatedException && failure !is UnrecoverableKeyException)) throw failure
+            store.deleteEntry(alias)
+            return sign(generate())
         }
     }
 }

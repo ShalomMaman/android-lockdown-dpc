@@ -106,6 +106,51 @@ internal class RemoteVerifier(private val schema: RemoteSchema, private val allo
         return RemoteTrust(rootSpki)
     }
 
+    internal class AuthenticatedReanchor private constructor(
+        val binding: RemoteBinding,
+        val trust: RemoteTrust,
+        val floors: Map<DocumentType, Long>,
+        val floorPayloadSha256: Map<DocumentType, String>
+    ) {
+        companion object {
+            fun verify(
+                verifier: RemoteVerifier, input: ByteArray, pin: RecoveryPin, nonce: String
+            ): AuthenticatedReanchor = try {
+                if (input.size > RemoteReanchor.MAX_ENVELOPE_BYTES) refuse("doc-field-invalid")
+                val envelope = verifier.schema.envelope(input)
+                if (envelope.text("keyId") != pin.rootFingerprint || !verifier.permitsKeyId(pin.rootFingerprint)) {
+                    refuse("re-anchor-root-mismatch")
+                }
+                val payload = RemoteCrypto.decode(envelope.text("payload"))
+                // Read only the candidate verification key before checking the signature.
+                // The full SPKI must hash to the independently authenticated fingerprint.
+                val body = verifier.schema.decode(payload).asObject()
+                val spki = body["rootSpki"] as? String ?: refuse("doc-field-invalid", "/rootSpki")
+                if (RemoteCrypto.keyId(spki) != pin.rootFingerprint) refuse("re-anchor-root-mismatch")
+                if (!RemoteCrypto.verifies(RemoteCrypto.publicKey(spki), payload,
+                        RemoteCrypto.decode(envelope.text("signature")))) refuse("doc-signature-invalid")
+                verifier.schema.requireValid(RemoteReanchor.TYPE, body)
+                if (body.text("rootFingerprint") != pin.rootFingerprint) refuse("re-anchor-root-mismatch")
+                val binding = RemoteBinding(body.text("fleetId"), body.text("deviceId"))
+                if (binding.fingerprint() != pin.bindingFingerprint) refuse("re-anchor-binding-mismatch")
+                if (body.text("nonce") != nonce) refuse("re-anchor-nonce-invalid")
+                val floors = body.obj("floors")
+                AuthenticatedReanchor(binding, verifier.bootstrap(pin.rootFingerprint, spki, binding),
+                    DocumentType.entries.associateWith { floors.number(it.wire) },
+                    RemoteReanchor.resendableTypes.mapNotNull { type ->
+                        body["floorPayloadSha256"]?.asObject()?.get(type.wire)?.let { type to (it as String) }
+                    }.toMap())
+            } catch (error: Refused) {
+                throw error
+            } catch (_: Exception) {
+                refuse("doc-field-invalid")
+            }
+        }
+    }
+
+    fun authenticateReanchor(input: ByteArray, pin: RecoveryPin, nonce: String): AuthenticatedReanchor =
+        AuthenticatedReanchor.verify(this, input, pin, nonce)
+
     fun permitsKeyId(id: String): Boolean = allowFixtureKeys || id !in TEST_KEY_IDS
 
     private fun verifyRoles(doc: JsonObject, trust: RemoteTrust) {
@@ -128,7 +173,8 @@ internal class RemoteVerifier(private val schema: RemoteSchema, private val allo
             "htxuEHubuWZIGu6bTg0LBRTPuH64WYhbyaVB6pyldnk", "8iXZ83US03Z5z5ZaTwn9ifumVvnNpaOHHyghOAyGJTw",
             "0N7UdpZGSywqoLCZa9dcI5BE7QtTB04SaEykPmwe74I", "yry0uOnre8zDLuLKEy0BbEzndWUotWqG1JSNz18Rh5o",
             "Ihuz3CXaARD5vI17XSYr3rE4zuHGSUphX-gk-9Nav70", "bBiF1hHDuE3iZhUHVRdArxFAUamsy29m94F8d7jc000",
-            "Wt5dqGUiOGEOmQnsjREkEhaDTi-Gwutlowxos8oCfYw", "GcH_iCSKuBg3eIxngwpuYtYDy-GlCwjyfzHejbgNCZg"
+            "Wt5dqGUiOGEOmQnsjREkEhaDTi-Gwutlowxos8oCfYw", "GcH_iCSKuBg3eIxngwpuYtYDy-GlCwjyfzHejbgNCZg",
+            "zFpgccW8b2hDsgIYtmCFrf3OcBrhtx8ahFN8skRU-Pg"
         )
     }
 }
