@@ -365,6 +365,9 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
             assertEquals(binding.deviceId, body["deviceId"])
             assertEquals(keySetVersion, body["keySetVersion"])
             assertEquals(commandFloor, body["lastCommandSequence"])
+            val packages = body.obj("report").obj("health").obj("packages")
+            assertEquals(AllowedAppsStore.getAllowedPackages(context).size.toLong(), packages["allowed"])
+            assertEquals(0L, packages["blocked"])
         }
 
         val policyKey = newKeyPair()

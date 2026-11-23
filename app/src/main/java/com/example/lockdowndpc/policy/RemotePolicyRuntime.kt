@@ -228,7 +228,7 @@ internal object RemotePolicyRuntime {
         return mapOf(
             "mode" to ManagementModeStore.read(context).name,
             "health" to mapOf("verification" to policy.verification().name, "ownership" to policy.ownership().name,
-                "packages" to mapOf("allowed" to counts.allowed(), "blocked" to counts.blocked())),
+                "packages" to mapOf("allowed" to counts.allowed().toLong(), "blocked" to counts.blocked().toLong())),
             "passErrors" to policy.verificationErrors(),
             "syncErrors" to current.syncErrors,
             "commands" to state.commands.values.filter { it.state.finished }.sortedBy { it.sequence }.map {
