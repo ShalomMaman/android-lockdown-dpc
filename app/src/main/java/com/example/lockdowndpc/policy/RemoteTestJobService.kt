@@ -189,7 +189,8 @@ internal class RemoteSyncClock(private val wallMillis: () -> Long = System::curr
     }
 
     private companion object {
-        const val MAX_OFFSET_MS = 24 * 60 * 60_000L
+        // Small: a wider bound would let an HTTPS interceptor obtain future-dated signed reports to replay later.
+        const val MAX_OFFSET_MS = 10 * 60_000L
     }
 }
 

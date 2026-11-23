@@ -100,7 +100,7 @@ class RemoteTestJobTest {
     @Test fun staleClockRetryIsBoundedAndRequiresAUsableAuthenticatedDate() {
         val wall = 1_800_000_000_000L
         val usable = RemoteClockSample(wall - 10_000L, wall)
-        val outsideBound = RemoteClockSample(wall - 25 * 60 * 60_000L, wall)
+        val outsideBound = RemoteClockSample(wall + 11 * 60_000L, wall)
         for ((sample, attempts) in listOf(null to 1, outsideBound to 1, usable to 2)) {
             val clock = RemoteSyncClock { wall }
             val reports = mutableListOf<String>()
