@@ -46,6 +46,7 @@ FIXTURE_KEY_IDS = frozenset(
 IDENTITY_TYPES = {"serial", "enrollmentSpecificId"}
 MAX_INPUT_BYTES = 4 * 1024 * 1024
 DEFAULT_REVOCATION_MAX_AGE_DAYS = 7
+REVOCATION_CLOCK_TOLERANCE_SECONDS = 5 * 60
 
 
 def read_bytes(path: Path, limit: int = MAX_INPUT_BYTES) -> bytes:
@@ -301,7 +302,7 @@ def load_revocations(path: Path, max_age_days: int) -> set[str]:
         raise FleetError("--revocation-max-age-days must be positive")
     with path.expanduser().open("rb") as source:
         age = time.time() - os.fstat(source.fileno()).st_mtime
-        if age < 0:
+        if age < -REVOCATION_CLOCK_TOLERANCE_SECONDS:
             raise FleetError("Android attestation revocation list has a future modification time")
         if age > max_age_days * 24 * 3600:
             raise FleetError(f"Android attestation revocation list is older than {max_age_days} day(s)")
@@ -583,6 +584,8 @@ def recovery(args: argparse.Namespace) -> None:
 def reanchor(args: argparse.Namespace) -> None:
     if args.device_id in FIXTURE_KEY_IDS:
         raise FleetError("contract fixture keys are refused as device IDs")
+    if args.policy_envelope is not None and args.keyset_envelope is None:
+        raise FleetError("--policy-envelope requires --keyset-envelope")
     key = SigningKey.open(args)
     if args.root_fingerprint != key.fingerprint:
         raise FleetError("private key does not match the current root fingerprint")
@@ -592,7 +595,8 @@ def reanchor(args: argparse.Namespace) -> None:
         **header(args.fleet_id, "re-anchor"), "deviceId": args.device_id, "nonce": args.nonce,
         "rootFingerprint": key.fingerprint, "rootSpki": b64url(key.spki), "floors": floors,
     }
-    hashes = {}
+    verified_payloads = {}
+    trusted_signers = {"keyset": (key.spki,)}
     for kind, path, version_field in (
         ("keyset", args.keyset_envelope, "keySetVersion"),
         ("fleet-policy", args.policy_envelope, "fleetPolicyVersion"),
@@ -600,13 +604,26 @@ def reanchor(args: argparse.Namespace) -> None:
         if path is None:
             continue
         check_output(args.output, path)
-        _, raw = read_envelope(path)
+        envelope, raw = read_envelope(path)
         payload = signed_payload(raw, kind)
         if payload["fleetId"] != args.fleet_id or payload[version_field] != floors[kind]:
             raise FleetError(f"{kind} envelope must match the re-anchor fleet and floor version")
-        hashes[kind] = hash_hex(raw)
-    if hashes:
-        document["floorPayloadSha256"] = hashes
+        signer = next((spki for spki in trusted_signers[kind] if key_id(spki) == envelope["keyId"]), None)
+        if signer is None:
+            raise FleetError(f"{kind} envelope signer is not trusted")
+        try:
+            attestation.verify_signature(signer, raw, decode(envelope["signature"]))
+        except attestation.AttestationError:
+            raise FleetError(f"{kind} envelope signature is invalid") from None
+        if kind == "fleet-policy" and payload["keySetVersion"] < floors["keyset"]:
+            # The device refuses a policy whose keySetVersion is below its active key set.
+            raise FleetError("fleet-policy envelope must be bound to the re-anchor key set version or later")
+        if kind == "keyset":
+            checked_key_roles(payload, b64url(key.spki))
+            trusted_signers["fleet-policy"] = tuple(decode(spki) for spki in payload["fleetPolicyKeys"])
+        verified_payloads[kind] = raw
+    if verified_payloads:
+        document["floorPayloadSha256"] = {kind: hash_hex(raw) for kind, raw in verified_payloads.items()}
     emit(args, document, key)
     print("Signed the re-anchor document for the supplied console nonce.")
 
@@ -692,7 +709,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     for kind in ("keyset", "policy", "recovery", "command"):
         anchor.add_argument(f"--{kind}-floor", type=int, required=True)
     anchor.add_argument("--keyset-envelope", type=Path, help="Issued key set envelope at --keyset-floor")
-    anchor.add_argument("--policy-envelope", type=Path, help="Issued policy envelope at --policy-floor")
+    anchor.add_argument("--policy-envelope", type=Path,
+                        help="Issued policy envelope at --policy-floor (requires --keyset-envelope)")
     anchor.set_defaults(run=reanchor)
     return parser.parse_args(argv)
 

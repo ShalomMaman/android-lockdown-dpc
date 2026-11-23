@@ -1,9 +1,13 @@
 """Offline conformance checks for the public Device Guard v1 fixtures."""
 
 import hashlib
+import os
 import re
+import tempfile
 import unittest
 from copy import deepcopy
+from pathlib import Path
+from unittest.mock import patch
 
 from remote_contract import (
     CONTRACT,
@@ -23,6 +27,7 @@ from remote_contract import (
     payload_error,
     schema_error,
     spki_point,
+    write_private_bundle,
 )
 
 
@@ -474,6 +479,41 @@ def check_recovery(case, data, initial=None):
 
 
 class RemoteContractTest(unittest.TestCase):
+    def test_bundle_preserves_directory_created_after_existence_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "bundle"
+            make_temporary = tempfile.TemporaryDirectory
+            existing_inode = None
+
+            def create_competing_directory(*args, **kwargs):
+                nonlocal existing_inode
+                staging = make_temporary(*args, **kwargs)
+                output.mkdir()
+                existing_inode = output.stat().st_ino
+                return staging
+
+            with patch("remote_contract.tempfile.TemporaryDirectory", side_effect=create_competing_directory):
+                with self.assertRaises(FileExistsError):
+                    write_private_bundle(output, {"file.txt": b"contents"})
+            self.assertEqual(output.stat().st_ino, existing_inode)
+            self.assertEqual(list(output.iterdir()), [])
+            self.assertEqual(list(output.parent.iterdir()), [output])
+
+    def test_bundle_cleans_up_if_a_file_cannot_be_published(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "bundle"
+            link = os.link
+
+            def fail_second_file(source, destination):
+                if destination.name == "second.txt":
+                    raise OSError("publication failed")
+                link(source, destination)
+
+            with patch("remote_contract.os.link", side_effect=fail_second_file):
+                with self.assertRaisesRegex(OSError, "publication failed"):
+                    write_private_bundle(output, {"first.txt": b"first", "second.txt": b"second"})
+            self.assertEqual(list(output.parent.iterdir()), [])
+
     def compare_cases(self, cases, evaluate):
         self.assertTrue(cases)
         self.assertEqual(len({case["id"] for case in cases}), len(cases))
