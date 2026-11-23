@@ -62,7 +62,7 @@ def owner(snapshot: str) -> tuple[str, int]:
         user = re.search(r"(?m)^\s*User ID:\s*(\d+)\s*$", block[2])
         if component and user and component[2] == ADMIN_CLASS:
             return component[1], int(user[1])
-    raise DrillError("Device Guard Device Owner and its user could not be read")
+    raise DrillError("Maakeh Device Owner and its user could not be read")
 
 
 def effective_restrictions(snapshot: str, user: int) -> list[str]:
