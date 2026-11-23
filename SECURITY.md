@@ -1,6 +1,6 @@
 # Security policy
 
-Device Guard is privileged software. A vulnerability can weaken restrictions or disrupt management of a fully managed Android device.
+Maakeh is privileged software. A vulnerability can weaken restrictions or disrupt management of a fully managed Android device.
 
 ## Reporting a vulnerability
 

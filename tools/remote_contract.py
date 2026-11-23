@@ -1,4 +1,4 @@
-"""Strict JSON encoding and validation for the Device Guard remote v1 contract."""
+"""Strict JSON encoding and validation for the Maakeh remote v1 contract."""
 
 import base64
 import hashlib

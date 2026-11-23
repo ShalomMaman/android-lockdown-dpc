@@ -100,7 +100,7 @@ internal val ISOLATE_MARKS = charArrayOf(LTR_ISOLATE, FIRST_STRONG_ISOLATE, POP_
 internal fun bidiIsolatedLines(text: String): String =
     text.lineSequence().joinToString("\n") { it.bidiIsolated() }
 
-/** The display languages Device Guard ships a complete translation for. */
+/** The display languages Maakeh ships a complete translation for. */
 internal enum class LanguageChoice { SYSTEM, ENGLISH, HEBREW }
 
 /**

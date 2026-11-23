@@ -6,7 +6,7 @@
 
 ## Decision
 
-Keep Device Guard as the Android Device Owner. Remote enrolment is opt-in on a
+Keep Maakeh as the Android Device Owner. Remote enrolment is opt-in on a
 fresh device, starts with a verified local baseline and leaves local PIN mode
 available for separate deployments. Moving an already-managed device requires
 the supported reset and reprovisioning path. [Design #82][p82], [Android 12+ setup #83][p83],
@@ -42,9 +42,9 @@ the supported reset and reprovisioning path. [Design #82][p82], [Android 12+ set
 
 | Option | Fit and operating cost | Decision |
 | --- | --- | --- |
-| Extend Device Guard | Keeps the custom filtering, kiosk and read-back engine. The project owns the small relay, audit, fleet identity and key custody. Existing local deployments can stay local. Exit from Device Owner uses the documented wipe path. | Adopt. Revisit if the project cannot safely operate the relay and recovery or customers require a supported enterprise lifecycle the DPC cannot provide. |
+| Extend Maakeh | Keeps the custom filtering, kiosk and read-back engine. The project owns the small relay, audit, fleet identity and key custody. Existing local deployments can stay local. Exit from Device Owner uses the documented wipe path. | Adopt. Revisit if the project cannot safely operate the relay and recovery or customers require a supported enterprise lifecycle the DPC cannot provide. |
 | Google Android Management API | Covers fully managed and dedicated Android Enterprise devices through Google's Android Device Policy app. Adoption replaces the custom enforcement component, requires migration and reprovisioning of existing Device Owner devices, and adds Google service dependency. Google's permissible-use rules restrict provider eligibility and require customer agreements and data disclosure. | Defer until the intended deployment meets eligibility and a migration and exit drill proves policy and recovery parity. [Architecture][amapi], [permissible use][usage], [production release][release]. |
-| Headwind MDM | The Apache-2.0 server provides QR enrolment (documented for Android 7+), app deployment and status. Its launcher has its own Device Owner receiver. The self-hosted stack adds Java/Tomcat and PostgreSQL operations. Its maintained release line includes authorization fixes. Adoption would replace the agent or require a maintained compatibility layer for Device Guard's offline signing and read-back contract. | Defer. Revisit if a maintained integration proves this contract, migration and exit with less operational burden. [Server and license][headwind], [installation][headwind-install], [launcher manifest][headwind-agent], [release evidence][headwind-release]. |
+| Headwind MDM | The Apache-2.0 server provides QR enrolment (documented for Android 7+), app deployment and status. Its launcher has its own Device Owner receiver. The self-hosted stack adds Java/Tomcat and PostgreSQL operations. Its maintained release line includes authorization fixes. Adoption would replace the agent or require a maintained compatibility layer for Maakeh's offline signing and read-back contract. | Defer. Revisit if a maintained integration proves this contract, migration and exit with less operational burden. [Server and license][headwind], [installation][headwind-install], [launcher manifest][headwind-agent], [release evidence][headwind-release]. |
 
 [epic]: https://github.com/ShalomMaman/android-lockdown-dpc/issues/41
 [issue]: https://github.com/ShalomMaman/android-lockdown-dpc/issues/43

@@ -61,7 +61,7 @@ depends on them is merged.
 ### v1 goals
 
 - **Zero-touch-style enrolment of fresh devices into a verified baseline.** A
-  factory-reset device enrols by scanning one QR code. Device Guard becomes
+  factory-reset device enrols by scanning one QR code. Maakeh becomes
   Device Owner, applies a built-in baseline, reads it back, and only then lets
   setup finish.
 - **Only the administrator's offline key decides what a device may use.** Every
@@ -76,7 +76,7 @@ depends on them is merged.
 
 ### Non-goals
 
-- Replacing Android Enterprise or managed Google Play. Device Guard stays a
+- Replacing Android Enterprise or managed Google Play. Maakeh stays a
   self-hosted DPC.
 - Making consumer hardware impossible to reset or reflash. See
   [`SECURITY.md`](../SECURITY.md) and section 11.
@@ -156,7 +156,7 @@ depends on them is merged.
           ^  HTTPS pull, device-signed request with a fresh nonce
           v
   +-------------------------------------------------------------+
-  |  Device Guard (Device Owner)                                |
+  |  Maakeh (Device Owner)                                |
   |  verify -> policy journal (one commit) -> ensureProjected   |
   |  -> LockdownPolicyController.apply -> read-back -> report   |
   +-------------------------------------------------------------+
@@ -181,7 +181,7 @@ starts at API 33.
 
 v1 enrols **only fresh devices**: a device that is factory reset and
 provisioned from a QR code, or a device that a bench operator has just made
-Device Owner over ADB and that has never been managed by Device Guard (4.8).
+Device Owner over ADB and that has never been managed by Maakeh (4.8).
 
 ### 4.1 QR payload and the provisioning tool
 
@@ -391,7 +391,7 @@ names. Key sets have no time-based expiry; revocation is by a newer version.
    and run `adb shell dpm set-device-owner <full component>`. The device
    starts `UNDECIDED`.
 2. **Freshness check.** The **Enrol with management server** option appears
-   only if Device Guard has never managed the device. That means: no PIN, no
+   only if Maakeh has never managed the device. That means: no PIN, no
    stored app selection or managed-package record, no explicit system-control
    choices, no Play compatibility, home filter, kiosk or management-pin
    records, no maintenance window or pending restore, and an empty audit log.
@@ -924,8 +924,8 @@ environment variable. Subcommands:
   `recovery` document.
 - `tickets`, `bench-code` — create enrolment tickets and bench codes.
 
-**Updating Device Guard in v1.** While `app_stores_and_installers` is on,
-Device Guard cannot update itself; that is today's behaviour. The v1 update
+**Updating Maakeh in v1.** While `app_stores_and_installers` is on,
+Maakeh cannot update itself; that is today's behaviour. The v1 update
 path is explicit:
 
 1. Sign a fleet policy that turns the control off (labelled as global install
@@ -971,7 +971,7 @@ notes describe the device and protocol boundary from revision 4.
   proof of possession; no exported bench entry; fresh devices only. *Not
   covered:* whoever holds a wiped device can provision it with a local QR.
   That is the intended local mode.
-- **Reboot before first unlock.** Nothing of Device Guard runs before the
+- **Reboot before first unlock.** Nothing of Maakeh runs before the
   first unlock: the journal is in credential-protected storage, and the boot
   receiver is not direct-boot aware. v1 never relaxes a device temporarily,
   and Android keeps Device Owner restrictions and hidden packages across a
@@ -1144,7 +1144,7 @@ the only update-only path. v1 uses the explicit global path in section 10.
 
 ### 14.6 Browser through the filter
 
-Device Guard's canary proves only Device Guard's own traffic. A browser
+Maakeh's canary proves only Maakeh's own traffic. A browser
 exemption needs:
 
 - per-browser and per-firmware evidence (TWA, Custom Tabs, WebView, tunnel
@@ -1168,7 +1168,7 @@ a credential and can never travel in a QR code.
 
 - The permit APIs return `false` when an enabled non-system service is left
   out, and input methods also have a foreground-user condition.
-- Restricted Settings may affect Device Guard on Android 13+.
+- Restricted Settings may affect Maakeh on Android 13+.
 - OTA windows use minutes `0–1439`, a later start crosses midnight, and freeze
   history can invalidate a policy.
 

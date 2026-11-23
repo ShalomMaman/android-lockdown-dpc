@@ -1,13 +1,13 @@
 # Project positioning and discoverability
 
-This document keeps Device Guard's public description accurate, searchable and
+This document keeps Maakeh's public description accurate, searchable and
 consistent. It is not a growth-at-any-cost plan. Discoverability must never
 outrun the evidence in the supported-device matrix or turn a pilot into an
 implied production guarantee.
 
 ## Public name
 
-- **Product name:** Device Guard for Android
+- **Product name:** Maakeh for Android
 - **Repository slug:** `android-lockdown-dpc`
 - **Short category:** open-source Android Device Owner / DPC
 - **One-line description:** Open-source Android Device Owner (DPC) for verified
@@ -19,7 +19,7 @@ update metadata and artifacts through GitHub repository URLs. A future rename
 requires a stable, project-controlled update domain first; redirects are not a
 long-term release-channel design.
 
-“Device Guard” is always paired with “for Android” in headings and external
+“Maakeh” is always paired with “for Android” in headings and external
 copy. The unqualified term has unrelated historical uses and is not sufficiently
 distinctive on its own.
 
@@ -79,7 +79,7 @@ terms.
 The repository landing page should answer four questions before presenting
 implementation detail:
 
-1. What is Device Guard?
+1. What is Maakeh?
 2. Which managed-device and kiosk jobs does it perform?
 3. Is it safe to deploy today?
 4. Where can a user download, evaluate, contribute or report a vulnerability?

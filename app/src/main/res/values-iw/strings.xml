@@ -17,7 +17,7 @@
     res/values/strings.xml by LocaleParityTest.kt and tools/check_locale_parity.py.
 -->
 <resources>
-    <string name="app_name">מגן המכשיר</string>
+    <string name="app_name">מעקה</string>
     <string name="admin_label">ניהול והגנת המכשיר</string>
     <string name="admin_description">ניהול אפליקציות, חסימת התקנות והגבלת גישה לאינטרנט.</string>
     <string name="remote_policy_unavailable">המדיניות המנוהלת אינה זמינה</string>
@@ -265,14 +265,14 @@
     <string name="kiosk_profile_state_summary">%1$s · %2$s</string>
     <string name="kiosk_back">חזרה לניהול</string>
     <string name="kiosk_recovery_title">כיצד מנהל חוזר פנימה</string>
-    <string name="kiosk_recovery_body">במסך הקיוסק של ⁦Device Guard⁩ יש להקיש שבע פעמים תוך שלוש שניות על פינת המסך העליונה בצד שממנו מתחיל הטקסט. פעולה זו פותחת את מסך הניהול הזה בשלב הזנת הקוד בלבד — היא אינה משחררת דבר בעצמה. יציאה מקיוסק או שינוי שלו תמיד דורשים את קוד המנהל, ולכן יש לשמור את קוד השחזור במקום בטוח. בלי קוד המנהל ובלי קוד השחזור, רק אתחול והקצאה מחדש של המכשיר יסירו את הקיוסק.</string>
-    <string name="kiosk_recovery_single_app">ב־⁦Android 9⁩ ואילך לחצן הבית מחזיר לאותו מסך של ⁦Device Guard⁩, ולכן המחווה נשארת נגישה גם כאשר האפליקציה הנעולה אינה נסגרת לעולם. ב־⁦Android 8⁩ המסך נגיש רק לאחר שהאפליקציה הנעולה נסגרת מעצמה.</string>
+    <string name="kiosk_recovery_body">במסך הקיוסק של מעקה יש להקיש שבע פעמים תוך שלוש שניות על פינת המסך העליונה בצד שממנו מתחיל הטקסט. פעולה זו פותחת את מסך הניהול הזה בשלב הזנת הקוד בלבד — היא אינה משחררת דבר בעצמה. יציאה מקיוסק או שינוי שלו תמיד דורשים את קוד המנהל, ולכן יש לשמור את קוד השחזור במקום בטוח. בלי קוד המנהל ובלי קוד השחזור, רק אתחול והקצאה מחדש של המכשיר יסירו את הקיוסק.</string>
+    <string name="kiosk_recovery_single_app">ב־⁦Android 9⁩ ואילך לחצן הבית מחזיר לאותו מסך של מעקה, ולכן המחווה נשארת נגישה גם כאשר האפליקציה הנעולה אינה נסגרת לעולם. ב־⁦Android 8⁩ המסך נגיש רק לאחר שהאפליקציה הנעולה נסגרת מעצמה.</string>
     <string name="kiosk_recovery_single_site">בקיוסק אתר יחיד המסך הזה הוא תצוגת הדפדפן עצמה, ולכן המחווה זמינה תמיד.</string>
 
     <!-- Kiosk profile: app picker -->
     <string name="kiosk_app_title">בחירת האפליקציה הנעולה</string>
     <string name="kiosk_app_subtitle">מוצגות רק אפליקציות מותקנות שאדם יכול לפתוח בפועל, כולל אפליקציות שהמדיניות הנוכחית מסתירה.</string>
-    <string name="kiosk_app_note">⁦Device Guard⁩ עצמה, רכיבי מערכת חיוניים, ערוץ הניהול ומשטחי בריחה מוכרים כגון מנהלי קבצים ובוררי מסמכים לעולם אינם מוצעים, משום שנעילה על אחד מהם הייתה מוסרת את דרך היציאה.</string>
+    <string name="kiosk_app_note">מעקה עצמו, רכיבי מערכת חיוניים, ערוץ הניהול ומשטחי בריחה מוכרים כגון מנהלי קבצים ובוררי מסמכים לעולם אינם מוצעים, משום שנעילה על אחד מהם הייתה מוסרת את דרך היציאה.</string>
     <string name="kiosk_app_empty_title">אין אפליקציה מתאימה</string>
     <string name="kiosk_app_empty_body">לא נמצאה במכשיר אפליקציה מותקנת וניתנת להפעלה שאפשר לנעול עליה את הקיוסק.</string>
     <string name="kiosk_app_row_description">%1$s, מזהה חבילה %2$s, בחירה כאפליקציה הנעולה</string>
@@ -289,7 +289,7 @@
     <!-- Kiosk profile: activation confirmation -->
     <string name="kiosk_confirm_title">לנעול את המכשיר?</string>
     <string name="kiosk_confirm_subtitle">ההפעלה נכנסת לתוקף מיד, על המסך של מי שמחזיק את המכשיר ברגע זה.</string>
-    <string name="kiosk_confirm_app">המכשיר יציג רק את %1$s. מסך הסקירה, מגירת ההתראות ומסך הנעילה מושבתים כל עוד הנעילה מחזיקה, וב־⁦Android 9⁩ ואילך גם תפריט ההפעלה. לחצן הבית מחזיר למסך הקיוסק של ⁦Device Guard⁩, שבו מנהל מזדהה; הוא אינו מגיע לאף אפליקציה אחרת.</string>
+    <string name="kiosk_confirm_app">המכשיר יציג רק את %1$s. מסך הסקירה, מגירת ההתראות ומסך הנעילה מושבתים כל עוד הנעילה מחזיקה, וב־⁦Android 9⁩ ואילך גם תפריט ההפעלה. לחצן הבית מחזיר למסך הקיוסק של מעקה, שבו מנהל מזדהה; הוא אינו מגיע לאף אפליקציה אחרת.</string>
     <string name="kiosk_confirm_site">המכשיר יציג רק את האתר בכתובת %1$s. מסך הבית, מסך הסקירה, מגירת ההתראות ומסך הנעילה מושבתים כל עוד הנעילה מחזיקה, וב־⁦Android 9⁩ ואילך גם תפריט ההפעלה.</string>
     <string name="kiosk_confirm_reboot">אתחול מחזיר ליעד הקיוסק ולא למסך בית רגיל, ולכן הפעלה מחדש של המכשיר אינה דרך יציאה.</string>
     <string name="kiosk_confirm_cancel">עדיין לא לנעול</string>
@@ -311,7 +311,7 @@
     <string name="kiosk_problem_target_invalid_name">הערך השמור אינו מזהה חבילה תקין של ⁦Android⁩.</string>
     <string name="kiosk_problem_target_unresolved">לא ניתן לקרוא מהמכשיר את האפליקציה שנבחרה.</string>
     <string name="kiosk_problem_target_mismatch">המכשיר השיב על חבילה אחרת מזו שנבחרה.</string>
-    <string name="kiosk_problem_target_device_guard">⁦Device Guard⁩ אינה יכולה לנעול את עצמה.</string>
+    <string name="kiosk_problem_target_device_guard">מעקה אינו יכול לנעול את עצמו.</string>
     <string name="kiosk_problem_target_protected">האפליקציה הזאת היא רכיב מערכת חיוני, ערוץ הניהול או משטח בריחה מוכר, ולכן אי אפשר לנעול עליה.</string>
     <string name="kiosk_problem_target_not_installed">האפליקציה שנבחרה אינה מותקנת עוד.</string>
     <string name="kiosk_problem_target_not_enabled">האפליקציה שנבחרה מושבתת במכשיר.</string>
@@ -339,7 +339,7 @@
         ("נסו שוב") was the most visible place for the register to slip.
     -->
     <string name="kiosk_host_retry">ניסיון חוזר</string>
-    <string name="kiosk_home_title">קיוסק ⁦Device Guard⁩</string>
+    <string name="kiosk_home_title">קיוסק מעקה</string>
     <string name="kiosk_home_body">המכשיר נעול על %1$s.</string>
     <string name="kiosk_home_resume">חזרה לאפליקציה</string>
 
@@ -373,7 +373,7 @@
     <string name="audit_mode_block">נבחר מצב: חסימת אפליקציות מסומנות</string>
     <string name="audit_apps_saved">רשימת האפליקציות נשמרה</string>
     <string name="action_retry">ניסיון חוזר</string>
-    <string name="update_up_to_date">הגרסה של Device Guard מעודכנת.</string>
+    <string name="update_up_to_date">הגרסה של מעקה מעודכנת.</string>
     <string name="health_load_failed">לא ניתן לקרוא את דוח תקינות המכשיר. יש למשוך למטה כדי לנסות שוב.</string>
     <string name="health_export_failed">לא ניתן להעתיק את דוח תקינות המכשיר.</string>
     <string name="kiosk_app_load_failed">לא ניתן לקרוא את רשימת האפליקציות למצב קיוסק. יש למשוך למטה כדי לנסות שוב.</string>

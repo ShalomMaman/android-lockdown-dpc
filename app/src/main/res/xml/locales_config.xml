@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Declares the languages Device Guard ships, so Android 13 (API 33) and newer
+    Declares the languages Maakeh ships, so Android 13 (API 33) and newer
     list the app in Settings > System > Languages > App languages. Older releases
     ignore the attribute; AppCompat provides the same choice in-app from API 26.
 

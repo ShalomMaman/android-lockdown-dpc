@@ -1,7 +1,7 @@
 # Product screenshot provenance
 
 The PNG files in this directory are direct Android emulator screen captures of
-the Device Guard interface. They were captured from the `main` development
+the Maakeh interface. They were captured from the `main` development
 build after the Android API 37 launch fix, with the application provisioned as
 Device Owner on an Android API 37.1 emulator.
 

@@ -60,9 +60,9 @@ public final class LockdownPackages {
     );
 
     /**
-     * Packages Device Guard must never hide, suspend or take over.
+     * Packages Maakeh must never hide, suspend or take over.
      *
-     * <p>Device Guard does not operate a "total system allowlist". Hiding every
+     * <p>Maakeh does not operate a "total system allowlist". Hiding every
      * system package bricks OEM devices in ways that are not recoverable from
      * the console, so the conservative default is: system packages are left
      * alone unless they appear in an explicit catalogue above, and the packages

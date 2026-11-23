@@ -18,7 +18,7 @@
     <!-- Screen frame -->
     <string name="health_title">Device health</string>
     <string name="health_generated_at">Built on this device at %1$s</string>
-    <string name="health_local_only">This report is assembled on the device. Device Guard collects no telemetry, has no analytics endpoint, and sends nothing anywhere on its own. An export is written only when an administrator asks for one.</string>
+    <string name="health_local_only">This report is assembled on the device. Maakeh collects no telemetry, has no analytics endpoint, and sends nothing anywhere on its own. An export is written only when an administrator asks for one.</string>
     <string name="health_status_headline">%1$s — %2$s</string>
     <string name="health_line">%1$s: %2$s</string>
     <string name="health_finding_line">%1$s — %2$s</string>
@@ -67,7 +67,7 @@
     <string name="health_field_reconciliation_at">When</string>
     <string name="health_field_android_release">Android release</string>
     <string name="health_field_build_fingerprint">Firmware build</string>
-    <string name="health_field_app_version">Device Guard version</string>
+    <string name="health_field_app_version">Maakeh version</string>
 
     <!-- Shared values -->
     <string name="health_value_never">Never</string>
@@ -78,8 +78,8 @@
     <string name="health_value_system_controls">%1$d requested, %2$d applied, %3$d faulted, %4$d advisory, %5$d not available on this Android release</string>
 
     <!-- Ownership -->
-    <string name="health_ownership_device_owner">Device Guard is the Device Owner</string>
-    <string name="health_ownership_not_device_owner">Device Guard is not the Device Owner</string>
+    <string name="health_ownership_device_owner">Maakeh is the Device Owner</string>
+    <string name="health_ownership_not_device_owner">Maakeh is not the Device Owner</string>
     <string name="health_ownership_unknown">Ownership could not be read</string>
 
     <!-- Policy verification -->
@@ -126,8 +126,8 @@
 
     <!-- Findings -->
     <string name="health_finding_snapshot_unavailable">The state of this device could not be read, so nothing about it can be reported as healthy.</string>
-    <string name="health_finding_device_owner_missing">Device Guard is not the Device Owner of this device, so no policy can be enforced.</string>
-    <string name="health_finding_device_owner_unknown">Device Guard could not read whether it is still the Device Owner of this device.</string>
+    <string name="health_finding_device_owner_missing">Maakeh is not the Device Owner of this device, so no policy can be enforced.</string>
+    <string name="health_finding_device_owner_unknown">Maakeh could not read whether it is still the Device Owner of this device.</string>
     <string name="health_finding_policy_verification_failed">The last policy pass read the platform back and disagreed with it.</string>
     <string name="health_finding_policy_verification_unknown">The stored policy state could not be read.</string>
     <string name="health_finding_policy_never_verified">Protection is on, but no pass has read the platform back to confirm it.</string>
@@ -172,7 +172,7 @@
     <string name="health_row_supporting">Policy, kiosk, updates and management identity in one answer</string>
     <string name="health_export_action">Copy a redacted export</string>
     <string name="health_export_title">Copy this report?</string>
-    <string name="health_export_body">The export drops the administrator PIN, the recovery code, the kiosk address beyond its origin, the list of installed applications, and every free-text entry. It is placed on the clipboard of this device and nowhere else. Device Guard does not send it anywhere.</string>
+    <string name="health_export_body">The export drops the administrator PIN, the recovery code, the kiosk address beyond its origin, the list of installed applications, and every free-text entry. It is placed on the clipboard of this device and nowhere else. Maakeh does not send it anywhere.</string>
     <string name="health_export_confirm">Copy</string>
     <string name="health_export_cancel">Cancel</string>
     <string name="health_export_copied">The redacted report was copied to the clipboard</string>

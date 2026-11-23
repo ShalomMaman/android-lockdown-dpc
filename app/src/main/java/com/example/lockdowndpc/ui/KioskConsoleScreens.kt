@@ -403,7 +403,7 @@ private fun KioskProblemList(problems: List<String>) {
  *
  * The shared paragraph describes the gesture; the profile-specific sentence says
  * where that screen actually is, because the answer differs. A single-site kiosk
- * *is* the Device Guard screen. A single-app kiosk hands the display to another
+ * *is* the Maakeh screen. A single-app kiosk hands the display to another
  * package, and the way back is the HOME key returning to this DPC — which the
  * platform only offers from API 28 up.
  */

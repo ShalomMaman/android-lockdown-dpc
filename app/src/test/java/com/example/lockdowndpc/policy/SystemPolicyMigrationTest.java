@@ -104,7 +104,7 @@ public final class SystemPolicyMigrationTest {
     @Test
     public void installBlockingIsNeverADefaultOnEitherProfile() {
         // DISALLOW_INSTALL_APPS also stops the device owner installing packages,
-        // which is how Device Guard installs its own signed update. Defaulting it
+        // which is how Maakeh installs its own signed update. Defaulting it
         // on would disable the very recovery path that has to work before ADB can
         // be withdrawn, so it stays an explicit administrator choice everywhere.
         for (SystemPolicyProfile profile : SystemPolicyProfile.values()) {

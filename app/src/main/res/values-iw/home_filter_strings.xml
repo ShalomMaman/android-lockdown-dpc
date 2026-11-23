@@ -27,7 +27,7 @@
     <string name="home_filter_remove_ca">הסרת תעודה</string>
     <string name="home_filter_retry">החלה ובדיקה מחדש</string>
     <string name="home_filter_confirm_enable">ה־VPN יחובר תמיד, וכשהוא יתנתק תיחסם הגישה לרשת. חשוב שקוד המנהל יהיה זמין. ייתכן שהגישה לאינטרנט תיפסק עד שה־VPN יעבוד. יש להתקין רק תעודה של המסנן הביתי שאתם סומכים עליו.</string>
-    <string name="home_filter_confirm_disable">הגדרות ה־VPN ושירות התיווך של פרופיל זה יוסרו, והתעודה שנבחרה תוסר מ־Android. יתר ההגבלות של Device Guard ימשיכו לפעול לפי ההגדרות שלהן.</string>
+    <string name="home_filter_confirm_disable">הגדרות ה־VPN ושירות התיווך של פרופיל זה יוסרו, והתעודה שנבחרה תוסר מ־Android. יתר ההגבלות של מעקה ימשיכו לפעול לפי ההגדרות שלהן.</string>
     <string name="home_filter_confirm_ca">יש להתקין רק את התעודה הציבורית של המסנן הביתי שאתם סומכים עליו. המסנן יכול לבדוק תעבורה מוצפנת של אפליקציות שסומכות על התעודה.</string>
     <string name="home_filter_confirm_remove_ca">התעודה שנבחרה תוסר מ־Android. אפליקציות שזקוקות לה כדי להשתמש במסנן עלולות לאבד גישה.</string>
     <string name="home_filter_invalid_settings">יש לבדוק את מזהה האפליקציה, החתימה, הגדרות Tailscale וכתובת ה־PAC. אם מגדירים בדיקת חיבור, יש להזין כתובת HTTPS ואת התשובה הצפויה.</string>

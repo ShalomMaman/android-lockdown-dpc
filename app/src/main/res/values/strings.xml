@@ -10,7 +10,7 @@
     categories and format placeholders.
 -->
 <resources>
-    <string name="app_name">Device Guard</string>
+    <string name="app_name">Maakeh</string>
     <string name="admin_label">Device management and protection</string>
     <string name="admin_description">Manage apps, block installations, and restrict internet access.</string>
     <string name="remote_policy_unavailable">Managed policy unavailable</string>
@@ -247,14 +247,14 @@
     <string name="kiosk_profile_state_summary">%1$s · %2$s</string>
     <string name="kiosk_back">Back to management</string>
     <string name="kiosk_recovery_title">How an administrator gets back in</string>
-    <string name="kiosk_recovery_body">On the Device Guard kiosk screen, tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
-    <string name="kiosk_recovery_single_app">On Android 9 and later the Home button returns to that Device Guard screen, so the gesture stays reachable even when the locked app never closes. On Android 8 the screen is only reachable once the locked app closes itself.</string>
+    <string name="kiosk_recovery_body">On the Maakeh kiosk screen, tap the top corner on the side the text starts from, seven times within three seconds. That opens this console on its PIN screen and nothing else — it unlocks nothing on its own. Leaving or changing kiosk always needs the administrator PIN, so keep the recovery code somewhere safe. Without the PIN and without the recovery code, only re-provisioning the device removes kiosk.</string>
+    <string name="kiosk_recovery_single_app">On Android 9 and later the Home button returns to that Maakeh screen, so the gesture stays reachable even when the locked app never closes. On Android 8 the screen is only reachable once the locked app closes itself.</string>
     <string name="kiosk_recovery_single_site">In a single-site kiosk that screen is the browser view itself, so the gesture is always reachable.</string>
 
     <!-- Kiosk profile: app picker -->
     <string name="kiosk_app_title">Choose the locked app</string>
     <string name="kiosk_app_subtitle">Only installed apps that a person can actually open are listed, including apps this policy currently hides.</string>
-    <string name="kiosk_app_note">Device Guard itself, essential system components, the management transport, and known escape surfaces such as file managers and document pickers are never offered, because pinning one of those would hand over the way out.</string>
+    <string name="kiosk_app_note">Maakeh itself, essential system components, the management transport, and known escape surfaces such as file managers and document pickers are never offered, because pinning one of those would hand over the way out.</string>
     <string name="kiosk_app_empty_title">No eligible app</string>
     <string name="kiosk_app_empty_body">This device has no installed, launchable app that may be pinned as a kiosk target.</string>
     <string name="kiosk_app_row_description">%1$s, package name %2$s, choose as the locked app</string>
@@ -271,7 +271,7 @@
     <!-- Kiosk profile: activation confirmation -->
     <string name="kiosk_confirm_title">Lock this device?</string>
     <string name="kiosk_confirm_subtitle">Activation takes effect immediately on the screen in front of whoever is holding this device.</string>
-    <string name="kiosk_confirm_app">The device will show only %1$s. Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu. Home returns to the Device Guard kiosk screen, which is where an administrator signs in; it reaches no other app.</string>
+    <string name="kiosk_confirm_app">The device will show only %1$s. Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu. Home returns to the Maakeh kiosk screen, which is where an administrator signs in; it reaches no other app.</string>
     <string name="kiosk_confirm_site">The device will show only the website at %1$s. Home, Overview, the notification shade and the keyguard are suppressed while the lock holds, and on Android 9 and later so is the power menu.</string>
     <string name="kiosk_confirm_reboot">A reboot returns to this kiosk target instead of to a launcher, so restarting the device is not a way out.</string>
     <string name="kiosk_confirm_cancel">Do not lock yet</string>
@@ -293,7 +293,7 @@
     <string name="kiosk_problem_target_invalid_name">The stored value is not a valid Android package name.</string>
     <string name="kiosk_problem_target_unresolved">The chosen app could not be read from this device.</string>
     <string name="kiosk_problem_target_mismatch">The device answered about a different package than the one chosen.</string>
-    <string name="kiosk_problem_target_device_guard">Device Guard cannot lock itself.</string>
+    <string name="kiosk_problem_target_device_guard">Maakeh cannot lock itself.</string>
     <string name="kiosk_problem_target_protected">That app is an essential system component, the management transport, or a known escape surface, so it may not be pinned.</string>
     <string name="kiosk_problem_target_not_installed">The chosen app is no longer installed.</string>
     <string name="kiosk_problem_target_not_enabled">The chosen app is disabled on this device.</string>
@@ -316,7 +316,7 @@
     <string name="kiosk_host_download_blocked">Downloads are blocked in kiosk mode.</string>
     <string name="kiosk_host_renderer_gone">The browser view stopped responding and was closed safely. Try again.</string>
     <string name="kiosk_host_retry">Try again</string>
-    <string name="kiosk_home_title">Device Guard kiosk</string>
+    <string name="kiosk_home_title">Maakeh kiosk</string>
     <string name="kiosk_home_body">This device is locked to %1$s.</string>
     <string name="kiosk_home_resume">Return to the app</string>
 
@@ -350,7 +350,7 @@
     <string name="audit_mode_block">Mode selected: block the selected apps</string>
     <string name="audit_apps_saved">The app list was saved</string>
     <string name="action_retry">Try again</string>
-    <string name="update_up_to_date">Device Guard is up to date.</string>
+    <string name="update_up_to_date">Maakeh is up to date.</string>
     <string name="health_load_failed">Could not read the device health report. Pull down to try again.</string>
     <string name="health_export_failed">Could not copy the device health report.</string>
     <string name="kiosk_app_load_failed">Could not read the kiosk app list. Pull down to try again.</string>

@@ -62,7 +62,7 @@
 
     <!-- בקרה: חנויות ומתקינים -->
     <string name="system_policy_control_app_stores_and_installers_title">כל התקנת חבילה, כולל חנויות</string>
-    <string name="system_policy_control_app_stores_and_installers_consequence">חוסם כל מתקין במכשיר. Android מחיל זאת גם על יישום הניהול, ולכן Device Guard לא יוכל להתקין עדכונים חתומים משלו כל עוד הבקרה פעילה. השאירו אותה כבויה עד שהעדכונים יסופקו בדרך אחרת.</string>
+    <string name="system_policy_control_app_stores_and_installers_consequence">חוסם כל מתקין במכשיר. Android מחיל זאת גם על יישום הניהול, ולכן מעקה לא יוכל להתקין עדכונים חתומים משלו כל עוד הבקרה פעילה. השאירו אותה כבויה עד שהעדכונים יסופקו בדרך אחרת.</string>
 
     <!-- בקרה: חשבונות -->
     <string name="system_policy_control_account_modification_title">הוספה ושינוי של חשבונות</string>
@@ -127,7 +127,7 @@
     <string name="system_policy_play_compat_state_unverified">פועל, אך המכשיר לא אישר את נעילת ההתקנה, ולכן החנות נשארת מוסתרת</string>
     <string name="system_policy_play_compat_locked_control">נשאר פעיל בגלל תאימות ל-Google Play</string>
     <string name="system_policy_play_compat_confirm_enable_title">להשאיר את חנות Google Play זמינה?</string>
-    <string name="system_policy_play_compat_confirm_enable_body">חבילת חנות Google Play תישאר זמינה ליישומים שזקוקים לה. בתמורה, כל התקנת החבילות וההתקנה ממקורות לא ידועים מופעלות, נשארות פעילות ונקראות בחזרה מהמכשיר. Device Guard אינו יכול להתקין עדכונים חתומים משלו כל עוד ההתקנה חסומה, ולכן תכננו נתיב עדכון אחר לפני שתמשיכו. במסך בית רגיל ייתכן שהחנות תישאר גלויה וניתן יהיה לפתוח אותה; מה שנחסם הוא ההתקנה. אם המכשיר לא יאשר את נעילת ההתקנה, החנות תוסתר שוב וההגנה תדווח כלא מאומתת.</string>
+    <string name="system_policy_play_compat_confirm_enable_body">חבילת חנות Google Play תישאר זמינה ליישומים שזקוקים לה. בתמורה, כל התקנת החבילות וההתקנה ממקורות לא ידועים מופעלות, נשארות פעילות ונקראות בחזרה מהמכשיר. מעקה אינו יכול להתקין עדכונים חתומים משלו כל עוד ההתקנה חסומה, ולכן תכננו נתיב עדכון אחר לפני שתמשיכו. במסך בית רגיל ייתכן שהחנות תישאר גלויה וניתן יהיה לפתוח אותה; מה שנחסם הוא ההתקנה. אם המכשיר לא יאשר את נעילת ההתקנה, החנות תוסתר שוב וההגנה תדווח כלא מאומתת.</string>
     <string name="system_policy_play_compat_confirm_disable_title">להסתיר שוב את חנויות היישומים?</string>
     <string name="system_policy_play_compat_confirm_disable_body">חבילת חנות Google Play תוסתר שוב בפעם הבאה שהמדיניות תוחל, ויישומים שזקוקים לה עלולים להפסיק להיפתח. בקרות ההתקנה שהמצב הזה השאיר פעילות יחזרו לבחירות השמורות שלכם.</string>
 
@@ -135,7 +135,7 @@
     <!-- החרגות מהחסימה המובנית -->
     <string name="system_policy_section_exemptions">החרגות מהחסימה המובנית</string>
     <string name="system_policy_exempt_chrome_row">Chrome דרך סינון הבית</string>
-    <string name="system_policy_exempt_chrome_body">אפשר לאשר רק את Google Chrome החתום על ידי Google, ורק כל עוד סינון הבית פועל וההגנה פעילה. לפני ש-Chrome מוצג, Device Guard מגדיר ובודק את ההגדרות המנוהלות שלו: סקריפט שירות התיווך של סינון הבית הוא חובה, כך ש-Chrome לעולם לא מתחבר ישירות כשהסקריפט אינו זמין, ו-DNS מאובטח, גלישה בסתר, כניסה לחשבון וכלי הפיתוח כבויים. ההגדרות האלה חלות גם על כרטיסיות מותאמות ועל יישומי אינטרנט שנפתחים ב-Chrome. אם תנאי כלשהו לא מתקיים, Chrome מוסתר לפני שמשהו אחר משתנה. התעבורה של כל היישומים ממשיכה לעבור דרך ה-VPN הקבוע של סינון הבית. דפי אינטרנט שמוצגים בתוך יישומים אחרים אינם מכוסים בהגדרות של Chrome, והם מסוננים רק ברשת הבית. השהיית ההגנה מציגה את כל היישומים, כולל Chrome. אי אפשר לאשר חנויות יישומים.</string>
+    <string name="system_policy_exempt_chrome_body">אפשר לאשר רק את Google Chrome החתום על ידי Google, ורק כל עוד סינון הבית פועל וההגנה פעילה. לפני ש-Chrome מוצג, מעקה מגדיר ובודק את ההגדרות המנוהלות שלו: סקריפט שירות התיווך של סינון הבית הוא חובה, כך ש-Chrome לעולם לא מתחבר ישירות כשהסקריפט אינו זמין, ו-DNS מאובטח, גלישה בסתר, כניסה לחשבון וכלי הפיתוח כבויים. ההגדרות האלה חלות גם על כרטיסיות מותאמות ועל יישומי אינטרנט שנפתחים ב-Chrome. אם תנאי כלשהו לא מתקיים, Chrome מוסתר לפני שמשהו אחר משתנה. התעבורה של כל היישומים ממשיכה לעבור דרך ה-VPN הקבוע של סינון הבית. דפי אינטרנט שמוצגים בתוך יישומים אחרים אינם מכוסים בהגדרות של Chrome, והם מסוננים רק ברשת הבית. השהיית ההגנה מציגה את כל היישומים, כולל Chrome. אי אפשר לאשר חנויות יישומים.</string>
     <string name="system_policy_exempt_audit_not_saved">השינוי נשמר, אך לא ניתן היה לרשום אותו ביומן הביקורת.</string>
     <string name="system_policy_exempt_android_state">‏Android מדווח: %1$s</string>
     <string name="system_policy_exempt_observed_visible">זמין</string>
@@ -164,7 +164,7 @@
     <string name="system_policy_exempt_clear_approvals">ניקוי כל האישורים</string>
     <string name="system_policy_exempt_paused_refused">יש לחדש את ההגנה כדי לשנות אישורים.</string>
     <string name="system_policy_exempt_active_admin_refused">האפליקציה לא אושרה: היא מנהלת מכשיר פעילה, ו-Android לא יאפשר לחסום אותה שוב. יש להסיר קודם את הרשאת הניהול שלה בהגדרות.</string>
-    <string name="system_policy_exempt_admins_unreadable">האפליקציה לא אושרה: Device Guard לא הצליח לבדוק את מנהלי המכשיר. יש לנסות שוב.</string>
+    <string name="system_policy_exempt_admins_unreadable">האפליקציה לא אושרה: מעקה לא הצליח לבדוק את מנהלי המכשיר. יש לנסות שוב.</string>
     <string name="system_policy_exempt_containment_refused">האישור הוסר. לפני שמירת השינוי, Android סירב לחסום אפליקציה. בדיקת ההגנה מנסה לחסום אותה שוב. המצב הנוכחי מופיע בשורה של האפליקציה.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">השינוי נשמר, אך המדיניות לא אומתה (%1$s), ולא ניתן היה לרשום את השינוי ביומן הביקורת.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">לא ניתן היה לקרוא את חתימת Chrome</string>
@@ -190,8 +190,8 @@
     <string name="system_policy_schedule_state_off">כבוי</string>
     <string name="system_policy_schedule_state_on">פעיל</string>
     <string name="system_policy_schedule_state_unreadable">לא ניתן היה לקרוא את לוח הזמנים השמור, ולכן נאכפות גם שעות הלילה וגם שעות העבודה וההגנה מדווחת כלא מאומתת</string>
-    <string name="system_policy_schedule_exact">התראות מדויקות מותרות ל־⁦Device Guard⁩, ולכן כל חלון מתוזמן להתחיל ולהסתיים בשעה שלו.</string>
-    <string name="system_policy_schedule_inexact">התראות מדויקות אינן מותרות ל־⁦Device Guard⁩. במצב כזה ⁦Android⁩ קובע מתי חלון מתחיל או מסתיים, ובמכשיר במנוחה או בחיסכון בסוללה זה יכול לקרות הרבה אחרי השעה שנקבעה. כדי שהחלונות יתחילו בזמן, אפשרו ל־⁦Device Guard⁩ את ההרשאה „שעונים מעוררים ותזכורות” בהגדרות ⁦Android⁩.</string>
+    <string name="system_policy_schedule_exact">התראות מדויקות מותרות למעקה, ולכן כל חלון מתוזמן להתחיל ולהסתיים בשעה שלו.</string>
+    <string name="system_policy_schedule_inexact">התראות מדויקות אינן מותרות למעקה. במצב כזה ⁦Android⁩ קובע מתי חלון מתחיל או מסתיים, ובמכשיר במנוחה או בחיסכון בסוללה זה יכול לקרות הרבה אחרי השעה שנקבעה. כדי שהחלונות יתחילו בזמן, אפשרו למעקה את ההרשאה „שעונים מעוררים ותזכורות” בהגדרות ⁦Android⁩.</string>
     <string name="system_policy_schedule_clock_needed">בגרסת ⁦Android⁩ הזו, שעות הלילה ושעות העבודה דורשות תאריך ושעה אוטומטיים, כדי שאי אפשר יהיה לשנות את השעון ולסיים חלון מוקדם. ההפעלה מבקשת מ־⁦Android⁩ לחייב תאריך ושעה אוטומטיים, ועד ש־⁦Android⁩ מאשר זאת אי אפשר להפעיל את לוח הזמנים.</string>
     <string name="system_policy_schedule_clock_unconfirmed">⁦Android⁩ לא אישר שתאריך ושעה אוטומטיים נדרשים, ולכן שעות הלילה ושעות העבודה נשארות כבויות.</string>
     <string name="system_policy_schedule_confirm_enable_title">להפעיל שעות לילה ושעות עבודה?</string>

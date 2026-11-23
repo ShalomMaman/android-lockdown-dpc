@@ -17,7 +17,7 @@ val generateRemoteTestSigner by tasks.registering(Exec::class) {
         File(System.getProperty("java.home"), "bin/keytool"), "-genkeypair",
         "-keystore", remoteTestKeystore, "-storetype", "PKCS12",
         "-storepass", "android", "-alias", "remote-test", "-keyalg", "RSA",
-        "-keysize", "2048", "-validity", "3650", "-dname", "CN=Device Guard Remote Test",
+        "-keysize", "2048", "-validity", "3650", "-dname", "CN=Maakeh Remote Test",
     )
 }
 

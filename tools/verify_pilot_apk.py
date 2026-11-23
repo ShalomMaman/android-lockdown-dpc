@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail-closed verification for a Device Guard pilot-channel APK."""
+"""Fail-closed verification for a Maakeh pilot-channel APK."""
 
 from __future__ import annotations
 

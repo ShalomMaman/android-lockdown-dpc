@@ -39,7 +39,7 @@ public final class KioskAppCatalog {
      * @param installed         present with {@code FLAG_INSTALLED} for this user
      * @param enabled           application component state is enabled
      * @param launchable        resolves a MAIN/LAUNCHER entry point, including
-     *                          while Device Guard currently hides the package
+     *                          while Maakeh currently hides the package
      * @param deviceGuardItself the DPC's own package
      */
     public record Candidate(

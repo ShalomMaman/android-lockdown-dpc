@@ -88,7 +88,7 @@ record redacted outcomes in the [device matrix](device-matrix.md).
    any associated delegated grants. Record service retirement separately
    from physical release. Android restrictions remain in place until release.
 2. Back up permitted data and confirm reset access requirements with the
-   custodian. The supported release for a Device Guard Device Owner is an
+   custodian. The supported release for a Maakeh Device Owner is an
    owner-approved, local factory reset using the documented OEM recovery
    path. The DPC has no ownership transfer, self-unenrol or remote wipe.
    [Provisioning and release](provisioning.md#recovering-a-device-with-the-wrong-component-or-identity).

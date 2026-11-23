@@ -1,4 +1,4 @@
-"""Offline conformance checks for the public Device Guard v1 fixtures."""
+"""Offline conformance checks for the public Maakeh v1 fixtures."""
 
 import hashlib
 import os

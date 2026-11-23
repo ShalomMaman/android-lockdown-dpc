@@ -160,7 +160,7 @@ public final class DeviceHealthAssessorTest {
 
     @Test
     public void ownershipThatCouldNotBeReadIsUnverifiedRatherThanUnmanaged() {
-        // "Could not ask the platform" is not "Device Guard was removed". Sending
+        // "Could not ask the platform" is not "Maakeh was removed". Sending
         // an operator to re-provision a device that is fine is the more expensive
         // of the two mistakes, and the report has no business guessing.
         DeviceHealthSnapshot snapshot = withPolicy(proven(), policy(

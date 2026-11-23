@@ -24,7 +24,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Pure schedule schema parser, evaluator, and change classifier for Device Guard's
+ * Pure schedule schema parser, evaluator, and change classifier for Maakeh's
  * night and work restriction windows.
  *
  * <p>Holds no Android types so every boundary, midnight-ownership, DST, and

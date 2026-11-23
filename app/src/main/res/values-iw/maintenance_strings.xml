@@ -119,7 +119,7 @@
 
     <!-- יכולת: חנויות יישומים ומתקינים -->
     <string name="maint_capability_app_store_access_title">חנויות יישומים ומתקינים</string>
-    <string name="maint_capability_app_store_access_consequence">כל מתקין במכשיר יכול לפעול שוב למשך החלון, כולל חנות יישומים. ⁦Device Guard⁩ גם יכול להתקין את העדכונים החתומים שלו בזמן שזה פתוח.</string>
+    <string name="maint_capability_app_store_access_consequence">כל מתקין במכשיר יכול לפעול שוב למשך החלון, כולל חנות יישומים. מעקה גם יכול להתקין את העדכונים החתומים שלו בזמן שזה פתוח.</string>
 
     <!-- יכולת: התקנת קובץ חבילה מקומי -->
     <string name="maint_capability_local_apk_install_title">התקנת קובץ חבילה מקומי</string>

@@ -1,6 +1,6 @@
 # Hardware validation runbook
 
-Device Guard's automated suite is a JVM suite. It proves pure rules — the kiosk
+Maakeh's automated suite is a JVM suite. It proves pure rules — the kiosk
 state machine, URL and origin containment, target eligibility, the system-policy
 verification contract, locale parity — and it proves **nothing about what Android
 actually does** when a Device Owner asks for those things. Every claim about lock
@@ -18,7 +18,7 @@ defines the procedure; that one holds the evidence.
 
 ## What this runbook does and does not establish
 
-It establishes that a specific Device Guard build, on a specific device model at
+It establishes that a specific Maakeh build, on a specific device model at
 a specific firmware build, behaves as the console claims for the cases listed
 here.
 
@@ -50,7 +50,7 @@ PIN, the recovery code, or a data-destroying reset.
   device itself is not available while lock task holds.
 - A reachable HTTPS test site on a known origin, and a second HTTPS site on a
   different origin, for the single-site cases.
-- A signed Device Guard APK of a **higher** version code than the installed one,
+- A signed Maakeh APK of a **higher** version code than the installed one,
   and its signed update manifest, for the self-update case
   ([`secure-updates.md`](secure-updates.md)).
 - A printed copy of the abort procedure in
@@ -151,7 +151,7 @@ fail action, and the evidence beyond the standard five.
 3. `adb install -t app-debug.apk` (or the release APK under test).
 4. `adb shell dpm set-device-owner com.example.lockdowndpc/.admin.LockdownAdminReceiver`
 
-**Expected:** the command prints success and names Device Guard as the active
+**Expected:** the command prints success and names Maakeh as the active
 device owner. Opening the app shows the console rather than a "not provisioned"
 state.
 
@@ -225,7 +225,7 @@ containing both handlers.
 
 1. Prepare the QR payload for the exact APK and enrol from the welcome screen
    using [Runbook A](provisioning.md#runbook-a--qr-enrolment-on-the-setup-wizard).
-2. During the compliance step, confirm Device Guard shows its progress screen,
+2. During the compliance step, confirm Maakeh shows its progress screen,
    that Back does not dismiss it, and that the wizard continues on its own once
    the pass finishes.
 3. Complete every wizard step that follows compliance (on a GMS device this
@@ -245,13 +245,13 @@ containing both handlers.
    `no_factory_reset` is present. On a production build, use the console and
    Settings because the baseline disables USB debugging.
 
-**Expected:** setup completes with Device Guard as Device Owner, with no work
+**Expected:** setup completes with Maakeh as Device Owner, with no work
 profile or app interaction during the two callbacks. The baseline policy is
 verified and in effect before any console action, and the wizard steps after
 compliance complete under it.
 
 **Fail action:** stop and record which stage failed. Capture available setup
-wizard or Device Guard errors before wiping for a retry. If compliance had
+wizard or Maakeh errors before wiping for a retry. If compliance had
 passed, use the recovery-mode wipe; the Settings reset entry is disabled.
 
 **Evidence:** record the wizard outcome, owner read-back, initial policy status
@@ -421,7 +421,7 @@ recovery code for every case here, and the abort procedure is within reach.
 
 1. Kiosk profile → Operating profile → single-app kiosk.
 2. Choose a locked application (a third-party application that is not a file
-   manager, not Device Guard and not a management transport — the picker should
+   manager, not Maakeh and not a management transport — the picker should
    already exclude those).
 3. Save.
 
@@ -458,7 +458,7 @@ and the one [`kiosk-mode.md`](kiosk-mode.md#what-is-not-proven-without-a-device)
 names first for the recovery change.
 
 The platform rejects `LOCK_TASK_FEATURE_HOME` when it sees no launcher it can
-use. Device Guard registers `KioskHostActivity` as the persistent preferred HOME
+use. Maakeh registers `KioskHostActivity` as the persistent preferred HOME
 activity in the same pass, immediately before applying the feature set. Whether
 that ordering is sufficient on a given OEM build is exactly what is unknown.
 
@@ -481,7 +481,7 @@ recovery from a Back-trapping target is unavailable on this firmware, which the
 matrix must say plainly.
 
 **Fail action:** if Home reaches a launcher, an app resolver or any surface
-outside Device Guard, stop immediately. That is an unauthenticated escape from
+outside Maakeh, stop immediately. That is an unauthenticated escape from
 kiosk and is a P1. Photograph it, exit kiosk with the PIN, and mark the cell
 **failed** with the defect reference. Do not ship single-app kiosk on this
 firmware family until it is closed.
@@ -523,7 +523,7 @@ untouched, so the page or app underneath must still receive it.
 4. In a single-site kiosk, tap a control the portal itself places in that corner
    (a logo or a hamburger menu) once.
 
-**Expected:** step 1 and step 2 open Device Guard on its **locked PIN screen** —
+**Expected:** step 1 and step 2 open Maakeh on its **locked PIN screen** —
 never an authenticated console. The audit log records `audit_kiosk_admin_entry`.
 Step 3 does not open anything. Step 4 activates the portal's own control, because
 the gesture observes rather than consumes touches.
@@ -776,7 +776,7 @@ not a defect.
 
 **Steps**
 
-1. Force-stop or kill the Device Guard process over ADB.
+1. Force-stop or kill the Maakeh process over ADB.
 2. Install a third-party package while it is down.
 3. Wait for the system to rebind the `DeviceAdminService`.
 
@@ -794,7 +794,7 @@ is a **failed** cell for reconciliation and a serious deployment constraint.
 **Steps**
 
 1. Open the system-application inventory and locate: the **active keyboard**, the
-   **active WebView provider**, System UI, and Device Guard itself.
+   **active WebView provider**, System UI, and Maakeh itself.
 2. Attempt to select each for blocking.
 3. Find an unclassified OEM component, accept the risk, and save.
 4. Update or replace that component (an OEM update, or reinstall a different
@@ -1176,7 +1176,7 @@ Record it, turn compatibility back off, and do not deploy the build.
 
 **Expected:** protection is reported as **not verified**, the console names the
 control that failed, and the Play Store is hidden rather than left available.
-Device Guard never reports active protection over an unverified installation lock.
+Maakeh never reports active protection over an unverified installation lock.
 
 ### P-4 The boundary the console states is the boundary the device has
 
@@ -1240,7 +1240,7 @@ saved — which on a default device means the store lock is off again.
 4. Close the window, or let it expire, and look again.
 
 **Expected:** the Store is hidden **from the moment the window opens** — not a
-few seconds later — because Device Guard hides it and reads it back before it
+few seconds later — because Maakeh hides it and reads it back before it
 relaxes anything. The console reports that the Store is withheld because
 installation from unknown sources is open, and protection is **not** reported as
 faulty: this is an authorised state, not a failure. The dependent application may
@@ -1285,7 +1285,7 @@ do not deploy the build.
 2. With compatibility on, try to open a local-APK maintenance window.
 
 **Expected:** the window **does not open**. The console reports the refusal, no
-restriction is relaxed, and the device is left exactly as it was. Device Guard
+restriction is relaxed, and the device is left exactly as it was. Maakeh
 never opens a window it cannot make safe first.
 
 **Fail action:** if the window opens anyway, this is a **critical** failure and
@@ -1338,7 +1338,7 @@ finding, not just an incident note.
    show it. After the reset the device is at PRE-1 and the run restarts from P-1.
 
 If the device is **physically unreachable** — deployed, locked, and neither the
-gesture nor the network is available — there is no remote route. Device Guard has
+gesture nor the network is available — there is no remote route. Maakeh has
 no remote unlock and adds none: the kiosk exit paths all require a local
 authenticated `AdminSession`. Retrieve the device and restart at rung 1.
 

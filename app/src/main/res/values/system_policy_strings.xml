@@ -9,7 +9,7 @@
 
     Consequence texts describe only what Android documents for the underlying
     UserManager restriction. Where OEM behaviour varies the text says so rather
-    than promising an outcome Device Guard cannot verify.
+    than promising an outcome Maakeh cannot verify.
 -->
 <resources>
 
@@ -69,7 +69,7 @@
 
     <!-- Controls: stores and installers -->
     <string name="system_policy_control_app_stores_and_installers_title">All package installation, including stores</string>
-    <string name="system_policy_control_app_stores_and_installers_consequence">Blocks every installer on the device. Android applies this to the management app as well, so Device Guard cannot install its own signed updates while this is on. Leave it off until updates are delivered another way.</string>
+    <string name="system_policy_control_app_stores_and_installers_consequence">Blocks every installer on the device. Android applies this to the management app as well, so Maakeh cannot install its own signed updates while this is on. Leave it off until updates are delivered another way.</string>
 
     <!-- Controls: accounts -->
     <string name="system_policy_control_account_modification_title">Adding and changing accounts</string>
@@ -135,7 +135,7 @@
     <string name="system_policy_play_compat_state_unverified">On, but this device has not confirmed the installation lock, so the Store stays hidden</string>
     <string name="system_policy_play_compat_locked_control">Kept on by Google Play compatibility</string>
     <string name="system_policy_play_compat_confirm_enable_title">Keep the Google Play Store available?</string>
-    <string name="system_policy_play_compat_confirm_enable_body">The Google Play Store package stays available to the applications that need it. In exchange, all package installation and installation from unknown sources are switched on, kept on, and read back from the device. Device Guard cannot install its own signed updates while installation is blocked, so plan updates another way before you continue. On an ordinary launcher the Store may remain visible and can be opened; installation is what is blocked. If this device does not confirm the installation lock, the Store is hidden again and protection is reported as not verified.</string>
+    <string name="system_policy_play_compat_confirm_enable_body">The Google Play Store package stays available to the applications that need it. In exchange, all package installation and installation from unknown sources are switched on, kept on, and read back from the device. Maakeh cannot install its own signed updates while installation is blocked, so plan updates another way before you continue. On an ordinary launcher the Store may remain visible and can be opened; installation is what is blocked. If this device does not confirm the installation lock, the Store is hidden again and protection is reported as not verified.</string>
     <string name="system_policy_play_compat_confirm_disable_title">Hide application stores again?</string>
     <string name="system_policy_play_compat_confirm_disable_body">The Google Play Store package is hidden again the next time policy is applied, and applications that need it may stop starting. The installation controls this mode kept on go back to your own saved choices.</string>
 
@@ -143,7 +143,7 @@
     <!-- Built-in block exemptions -->
     <string name="system_policy_section_exemptions">Exemptions from the built-in block</string>
     <string name="system_policy_exempt_chrome_row">Chrome through the home filter</string>
-    <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed, and only while the home filter is on and protection is active. Before Chrome is shown, Device Guard sets and checks Chrome\'s managed settings: the home filter\'s proxy script is mandatory, so Chrome never connects directly when the script is unavailable; secure DNS, incognito mode, sign-in and developer tools are turned off. These settings also cover Custom Tabs and web apps that open in Chrome. If any condition is not met, Chrome is hidden before anything else changes. Every app\'s traffic still goes through the home filter\'s always-on VPN. Web pages shown inside other apps are not covered by Chrome\'s settings; they are filtered only by the home network. Pausing protection shows every app, Chrome included. Application stores can never be allowed.</string>
+    <string name="system_policy_exempt_chrome_body">Only Google Chrome, signed by Google, can be allowed, and only while the home filter is on and protection is active. Before Chrome is shown, Maakeh sets and checks Chrome\'s managed settings: the home filter\'s proxy script is mandatory, so Chrome never connects directly when the script is unavailable; secure DNS, incognito mode, sign-in and developer tools are turned off. These settings also cover Custom Tabs and web apps that open in Chrome. If any condition is not met, Chrome is hidden before anything else changes. Every app\'s traffic still goes through the home filter\'s always-on VPN. Web pages shown inside other apps are not covered by Chrome\'s settings; they are filtered only by the home network. Pausing protection shows every app, Chrome included. Application stores can never be allowed.</string>
     <string name="system_policy_exempt_audit_not_saved">The change was saved, but its audit entry could not be written.</string>
     <string name="system_policy_exempt_android_state">Android reports: %1$s</string>
     <string name="system_policy_exempt_observed_visible">available</string>
@@ -171,8 +171,8 @@
     <string name="system_policy_exempt_record_unreadable">The saved exemptions could not be read. Until they are cleared, no exemption applies and ordinary changes are refused.</string>
     <string name="system_policy_exempt_clear_approvals">Clear all approvals</string>
     <string name="system_policy_exempt_paused_refused">Resume protection to change approvals.</string>
-    <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Device Guard block it again. Remove its administrator access in Android Settings first.</string>
-    <string name="system_policy_exempt_admins_unreadable">The app was not approved: Device Guard could not check the device administrators. Try again.</string>
+    <string name="system_policy_exempt_active_admin_refused">This app was not approved: it is an active device administrator, and Android would not let Maakeh block it again. Remove its administrator access in Android Settings first.</string>
+    <string name="system_policy_exempt_admins_unreadable">The app was not approved: Maakeh could not check the device administrators. Try again.</string>
     <string name="system_policy_exempt_containment_refused">The approval was removed. Android refused to block an app before the removal was saved. The protection pass retries the block. Check the app\'s row for its current state.</string>
     <string name="system_policy_exempt_failed_and_audit_not_saved">The change was saved, but the policy was not verified (%1$s), and the change\'s audit entry could not be written.</string>
     <string name="system_policy_exempt_chrome_reason_signer_unreadable">Chrome\'s signer could not be read</string>
@@ -201,8 +201,8 @@
     <string name="system_policy_schedule_state_off">Off</string>
     <string name="system_policy_schedule_state_on">On</string>
     <string name="system_policy_schedule_state_unreadable">The stored schedule could not be read, so night and work hours are both enforced and protection is reported as not verified</string>
-    <string name="system_policy_schedule_exact">Exact alarms are allowed for Device Guard, so each window is set to start and end at its time.</string>
-    <string name="system_policy_schedule_inexact">Exact alarms are not allowed for Device Guard. Android then decides when a window starts or ends, and on a device that is idle or saving battery that can be much later than the set time. To keep windows on time, allow Alarms and reminders for Device Guard in Android Settings.</string>
+    <string name="system_policy_schedule_exact">Exact alarms are allowed for Maakeh, so each window is set to start and end at its time.</string>
+    <string name="system_policy_schedule_inexact">Exact alarms are not allowed for Maakeh. Android then decides when a window starts or ends, and on a device that is idle or saving battery that can be much later than the set time. To keep windows on time, allow Alarms and reminders for Maakeh in Android Settings.</string>
     <string name="system_policy_schedule_clock_needed">On this Android version, night and work hours need automatic date and time, so the clock cannot be changed to end a window early. Turning this on asks Android to require automatic date and time; until Android confirms it, the schedule cannot be turned on.</string>
     <string name="system_policy_schedule_clock_unconfirmed">Android did not confirm that automatic date and time is required, so night and work hours stay off.</string>
     <string name="system_policy_schedule_confirm_enable_title">Turn on night and work hours?</string>

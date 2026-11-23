@@ -308,7 +308,7 @@ class SystemAppInventoryTest {
 
     @Test
     fun `a sanitized label is still isolated at render time`() {
-        // Stripping the label's own controls is only half of it: Device Guard adds
+        // Stripping the label's own controls is only half of it: Maakeh adds
         // its own balanced isolate so a Hebrew or Arabic label cannot reorder the
         // Latin package name on the line below.
         val label = AppLabelSanitizer.sanitize("מצלמה")!!

@@ -4,7 +4,7 @@
   "analysisId": "hardening_20260811_remote_updates",
   "sourceEvidence": {
     "kind": "source_and_platform_documentation",
-    "label": "Device Guard source and Android Device Owner installer contract",
+    "label": "Maakeh source and Android Device Owner installer contract",
     "collectionSha256": "394a60a344fd7e9622c484a780daa84555ebf9e4e8c62181eefabbc9c931cc9a",
     "artifactCount": 5,
     "targetRevision": "482e0235aeaa18afc6921e3996c9345c32049ec5",

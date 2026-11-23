@@ -77,7 +77,7 @@ public enum SystemPolicyControl {
      * <p>Opt-in on every profile, and deliberately not part of production
      * hardening. Android documents {@code DISALLOW_INSTALL_APPS} as also
      * preventing the device owner from installing packages, which is exactly the
-     * mechanism {@code SecureUpdateManager} uses to install a signed Device Guard
+     * mechanism {@code SecureUpdateManager} uses to install a signed Maakeh
      * update. Defaulting it on would disable self-update — the very path roadmap
      * gate 3 requires before ADB can be withdrawn. An administrator may still
      * choose it, and the console says plainly what it costs.

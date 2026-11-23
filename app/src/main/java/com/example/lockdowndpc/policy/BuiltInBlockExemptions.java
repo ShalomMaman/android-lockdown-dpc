@@ -12,7 +12,7 @@ import java.util.Set;
 /**
  * Administrator-approved exemptions from the built-in block catalogues.
  *
- * <p>With protection active, Device Guard hides every package in
+ * <p>With protection active, Maakeh hides every package in
  * {@link LockdownPackages#ALWAYS_BLOCKED} and
  * {@link LockdownPackages#KNOWN_BROWSER_AND_SOCIAL}. Two narrow exceptions
  * exist, both off by default:

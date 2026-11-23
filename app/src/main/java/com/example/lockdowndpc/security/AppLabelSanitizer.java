@@ -11,7 +11,7 @@ public final class AppLabelSanitizer {
     /**
      * Strips legacy bidi embeddings/overrides and isolate controls.
      *
-     * <p>Device Guard supplies its own balanced isolate around labels at render
+     * <p>Maakeh supplies its own balanced isolate around labels at render
      * time. Retaining controls supplied by another application would let that
      * application close or nest that boundary, including through a label saved
      * by an older policy pass.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a signed Device Guard update envelope without handling key material in-process."""
+"""Create a signed Maakeh update envelope without handling key material in-process."""
 
 from __future__ import annotations
 

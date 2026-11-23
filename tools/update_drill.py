@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rehearse the offline half of a Device Guard signed self-update drill and record the evidence.
+"""Rehearse the offline half of a Maakeh signed self-update drill and record the evidence.
 
 The acceptance gate for removing ADB as the normal recovery path is a real signed
 self-update from an installed version to a higher version. This tool rehearses and
@@ -333,7 +333,7 @@ def iso_utc(epoch_seconds: int) -> str:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Rehearse the offline half of a signed Device Guard self-update: prove the APK pair "
+            "Rehearse the offline half of a signed Maakeh self-update: prove the APK pair "
             "is a legal in-place update and that the envelope satisfies the on-device rules."
         ),
     )
@@ -1118,7 +1118,7 @@ def render_summary(record: dict[str, object]) -> str:
     counts = record["counts"]
     width = max((len(str(check["id"])) for check in checks), default=0)
     lines = [
-        "Device Guard signed self-update drill - offline half",
+        "Maakeh signed self-update drill - offline half",
         "=" * 51,
         f"evaluated at: {record['generatedAt']}",
         "environment:  "

@@ -1,6 +1,6 @@
 # Remote updates without ADB
 
-Device Guard includes a self-update channel for a Device Owner installation. The channel is disabled by default and becomes active only when the build receives both an HTTPS manifest URL and an EC public key for metadata verification.
+Maakeh includes a self-update channel for a Device Owner installation. The channel is disabled by default and becomes active only when the build receives both an HTTPS manifest URL and an EC public key for metadata verification.
 
 ## Trust boundary
 

@@ -1,6 +1,6 @@
 # Kiosk mode
 
-Device Guard 0.5 has three explicit operating profiles:
+Maakeh 0.5 has three explicit operating profiles:
 
 | Profile | `KioskMode` | What it does |
 | --- | --- | --- |
@@ -51,7 +51,7 @@ Explicitly **out of scope**:
   this WebView.
 - Physical attacks, recovery mode, unlocked bootloaders, and OEM backdoors.
 - Screen mirroring, external displays, and accessibility services installed
-  outside Device Guard's control.
+  outside Maakeh's control.
 
 ## Authorization
 
@@ -411,7 +411,7 @@ equivalent of `dir="auto"`.
 
 The layout direction itself comes from `R.bool.use_rtl_layout`, answered by the
 same resource folder the strings came from, rather than from
-`Configuration#getLayoutDirection`. Device Guard ships two translations, so a
+`Configuration#getLayoutDirection`. Maakeh ships two translations, so a
 device set to a third right-to-left language with the display language on "System
 default" used to resolve English strings into a fully mirrored layout — which also
 moved the administrator corner away from "the side the text starts from", the
@@ -420,7 +420,7 @@ same bool, so text and layout cannot disagree.
 
 ## Package and system-app policy
 
-Device Guard does **not** operate a total system allowlist. Hiding every system
+Maakeh does **not** operate a total system allowlist. Hiding every system
 package bricks OEM devices in ways the console cannot repair, so the model is
 explicit and conservative. `LockdownPackages.classify` returns:
 

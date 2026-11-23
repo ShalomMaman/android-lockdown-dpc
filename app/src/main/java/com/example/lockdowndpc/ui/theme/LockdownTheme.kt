@@ -82,7 +82,7 @@ private val LockdownTypography = Typography().let { base ->
  * The layout direction follows the *resolved strings*, not the system locale.
  *
  * Compose seeds `LocalLayoutDirection` from the activity configuration, which
- * reports RTL for any right-to-left system locale. Device Guard ships two
+ * reports RTL for any right-to-left system locale. Maakeh ships two
  * translations, so a device set to a third right-to-left language with the
  * display language left on "System default" resolved English strings into a fully
  * mirrored layout — including the auto-mirrored back arrow and the side the kiosk
