@@ -215,8 +215,8 @@ passphrase, the administrator PIN or a recovery code.
 
 ## Home filter
 
-1. Use Android 10 (API 29) or later. Complete **Runbook A** to enroll Device
-   Guard as Device Owner, set the administrator PIN, and verify the device has
+1. Use Android 10 (API 29) or later. Complete **Runbook A** to enroll
+   Maakeh as Device Owner, set the administrator PIN, and verify the device has
    only the intended user and no work or private profile.
 2. Install a current official Tailscale Android build (`com.tailscale.ipn`),
    sign in to the intended tailnet, and verify you can reach the home proxy
@@ -372,8 +372,8 @@ CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
 restricts CA removal in Android Settings during the approval, subject to the
 confirmation limit below. Maakeh sets and reads it back before saving a
 Chrome approval. Each pass confirms the restriction before checking the CA
-for Chrome's release. The teardown guard must allow teardown before Device
-Guard lifts the restriction, so a refused hide keeps it in force. Every save
+for Chrome's release. The teardown guard must allow teardown before
+Maakeh lifts the restriction, so a refused hide keeps it in force. Every save
 writes a format marker, and one parser reads the record for every use
 (enforcement, kiosk eligibility, the teardown guard, the console and edits): a
 file that exists without the marker — zero bytes, damaged, or an older format —
@@ -557,8 +557,8 @@ let an external tool reassign it.
   release-signed Maakeh will refuse, by design: an active kiosk that ADB
   could dismantle would not be a kiosk.
 
-**Wiping an already-managed device is harder than wiping a fresh one.** Device
-Guard enforces `DISALLOW_FACTORY_RESET` on every profile, pilot included, so
+**Wiping an already-managed device is harder than wiping a fresh one.**
+Maakeh enforces `DISALLOW_FACTORY_RESET` on every profile, pilot included, so
 once protection has been applied the Settings reset entry is gone. The remaining
 path is the bootloader/recovery wipe for that model, entered with the hardware
 key combination. `DISALLOW_SAFE_BOOT` is enforced as well, so Safe Boot is not

@@ -20,7 +20,7 @@
 
     <!-- מסך -->
     <string name="mgmtid_title">זהות אמצעי הניהול</string>
-    <string name="mgmtid_subtitle">מגן המכשיר פוטר את אמצעי הניהול מחסימה. המסך הזה מראה אם הפטור הזה נשען על אישור חתימה שנבדק, או רק על שם החבילה.</string>
+    <string name="mgmtid_subtitle">מעקה פוטר את אמצעי הניהול מחסימה. המסך הזה מראה אם הפטור הזה נשען על אישור חתימה שנבדק, או רק על שם החבילה.</string>
     <string name="mgmtid_admin_row">זהות אמצעי הניהול</string>
     <string name="mgmtid_admin_supporting">הוכחת אמצעי הניהול באמצעות אישור החתימה שלו</string>
     <string name="mgmtid_loading">קוראים את אישורי החתימה המותקנים…</string>

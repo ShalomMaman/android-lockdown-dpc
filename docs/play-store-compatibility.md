@@ -6,8 +6,8 @@ Google Play services and the active WebView provider are untouched. Play Core,
 in-app update, licensing and integrity flows can all reach for the Store
 package itself.
 
-This document describes the explicit, administrator-controlled exception Device
-Guard offers for that case, and — more importantly — the boundary it does not
+This document describes the explicit, administrator-controlled exception
+Maakeh offers for that case, and — more importantly — the boundary it does not
 cross. It is the durable reference for
 [Issue #64](https://github.com/ShalomMaman/android-lockdown-dpc/issues/64).
 

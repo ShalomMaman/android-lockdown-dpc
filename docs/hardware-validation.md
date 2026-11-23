@@ -105,8 +105,8 @@ whatever the device did.
 1. **Case ID and verdict** — `pass`, `fail`, `blocked` (a dependency is not in the
    build), or `not applicable` (the release genuinely does not implement the
    capability, which is a documented outcome and not a defect).
-2. **Device record** — model, Android release, firmware build from PRE-2, Device
-   Guard `versionName`/`versionCode`.
+2. **Device record** — model, Android release, firmware build from PRE-2,
+   Maakeh `versionName`/`versionCode`.
 3. **The observation** — a photograph or screenshot of the screen the expected
    result names, timestamped. For a suppression claim ("Overview does not open"),
    photograph the screen that *stayed*, and record the gesture attempted.
@@ -287,8 +287,8 @@ group. A filtering failure invalidates every kiosk result that depends on hiding
 2. Select exactly one third-party application. Save and apply.
 3. Inspect the launcher.
 
-**Expected:** third-party applications other than the selected one and Device
-Guard are hidden. System applications remain, per the conservative model in
+**Expected:** third-party applications other than the selected one and
+Maakeh are hidden. System applications remain, per the conservative model in
 [`kiosk-mode.md`](kiosk-mode.md#package-and-system-app-policy) — a device with
 every system package hidden is a defect, not a stricter pass.
 
@@ -468,8 +468,8 @@ that ordering is sufficient on a given OEM build is exactly what is unknown.
    activation produced.
 2. Press Home.
 
-**Expected — accepted:** no error reason is reported, and Home resumes Device
-Guard's **contained kiosk home**: a screen naming the locked application with a
+**Expected — accepted:** no error reason is reported, and Home resumes
+Maakeh's **contained kiosk home**: a screen naming the locked application with a
 single "Return to the app" action. It must not be a launcher, an app resolver
 ("Complete action using…"), or an immediate relaunch of the target.
 

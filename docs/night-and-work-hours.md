@@ -87,8 +87,8 @@ suspended, which errs on the restrictive side.
 
 ## Triggers and retries
 
-- **Boundary alarm.** Each boundary arms a primary alarm (exact when Device
-  Guard may schedule exact alarms, otherwise a short inexact window) and an
+- **Boundary alarm.** Each boundary arms a primary alarm (exact when
+  Maakeh may schedule exact alarms, otherwise a short inexact window) and an
   inexact fallback that can fire in Doze. The fallback is always armed, because
   Android cancels exact alarms without any broadcast when the permission is
   revoked.

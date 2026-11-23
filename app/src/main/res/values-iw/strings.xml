@@ -130,7 +130,7 @@
 
     <!-- Admin console -->
     <string name="admin_subtitle_allow">רק אפליקציות שנבחרו במפורש יהיו זמינות בזמן ההגנה.</string>
-    <string name="admin_subtitle_block">האפליקציות שתסומנו ייחסמו בזמן ההגנה; שאר האפליקציות יישארו פעילות.</string>
+    <string name="admin_subtitle_block">האפליקציות שתסמנו ייחסמו בזמן ההגנה; שאר האפליקציות יישארו פעילות.</string>
     <string name="admin_apply">הפעלת ההגנה</string>
     <string name="admin_apply_refresh">שמירה ורענון ההגנה</string>
     <string name="admin_policy_working">מאמת את מדיניות ההגנה…</string>
