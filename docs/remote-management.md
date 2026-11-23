@@ -1,9 +1,11 @@
 # Remote management design
 
-**Status: accepted direction (v1); implementation PRs must meet the acceptance
-criteria in [section 15](#15-acceptance-criteria-carried-into-prs). Revision 4,
-final. Nothing in this document is implemented yet unless a section says
-"exists today".**
+**Status: Accepted for v1 ([ADR 43](remote-v1-adr.md)).** This document records
+the revision 4 design and its historical acceptance criteria. The ADR links
+the merged implementation. Production remote enrolment remains disabled
+pending the [activation criteria](#blockers-for-pr-9-activation). See also
+the [threat model and privacy requirements](remote-v1-security.md) and
+[operating runbooks](remote-v1-runbooks.md).
 
 Three independent reviews found new P1 issues each time the design let the
 online server change what a device may do. Revision 4 therefore keeps v1 to the
@@ -938,6 +940,10 @@ family.
 
 ## 11. Threat model
 
+See the [v1 threat model and privacy requirements](remote-v1-security.md) for
+delegated access, data flows, abuse cases and verifiable audit. The following
+notes describe the device and protocol boundary from revision 4.
+
 - **Test-only build removal.** Remote enrolment refuses `FLAG_TEST_ONLY` and
   `FLAG_DEBUGGABLE`. The attested application signer must be the release
   signer for production fleets. *Not covered:* someone's own test device,
@@ -983,6 +989,12 @@ Each PR lands with its tests. Hardware groups go into
 [`hardware-validation.md`](hardware-validation.md), with evidence in
 [`device-matrix.md`](device-matrix.md).
 
+The [first pilot](remote-v1-security.md#consent-revocation-and-pilot-scope)
+starts view-only. Its write phase is limited to ordinary app filtering and
+explicitly approved low-risk rules. Production verification requires a
+physical device with hardware-attested Verified Boot and a locked bootloader.
+Any loosening of fleet policy requires the owner's offline policy key.
+
 - `REMOTE_ENROLMENT_ENABLED` is `false` in release builds until **PR 9**.
 - PRs 5–8 run remote enrolment only in a dedicated **remote-test artifact**.
   It is a non-debuggable, non-test-only build type signed with a test key
@@ -1018,19 +1030,30 @@ the baseline is applied through its journal.
    baseline, and bench enrolment with refusal of a non-fresh device. Also
    interrupted-apply recovery, and the state after a reboot before first
    unlock.
-2. Enrolment identity proven end to end: challenge, proof of possession, and
-   offline verification by the admin tooling.
+2. Enrolment identity proven end to end on production-verification hardware:
+   challenge, proof of possession, offline inventory match (A7), and hardware
+   attestation of Verified Boot and the locked bootloader. The client and
+   offline checks are merged. Record real-device evidence before activation.
 3. Final production application ID and signer.
-4. Resolved by PR 2: audit event codes are stored and exported with timestamps.
-5. An owner decision on server hosting, operation and server-key protection.
-   Nothing in this repository may name it.
+4. Stable local audit event codes are merged. Prove the separate service's
+   verifiable audit export and match it to signed device read-back.
+5. Owner approval of private hosting and operating arrangements. Verify the
+   separate production relay, scoped access and command handling, server-key
+   protection (KMS/HSM), and relay recovery before release.
 6. Fleet policy key custody: where the offline key lives and who may sign.
 7. The signed self-update drill passing on each firmware family before
    **anything** disables ADB there: a fleet policy (enforced by the admin
    tool's ADB guard) **or the baseline itself**. A production-profile build,
    whose baseline turns `developer_options_and_adb` on, may enrol devices only
    on firmware families with a recorded drill pass.
-8. Acceptance criteria A1–A7 (section 15) met by their PRs.
+8. Verify acceptance criteria A1–A7 (section 15) against the activation
+   candidate and obtain independent review.
+9. Prove consent, revocation and isolation through the view-only service
+   before exposing edits. Review the v1 revocation limits against the epic's
+   human authorization-epoch and expiry requirements. Approve the exact
+   low-risk pilot rules and rehearse the [incident, recovery and exit
+   runbooks](remote-v1-runbooks.md) on supported hardware, including the
+   owner-facing one-use recovery flow.
 
 ### Open questions
 
@@ -1159,13 +1182,12 @@ changes a README claim and needs its own privacy review.
 ## 15. Acceptance criteria carried into PRs
 
 The fourth review confirmed that the v1 cuts removed the earlier design risks.
-What remains are properties of the **current code** that v1 relies on. They
-are carried as acceptance criteria: the named PR is not merged until the
-criterion holds and its regression test passes. Two pure-specification items
-were fixed in this document directly (5.3 hash encoding; 5.4 and 8.3
-`commands-off` at dispatch).
+The table records the code inspected at that review and the fixes and tests
+it required. Use the [ADR](remote-v1-adr.md) for merged evidence and rerun
+these criteria on the activation candidate. Revision 4 specified the hash
+encoding in 5.3 and the `commands-off` dispatch rule in 5.4 and 8.3.
 
-| # | Finding (round 4) | Code today | PR | Required fix | Regression test |
+| # | Finding (round 4) | Code at review | Design PR | Required fix | Regression test |
 | --- | --- | --- | --- | --- | --- |
 | A1 | **P1-1** A policy change can make an app visible before the protection it depends on is verified | `LockdownPolicyController.apply` runs `applyPackagePolicy` before `HomeFilterController.reconcile`; a later VPN failure is reported, but the unhide stays | 5 | In remote modes, the pass applies and reads back the protections that a newly visible package depends on (system controls, home filter, VPN lockdown) **before** any hide-to-visible write. If they fail, or the pass is interrupted, packages that the previous verified generation hid stay hidden. Visible-to-hidden writes are not delayed | Gateway fault injection: the VPN lockdown fails, or the process dies between Android calls, during a change that unhides a package → the package is still hidden, the pass is not verified, and `verifiedSha256` is unchanged |
 | A2 | **P1-2** A failed `commit()` can still become live policy, because Android updates the in-memory `SharedPreferences` copy first | `SharedPreferencesImpl` applies edits in memory before writing; current setters ignore the result or use `apply()` | 5 (vectors in 4) | The engine reads only from a **snapshot that was stored successfully**: the journal is read back from disk after each commit, or written to a temporary file that is then atomically renamed, and an unsuccessful write is never visible to readers in the same process. `ensureProjected()` re-projects the full generation before **every** pass; the stamp is a consistency check, not a reason to skip writing | Write-failure injection with the process **still running**: for the journal, each projection store, and recovery consumption, the next pass in the same process applies the previous committed generation, and the recovery code is not consumed |
