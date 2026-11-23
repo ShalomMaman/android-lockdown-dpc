@@ -69,13 +69,20 @@ internal object RemoteClientWire {
     }
 
     fun syncBody(exchange: RemoteSync.Exchange, state: JournalState, report: JsonObject): ByteArray {
-        val generation = requireNotNull(state.generation())
-        return WireJson.canonical(generation.fields("generationSha256") + mapOf(
+        val generation = state.generation()
+        require(generation != null || state.awaitingReplacementPolicy)
+        val committed = generation?.fields("generationSha256") ?: mapOf(
+            "fleetPolicyVersion" to null,
+            "committedSha256" to null,
+            "overrides" to emptyList<String>(),
+            "generationSha256" to null,
+        )
+        return WireJson.canonical(committed + mapOf(
             "deviceId" to requireNotNull(state.binding).deviceId,
             "nonce" to exchange.nonce,
             "keySetVersion" to requireNotNull(state.trust).version,
             "recoveryVersion" to state.recoveryVersion,
-            "verifiedGeneration" to state.verified?.fields("verifiedSha256"),
+            "verifiedGeneration" to generation?.let { state.verified?.fields("verifiedSha256") },
             "lastCommandSequence" to state.floor(DocumentType.COMMAND),
             "report" to report,
         ))

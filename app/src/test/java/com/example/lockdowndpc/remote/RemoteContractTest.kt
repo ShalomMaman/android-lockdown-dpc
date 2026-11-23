@@ -189,7 +189,7 @@ class RemoteContractTest {
             "document-shapes" to setOf("payloads", "envelopes", "rawPayloads"),
             "hashes" to setOf("example", "canonicalJson", "baseline", "generations", "verifiedGeneration",
                 "invalidOverrides", "exactBytes", "canonicalStrings"),
-            "client-wire" to setOf("fixture", "signerSpki", "enrolment", "sync"),
+            "client-wire" to setOf("fixture", "signerSpki", "enrolment", "sync", "awaitingPolicy"),
             "sync" to setOf("fleetId", "deviceKey", "nonces", "nonceCases", "batches"),
             "journal" to setOf("cases", "readBackCases"),
             "dispatch" to setOf("initial", "cases"),

@@ -38,5 +38,57 @@
     "timestamp": 1700000000,
     "transcriptUtf8": "[\"dg-sync/1\",\"POST\",\"/v1/sync\",1700000000,\"581918e75533ac51765b8aad4240efec9f96ecb81483086c12ab8032aa722041\"]",
     "signature": "MEYCIQDRloyz8ESnWJVFUDmv6dyWxqg8ZDnb3GXoIRTY5idhSwIhANSj-ZGLE_uAb67hoTcZdQ4ya6leeJoGEdtmopi_ec0F"
+  },
+  "awaitingPolicy": {
+    "body": {
+      "fleetPolicyVersion": null,
+      "committedSha256": null,
+      "overrides": [],
+      "generationSha256": null,
+      "deviceId": "5A5BpnZS-7Ag2TaiqOOOvAfeb_ANw1d-P33VRmyc8Rc",
+      "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "keySetVersion": 2,
+      "recoveryVersion": 0,
+      "verifiedGeneration": null,
+      "lastCommandSequence": 3,
+      "report": {
+        "mode": "ENROLLING",
+        "commands": []
+      }
+    },
+    "bodyUtf8": "{\"committedSha256\":null,\"deviceId\":\"5A5BpnZS-7Ag2TaiqOOOvAfeb_ANw1d-P33VRmyc8Rc\",\"fleetPolicyVersion\":null,\"generationSha256\":null,\"keySetVersion\":2,\"lastCommandSequence\":3,\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"overrides\":[],\"recoveryVersion\":0,\"report\":{\"commands\":[],\"mode\":\"ENROLLING\"},\"verifiedGeneration\":null}",
+    "invalid": {
+      "baseline-version-without-digests": {
+        "fleetPolicyVersion": "baseline"
+      },
+      "null-version-with-digests": {
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+        "generationSha256": "41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb"
+      },
+      "committed-digest-without-version": {
+        "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c"
+      },
+      "generation-digest-without-version": {
+        "generationSha256": "41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb"
+      },
+      "previous-verification": {
+        "verifiedGeneration": {
+          "fleetPolicyVersion": "baseline",
+          "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+          "overrides": [
+            "network-off"
+          ],
+          "verifiedSha256": "41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb"
+        }
+      },
+      "nonempty-overrides": {
+        "overrides": [
+          "network-off"
+        ]
+      },
+      "null-overrides": {
+        "overrides": null
+      }
+    }
   }
 }

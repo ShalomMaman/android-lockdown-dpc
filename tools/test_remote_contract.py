@@ -135,6 +135,20 @@ def generation_hash(committed, overrides):
     return hash_hex(prefix + b"".join(bytes([len(code)]) + code for code in codes))
 
 
+def sync_generation_error(body):
+    fields = ("fleetPolicyVersion", "committedSha256", "generationSha256")
+    current = {field: body[field] for field in (*fields, "overrides")}
+    previous = body["verifiedGeneration"]
+    if any(current[field] is None for field in fields):
+        awaiting = (all(current[field] is None for field in fields)
+                    and previous is None and current["overrides"] == [])
+        return None if awaiting else FIELD_INVALID
+    error = schema_error({"$ref": "#/$defs/generation"}, current)
+    if error is None and previous is not None:
+        error = schema_error({"$ref": "#/$defs/verifiedGeneration"}, previous)
+    return error[0] if error else None
+
+
 def keyset_role_error(document, trusted_roots):
     roots = set(trusted_roots)
     if "successorRoot" in document:
@@ -499,6 +513,17 @@ class RemoteContractTest(unittest.TestCase):
         transcript = canonical(["dg-sync/1", "POST", "/v1/sync", sync["timestamp"], hash_hex(body)])
         self.assertEqual(sync["transcriptUtf8"].encode(), transcript)
         self.assertTrue(signature_valid(vector["signerSpki"], transcript, decode(sync["signature"])))
+
+    def test_awaiting_policy_sync_request(self):
+        vector = vectors("client-wire")
+        case = vector["awaitingPolicy"]
+        body = case["body"]
+        self.assertEqual(case["bodyUtf8"].encode(), canonical(body))
+        self.assertIsNone(sync_generation_error(body))
+        self.assertIsNone(sync_generation_error(vector["sync"]["body"]))
+        for name, overrides in case["invalid"].items():
+            with self.subTest(name=name):
+                self.assertEqual(FIELD_INVALID, sync_generation_error(body | overrides))
 
     def test_bundle_preserves_directory_created_after_existence_check(self):
         with tempfile.TemporaryDirectory() as temporary:

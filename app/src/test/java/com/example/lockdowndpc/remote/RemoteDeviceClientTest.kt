@@ -53,6 +53,23 @@ class RemoteDeviceClientTest {
         assertFalse(RemoteCrypto.verifies(signer, wire.syncTranscript(sync.number("timestamp") + 1, request), signature))
     }
 
+    @Test fun matchesAwaitingPolicyWireVectorOnlyForAReanchoredBindingWithTrust() {
+        val vector = fixtures.vectors("client-wire").obj("awaitingPolicy")
+        val body = vector.obj("body")
+        val journal = JournalState(
+            binding = RemoteBinding("fixture", body.text("deviceId")),
+            trust = fixtures.trust("keyset-2", "successor"),
+            reanchorFloors = mapOf(DocumentType.COMMAND to body.number("lastCommandSequence")),
+        )
+        val exchange = RemoteSync.Exchange(body.text("nonce"), RemoteTime(1, 50))
+        val report = body.obj("report")
+        assertArrayEquals(vector.text("bodyUtf8").toByteArray(), wire.syncBody(exchange, journal, report))
+        for (ineligible in listOf(journal.copy(reanchorFloors = emptyMap()),
+            journal.copy(binding = null), journal.copy(trust = null))) {
+            assertThrows(IllegalArgumentException::class.java) { wire.syncBody(exchange, ineligible, report) }
+        }
+    }
+
     @Test fun bootstrapCommitsOnlyThePinnedKeySetAfterTheVerifiedBaseline() {
         val harness = fixtures.harness(JournalState())
         val engine = harness.engine

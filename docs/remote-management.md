@@ -510,8 +510,16 @@ depends on wall-clock time.
   4. `command` documents, verified with the server key from the step-1 key
      set and bound to the request nonce.
 
-  A refusal at one step does not stop later steps. A command never depends on
-  the policy state, so step 2's outcome does not change step 4.
+  A refusal at one step does not stop later steps. Outside re-anchor recovery,
+  a command does not depend on the policy state.
+
+  After a storage re-anchor, a bound device with verified trust and no
+  committed generation sends JSON `null` for `fleetPolicyVersion`,
+  `committedSha256`, `generationSha256` and `verifiedGeneration`, and `[]`
+  for `overrides`. It reports its verified `keySetVersion` and stored command
+  floor as usual. The server sends the newest fleet policy listing the device
+  in step 2 and omits recovery documents and commands. The device keeps its
+  live restrictions and refuses commands until the replacement passes read-back.
 - **Hashes both sides can reproduce.** Every hash is a raw 32-byte SHA-256
   digest. On the wire, in reports and in the journal it is written as
   **lowercase hexadecimal, 64 characters**. Hashes are always concatenated as

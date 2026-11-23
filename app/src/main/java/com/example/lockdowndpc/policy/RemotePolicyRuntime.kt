@@ -71,7 +71,7 @@ internal object RemotePolicyRuntime {
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
-                // The live restrictions are the baseline after a re-anchor.
+                // After a re-anchor, keep the live restrictions until a replacement arrives.
                 if (current.engine.state.reanchored) return failed(DISABLED)
                 if (!BuildConfig.REMOTE_ENROLMENT_ENABLED) return LockdownPolicyController.applyRemoteContainment(context)
                 current.engine.commitBaseline(RemoteProvisioning.baseline())?.let { return failed(it) }
@@ -175,7 +175,9 @@ internal object RemotePolicyRuntime {
     fun prepareSync(context: Context): SyncRequest? = onRemoteThread(context, null) {
         val generation = engine.state.generation()
         if (generation == null || engine.state.verified != generation) engine.reconcile()
-        if (engine.failure != null || engine.state.generation() == null) return@onRemoteThread null
+        if (engine.failure != null ||
+            (engine.state.generation() == null && !engine.state.awaitingReplacementPolicy)
+        ) return@onRemoteThread null
         val report = report(context, this)
         val exchange = beginExchange(context) ?: return@onRemoteThread null
         SyncRequest(exchange, RemoteClientWire.syncBody(exchange, engine.state, report))
