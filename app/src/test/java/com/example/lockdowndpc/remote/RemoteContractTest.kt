@@ -207,15 +207,17 @@ class RemoteContractTest {
 
     /** Nothing in the application can open the build gate: it is the build constant alone, with no test switch. */
     @Test fun productionCodeNeverOpensTheEnrolmentGate() {
-        val mentions = f.mainSources.walkTopDown().filter { it.isFile && it.readText().contains("openedByTest") }
-            .map { it.name }.toList()
+        val shipped = listOf(f.mainSources, File(f.mainSources.parentFile.parentFile, "localBuild/java"))
+        val mentions = shipped.flatMap { root -> root.walkTopDown().filter { it.isFile && it.readText().contains("openedByTest") }.toList() }
+            .map { it.name }
         assertEquals(emptyList<String>(), mentions)
         val gate = File(f.mainSources, "com/example/lockdowndpc/policy/RemoteEnrolmentGate.java").readText()
-        assertEquals(listOf("return BuildConfig.REMOTE_ENROLMENT_ENABLED;"),
-            gate.lines().map { it.trim() }.filter { "REMOTE_ENROLMENT_ENABLED" in it })
+        val body = Regex("""public static boolean permits\(\)\s*\{([^}]*)\}""").find(gate)?.groupValues?.get(1)
+            ?.lines()?.map { it.trim() }?.filter { it.isNotEmpty() }
+        assertEquals("permits() is the build constant alone", listOf("return BuildConfig.REMOTE_ENROLMENT_ENABLED;"), body)
         assertFalse(gate.contains("setAccessible") || gate.contains("getDeclaredField"))
-        assertFalse("no boolean field may override the build constant",
-            Regex("""static\s+(volatile\s+)?boolean\s+\w+\s*[;=]""").containsMatchIn(gate))
+        assertFalse("no field may override the build constant",
+            Regex("""static\s+(final\s+)?(volatile\s+)?(boolean|Boolean)\s+\w+\s*[;=]""").containsMatchIn(gate))
     }
 
     /** Only tests may trust the published fixture keys: no production caller can switch the refusal off. */

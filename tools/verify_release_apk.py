@@ -29,6 +29,8 @@ DISABLED_SURFACES = {NAMESPACE + ".kiosk.KioskHostActivity", NAMESPACE + ".ui.Bl
 LAB_MARKERS = (
     b"openedByTest", b"remote_test_client", b"device-guard-remote-test",
     b"RemoteTestJobService;", b"RemoteTestLifecycleReceiver;", b"RemoteTestClient;",
+    # Literal provisioning keys survive R8 renaming; main carries only the "dg.remote." prefix.
+    b"dg.remote.ticket", b"dg.remote.fleet",
 )
 ANDROID_ATTRIBUTE = re.compile(
     r"A: (?:android:|http://schemas\.android\.com/apk/res/android:)(\w+)(?:\(0x[0-9a-f]+\))?=(.*)"
