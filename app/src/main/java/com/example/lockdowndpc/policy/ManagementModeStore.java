@@ -87,6 +87,10 @@ public final class ManagementModeStore {
         return readMarker(context) == Marker.PRESENT;
     }
 
+    static synchronized boolean hasUnreadableRemoteIntent(Context context) {
+        return readMarker(context) == Marker.UNREADABLE;
+    }
+
     /** Called once the fleet binding has been stored by the remote journal. */
     static synchronized boolean commitRemote(Context context) {
         return commitManagedMode(context, ManagementMode.REMOTE);
@@ -136,6 +140,13 @@ public final class ManagementModeStore {
     }
 
     /** Reserved for gated provisioning; a successful marker is never removed. */
+    static synchronized boolean markProvisioningRemoteIntent(Context context) {
+        if (!RemoteEnrolmentGate.permits()) return false;
+        Marker marker = readMarker(context);
+        return marker == Marker.PRESENT || (marker == Marker.ABSENT
+                && readMode(context) == ManagementMode.UNDECIDED && markRemoteIntent(context));
+    }
+
     static synchronized boolean markRemoteIntent(Context context) {
         if (!RemoteEnrolmentGate.permits()) {
             return false;

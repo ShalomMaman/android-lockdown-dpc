@@ -10,4 +10,10 @@ internal object RemoteTestGate {
         field.isAccessible = true
         field.setBoolean(null, open)
     }
+
+    @JvmStatic
+    fun closeRuntime() {
+        AdminAuthority.CommittedPolicy.bindJournal(null)
+        RemotePolicyRuntime.closeForTests()
+    }
 }

@@ -80,6 +80,8 @@ internal data class JournalState(
 
     fun generation() = policy?.let { Generation(it.version, it.hash, overrides) }
     val reanchored: Boolean get() = reanchorFloors.isNotEmpty()
+    val awaitingReplacementPolicy: Boolean
+        get() = reanchored && policy == null && binding != null && trust != null
 
     fun floor(type: DocumentType): Long {
         val applied = appliedFloor(type)

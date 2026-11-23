@@ -53,6 +53,9 @@ internal class RemoteEngine(
 
     fun checkStores(): RemoteFailure? = journal.checkStores()
 
+    fun committedPullMinutes(): Long? =
+        state.policy?.body(schema)?.get("sync")?.asObject()?.get("pullMinutes") as Long?
+
     data class Pass(val verified: Boolean, val failure: RemoteFailure? = null)
     enum class RecoveryOutcome { UNCHANGED, REFUSED, COMMITTED }
     data class RecoveryResult(
@@ -79,6 +82,31 @@ internal class RemoteEngine(
         } catch (error: Refused) {
             error.failure
         } catch (_: Exception) {
+            RemoteFailure("doc-field-invalid")
+        }
+    }
+
+    /** The transport supplies the root; the provisioning digest authenticates it. */
+    fun installEnrolmentKeySet(
+        verifier: RemoteVerifier, binding: RemoteBinding, pin: String, root: String, envelope: ByteArray, sdk: Int
+    ): RemoteFailure? {
+        failure?.let { return it }
+        val baseline = state.generation()
+        if (baseline?.version != 0L || state.verified != baseline) return POLICY_UNAVAILABLE
+        if (state.binding != null && state.binding != binding) return RemoteFailure("doc-device-not-listed")
+        return try {
+            val initial = verifier.bootstrap(pin, root, binding)
+            val doc = verifier.authenticate(RemoteDocument(DocumentType.KEY_SET, envelope), initial, binding)
+            val current = state.trust
+            if (current != null && current.root != root) refuse("doc-key-unknown")
+            if (current == doc.rotatedTrust()) return null
+            val floor = journal.floor(DocumentType.KEY_SET)
+            verifier.checkFloorsAndBinding(doc, floor, floor, binding.deviceId, null, journal.canRetry(doc))
+            if (current == null) bindFleet(verifier, binding, pin, root, sdk)?.let { return it }
+            save(state.copy(trust = doc.rotatedTrust()), doc)
+        } catch (error: Refused) {
+            error.failure
+        } catch (_: RuntimeException) {
             RemoteFailure("doc-field-invalid")
         }
     }

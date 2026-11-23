@@ -6,6 +6,21 @@ plugins {
 fun String.asBuildConfigString(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+// Keep the bench identity stable across clean builds. This throwaway signer
+// is independent of both debug and the externally configured pilot signer.
+val remoteTestKeystore = rootProject.file(".gradle/device-guard-remote-test.p12")
+val generateRemoteTestSigner by tasks.registering(Exec::class) {
+    outputs.file(remoteTestKeystore)
+    onlyIf { !remoteTestKeystore.exists() }
+    doFirst { remoteTestKeystore.parentFile.mkdirs() }
+    commandLine(
+        File(System.getProperty("java.home"), "bin/keytool"), "-genkeypair",
+        "-keystore", remoteTestKeystore, "-storetype", "PKCS12",
+        "-storepass", "android", "-alias", "remote-test", "-keyalg", "RSA",
+        "-keysize", "2048", "-validity", "3650", "-dname", "CN=Device Guard Remote Test",
+    )
+}
+
 android {
     namespace = "com.example.lockdowndpc"
     compileSdk {
@@ -30,6 +45,16 @@ android {
         buildConfigField("String", "UPDATE_PUBLIC_KEY", "".asBuildConfigString())
     }
 
+    signingConfigs {
+        create("remoteTest") {
+            storeFile = remoteTestKeystore
+            storeType = "PKCS12"
+            storePassword = "android"
+            keyAlias = "remote-test"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -38,6 +63,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+        }
+        create("remoteTest") {
+            initWith(getByName("release"))
+            matchingFallbacks += "release"
+            applicationIdSuffix = ".remotetest"
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("remoteTest")
+            buildConfigField("boolean", "REMOTE_ENROLMENT_ENABLED", "true")
+            buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())
+            buildConfigField("String", "UPDATE_PUBLIC_KEY", "".asBuildConfigString())
         }
     }
 
@@ -70,6 +105,10 @@ android {
     }
 }
 
+tasks.matching { it.name == "validateSigningRemoteTest" }.configureEach {
+    dependsOn(generateRemoteTestSigner)
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.08.00")
     implementation(composeBom)
@@ -93,6 +132,17 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
     testImplementation("org.robolectric:robolectric:4.18.1")
+}
+
+tasks.register<Exec>("verifyRemoteTestIsolation") {
+    group = "verification"
+    dependsOn("assembleRelease", "assembleRemoteTest")
+    commandLine(
+        "python3",
+        rootProject.file("tools/verify_remote_test_apk.py"),
+        layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile,
+        layout.buildDirectory.file("outputs/apk/remoteTest/app-remoteTest.apk").get().asFile,
+    )
 }
 
 // Ordinary releases deliberately have no update channel. Keep this verification

@@ -9,10 +9,16 @@ import android.provider.Settings
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.security.keystore.KeyPermanentlyInvalidatedException
+import com.example.lockdowndpc.BuildConfig
+import com.example.lockdowndpc.health.DeviceHealthCollector
+import com.example.lockdowndpc.health.DeviceHealthRedaction
 import com.example.lockdowndpc.remote.DocumentType
+import com.example.lockdowndpc.remote.JsonObject
 import com.example.lockdowndpc.remote.RecoveryPinFile
 import com.example.lockdowndpc.remote.RemoteReanchor
 import com.example.lockdowndpc.remote.RemoteBinding
+import com.example.lockdowndpc.remote.RemoteClientWire
+import com.example.lockdowndpc.remote.RemoteClientWire.fields
 import com.example.lockdowndpc.remote.RemoteCrypto
 import com.example.lockdowndpc.remote.RemoteDocument
 import com.example.lockdowndpc.remote.RemoteEngine
@@ -40,7 +46,7 @@ import kotlinx.coroutines.flow.asStateFlow
 internal object RemotePolicyRuntime {
     private data class Open(
         val projection: RemotePolicyProjection, val engine: RemoteEngine, val verifier: RemoteVerifier,
-        var sync: RemoteSync? = null
+        var sync: RemoteSync? = null, var syncErrors: List<String> = emptyList()
     )
 
     private var open: Open? = null
@@ -65,9 +71,10 @@ internal object RemotePolicyRuntime {
             // Before enrolment commits the baseline there is no generation to project.
             // The stores are still untouched, so the marker's containment pass applies.
             if (current.engine.state.policy == null) {
-                // The live restrictions are the baseline after a re-anchor.
+                // After a re-anchor, keep the live restrictions until a replacement arrives.
                 if (current.engine.state.reanchored) return failed(DISABLED)
-                return LockdownPolicyController.applyRemoteContainment(context)
+                if (!BuildConfig.REMOTE_ENROLMENT_ENABLED) return LockdownPolicyController.applyRemoteContainment(context)
+                current.engine.commitBaseline(RemoteProvisioning.baseline())?.let { return failed(it) }
             }
             val pass = current.engine.reconcile()
             if (pass.failure != null) {
@@ -84,6 +91,31 @@ internal object RemotePolicyRuntime {
         } catch (_: Exception) {
             failed(RemoteFailure("journal-write-failed"))
         }
+    }
+
+    fun baselineVerified(context: Context): Boolean = onRemoteThread(context, false) {
+        if (engine.state.reanchored || engine.state.policy?.version?.let { it != 0L } == true) {
+            return@onRemoteThread false
+        }
+        if (engine.state.policy == null && engine.commitBaseline(RemoteProvisioning.baseline()) != null) {
+            return@onRemoteThread false
+        }
+        val generation = engine.state.generation()
+        engine.failure == null && generation != null &&
+            (engine.state.verified == generation || engine.reconcile().verified)
+    }
+
+    fun boundDevice(context: Context): String? = onRemoteThread(context, null, revoke = false) {
+        if (engine.failure != null || (engine.state.trust?.version ?: 0L) == 0L) null
+        else engine.state.binding?.deviceId
+    }
+
+    fun finishEnrolment(
+        context: Context, device: RemoteClientWire.Enrolled, pin: String, root: String,
+    ): RemoteFailure? = onRemoteThread(context, DISABLED, WRITE_FAILED, resumeMode = false) {
+        engine.installEnrolmentKeySet(verifier, RemoteBinding(device.fleetId, device.deviceId), pin, root,
+            device.keySet, Build.VERSION.SDK_INT)?.let { return@onRemoteThread it }
+        WRITE_FAILED.takeUnless { ManagementModeStore.commitRemote(context) }
     }
 
     fun bindFleet(context: Context, binding: RemoteBinding, pinnedId: String, rootSpki: String): RemoteFailure? =
@@ -138,6 +170,77 @@ internal object RemotePolicyRuntime {
         sync.begin(RemoteCrypto.encode(nonce), now(context))
     }
 
+    data class SyncRequest(val exchange: RemoteSync.Exchange, val body: ByteArray)
+
+    fun prepareSync(context: Context): SyncRequest? = onRemoteThread(context, null) {
+        val generation = engine.state.generation()
+        if (generation == null || engine.state.verified != generation) engine.reconcile()
+        if (engine.failure != null ||
+            (engine.state.generation() == null && !engine.state.awaitingReplacementPolicy)
+        ) return@onRemoteThread null
+        val report = report(context, this)
+        val exchange = beginExchange(context) ?: return@onRemoteThread null
+        SyncRequest(exchange, RemoteClientWire.syncBody(exchange, engine.state, report))
+    }
+
+    fun discardExchange(context: Context, exchange: RemoteSync.Exchange) {
+        onRemoteThread(context, Unit, revoke = false) { sync?.discard(exchange) }
+    }
+
+    fun committedPullMinutes(context: Context): Long? =
+        onRemoteThread(context, null, resumeMode = false, revoke = false) { engine.committedPullMinutes() }
+
+    fun recordSyncError(context: Context, code: String) {
+        onRemoteThread(context, Unit, resumeMode = false, revoke = false) {
+            syncErrors = (syncErrors + code).distinct()
+        }
+    }
+
+    /** Apply an arrived response through the live exchange and its journal, even if the job stopped. */
+    fun receiveAndApply(
+        context: Context, exchange: RemoteSync.Exchange, reply: RemoteClientWire.SyncReply,
+    ): SyncResult = onRemoteThread(context, SyncResult(retry = true)) {
+        val previous = engine.state
+        val response = receive(context, exchange, reply.nonce, reply.documents)
+        syncErrors = listOfNotNull(response.failure?.code) +
+            response.decisions.mapNotNull { it.failure?.code }.distinct()
+        if (response.failure != null) return@onRemoteThread SyncResult(retry = true)
+        val accepted = engine.state
+        (accepted.commands.keys - previous.commands.keys).sorted().forEach { dispatch(context, it) }
+        val changed = accepted.generation() != previous.generation()
+        val target = engine.state.generation()
+        val verified = target != null && (engine.state.verified == target || engine.ensureProjected().verified)
+        if (verified && engine.state.reanchored && !ManagementModeStore.commitRemote(context)) {
+            return@onRemoteThread SyncResult(retry = true)
+        }
+        SyncResult(retry = !verified || WRITE_FAILED.code in syncErrors,
+            followUp = changed || accepted.trust != previous.trust || accepted.recoveryVersion != previous.recoveryVersion ||
+                accepted.commandFloor != previous.commandFloor)
+    }
+
+    data class SyncResult(val retry: Boolean, val followUp: Boolean = false)
+
+    private fun report(context: Context, current: Open): JsonObject {
+        val health = DeviceHealthRedaction.redact(DeviceHealthCollector.read(context))
+        val policy = health.policy()
+        val counts = policy.packages()
+        val state = current.engine.state
+        return mapOf(
+            "mode" to ManagementModeStore.read(context).name,
+            "health" to mapOf("verification" to policy.verification().name, "ownership" to policy.ownership().name,
+                "packages" to mapOf("allowed" to counts.allowed().toLong(), "blocked" to counts.blocked().toLong())),
+            "passErrors" to policy.verificationErrors(),
+            "syncErrors" to current.syncErrors,
+            "commands" to state.commands.values.filter { it.state.finished }.sortedBy { it.sequence }.map {
+                mapOf("sequence" to it.sequence, "kind" to it.kind, "state" to it.state.name, "code" to it.code,
+                    "secureLock" to it.secureLock, "reapplyVerified" to it.reapplyVerified,
+                    "verifiedGeneration" to it.verified?.fields("verifiedSha256"))
+            },
+            "recoveryUses" to state.recoveryUses,
+            "auditCodes" to health.audit().map { it.eventCode() },
+        )
+    }
+
     fun receive(context: Context, exchange: RemoteSync.Exchange, nonce: String, documents: List<RemoteDocument>):
         RemoteSync.Response = onRemoteThread(context, RemoteSync.Response(DISABLED), RemoteSync.Response(WRITE_FAILED)) {
         engine.failure?.let { return@onRemoteThread RemoteSync.Response(it) }
@@ -157,6 +260,7 @@ internal object RemotePolicyRuntime {
             RemoteEngine.RecoveryResult(RemoteEngine.RecoveryOutcome.REFUSED, RemoteFailure("recovery-commit-failed"))) {
             val result = engine.recover(choices, code, now(context))
             if (result.outcome == RemoteEngine.RecoveryOutcome.COMMITTED) {
+                RemoteTestScheduler.schedule(context)
                 result.copy(projection = engine.ensureProjected())
             } else result
         }
@@ -200,7 +304,7 @@ internal object RemotePolicyRuntime {
     /** A restart between the journal commit and the mode commit can finish the transition. */
     private fun commitRemoteMode(context: Context, engine: RemoteEngine): Boolean =
         engine.lost || engine.state.binding == null || engine.state.trust == null ||
-            engine.state.reanchored ||
+            engine.state.reanchored || engine.state.trust?.version == 0L ||
             ManagementModeStore.commitRemote(context)
 
     private fun now(context: Context) = RemoteTime(

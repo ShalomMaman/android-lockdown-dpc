@@ -23,6 +23,8 @@ import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
+import com.example.lockdowndpc.policy.RemoteProvisioning;
+import com.example.lockdowndpc.policy.RemoteTestScheduler;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 import java.util.function.IntConsumer;
@@ -60,9 +62,25 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         setResult(RESULT_CANCELED);
         DevicePolicyManager dpm = getSystemService(DevicePolicyManager.class);
         if (!ACTION_ADMIN_POLICY_COMPLIANCE.equals(getIntent().getAction())
-                || !RemoteEnrolmentGate.permitsLocalProvisioning(getIntent())
                 || dpm == null || !dpm.isDeviceOwnerApp(getPackageName())) {
             finish();
+            return;
+        }
+        if (!RemoteEnrolmentGate.permitsLocalProvisioning(getIntent())) {
+            if (!RemoteProvisioning.store(this, getIntent())) {
+                Log.w(TAG, "remote-enrolment-config-refused");
+                finish();
+                return;
+            }
+            Context appContext = getApplicationContext();
+            PENDING.request(() -> true, this::showProgress,
+                    report -> PolicyReconciliationCoordinator.reconcileForProvisioning(appContext, verified -> {
+                        if (Boolean.TRUE.equals(verified)) {
+                            markComplianceDone(appContext);
+                            RemoteTestScheduler.schedule(appContext);
+                        }
+                        report.accept(verified);
+                    }), deliverResult);
             return;
         }
         if (!ManagementModeStore.selectLocal(this)) {
@@ -152,7 +170,7 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
         }
     }
 
-    private static boolean isComplianceDone(Context context) {
+    static boolean isComplianceDone(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getBoolean(KEY_COMPLIANCE_DONE, false);
     }

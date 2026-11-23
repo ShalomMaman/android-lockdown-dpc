@@ -116,6 +116,22 @@ when a vector file or section is added without a Kotlin test that replays it.
   an accepted keyset, it becomes the current root. `sync.json` models decoded
   batches and request events. Transport framing and report serialization
   are left to PR 8.
+- **Awaiting policy.** A bound device with verified trust and no committed
+  generation after storage re-anchor sends an awaiting-policy `POST /v1/sync`.
+  `fleetPolicyVersion`, `committedSha256`, `generationSha256` and
+  `verifiedGeneration` are JSON `null`, and `overrides` is `[]`. The usual
+  device signature and remaining fields still apply. `keySetVersion` is the
+  verified key-set version, zero while only the re-anchored root is trusted,
+  and `lastCommandSequence` is the stored sequence floor. A mix of null and
+  non-null committed-generation fields, a non-null `verifiedGeneration`, or
+  a nonempty override list in this form is a `doc-field-invalid` schema error.
+  A request with a committed generation may still have `verifiedGeneration`
+  null when no generation has passed read-back. For awaiting-policy requests,
+  step 2 uses a policy selection floor of zero and returns the newest
+  admissible fleet policy listing the device. The server omits recovery and
+  commands, and the device refuses either until the replacement passes live
+  read-back. Re-anchor replay floors and the existing live restrictions stay
+  in force.
 - **Durability and codes.** A failed policy journal write leaves the live
   target unchanged. A failed projection write aborts the pass. After restart,
   reconciliation uses the covered durable target and rewrites every store.
@@ -328,6 +344,7 @@ then returns to `REMOTE`.
 | `vectors/signed-documents.json` | Signed sync documents and key roles, including distinct exact encodings of the same policy |
 | `vectors/document-shapes.json` | Valid and invalid decoded shapes, one mutation per vector, Later sections 14.1–14.9, malformed JSON and signed-envelope limits |
 | `vectors/hashes.json` | The two section 5.3 goldens, override hash input order and wire order, canonical bytes, baseline, exact signed payloads and an older verified generation |
+| `vectors/client-wire.json` | Enrolment and sync transcripts, canonical awaiting-policy request and malformed variants |
 | `vectors/sync.json` | Nonce lifecycle and exact cutoff, order, current and successor roots, signer/device/version refusals and progression after a refusal |
 | `vectors/dispatch.json` | Dispatch commits, crashes, recovery before and after the call, secure lock evidence and reapply outcomes |
 | `vectors/journal.json` | The eight section 5.5 crash scenarios, each projection checkpoint, write failures and section 15 read-back requirements |

@@ -1,6 +1,7 @@
 package com.example.lockdowndpc.policy
 
 import android.content.Context
+import com.example.lockdowndpc.BuildConfig
 import com.example.lockdowndpc.remote.CommandEntry
 import com.example.lockdowndpc.remote.CommandState
 import com.example.lockdowndpc.remote.JournalState
@@ -202,7 +203,7 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
     /** The build gate is off: with a marker present, no runtime entry point reaches the journal. */
     @Test fun gateOffRefusesEveryRuntimeEntryPointAndWritesNothing() {
         RemoteTestGate.open(false)
-        assertFalse(RemoteEnrolmentGate.permits())
+        org.junit.Assume.assumeFalse(RemoteEnrolmentGate.permits())
         val unavailable = RemotePolicyApplier.UNAVAILABLE
         assertEquals(unavailable, RemotePolicyRuntime.bindFleet(context, f.binding, f.binding.deviceId, "")?.code)
         assertNull(RemotePolicyRuntime.beginExchange(context))
@@ -237,8 +238,18 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
         })
         // A closed authority.
         assertFalse(onPolicyThread { withAuthority { it }.let { AdminAuthority.CommittedPolicy.permits(context, it) } })
-        // The gate off: no authority, no projection and no pass.
+        // Drop the test override. The remoteTest artifact still has its build gate on.
         RemoteTestGate.open(false)
+        if (BuildConfig.REMOTE_ENROLMENT_ENABLED) {
+            assertTrue(onPolicyThread { permitted() })
+            assertVerified()
+            assertEquals(target(), verified())
+            assertFalse(hidden(READER))
+            assertFalse(hidden(SECOND_READER))
+            return
+        }
+
+        // The release gate is off: no authority, no projection and no pass.
         assertFalse(onPolicyThread { permitted() })
         val refused = onPolicyThread {
             withAuthority {

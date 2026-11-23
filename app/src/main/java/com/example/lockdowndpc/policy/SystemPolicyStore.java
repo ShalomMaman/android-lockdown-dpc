@@ -87,7 +87,7 @@ public final class SystemPolicyStore {
 
     /**
      * The base policy this device is configured for: the administrator's stored
-     * choices, raised by any explicit compatibility floor.
+     * choices, raised by compatibility and containment requirements.
      *
      * <p>This is the single seam every consumer of the base policy reads —
      * {@code LockdownPolicyController}, the maintenance coordinator that has to
@@ -104,9 +104,14 @@ public final class SystemPolicyStore {
      * including a pending teardown the pass holds, which must look enabled.
      */
     public static Map<SystemPolicyControl, Boolean> baseChoices(Context context, boolean homeFilterEnabled) {
-        Map<SystemPolicyControl, Boolean> choices = PlayStoreCompatibility.baseChoices(
-                PlayStoreCompatibilityStore.isEnabled(context), explicitChoices(context));
-        return HomeFilterPolicy.choicesFor(choices, homeFilterEnabled);
+        Map<SystemPolicyControl, Boolean> choices = explicitChoices(context);
+        if (ManagementModeStore.hasUnreadableRemoteIntent(context)) {
+            // An unreadable marker cannot authorize keeping the ADB recovery path open.
+            choices.put(SystemPolicyControl.DEVELOPER_OPTIONS_AND_ADB, true);
+        }
+        var compatibleChoices = PlayStoreCompatibility.baseChoices(
+                PlayStoreCompatibilityStore.isEnabled(context), choices);
+        return HomeFilterPolicy.choicesFor(compatibleChoices, homeFilterEnabled);
     }
 
     /** What a control resolves to right now: the base choice, or the profile default. */

@@ -22,19 +22,25 @@ public final class RemoteEnrolmentGate {
         return BuildConfig.REMOTE_ENROLMENT_ENABLED || openedByTest;
     }
 
-    /** Only local provisioning is implemented. Unreadable extras are refused. */
+    /** Only a readable bundle without remote keys can enter local provisioning. */
     public static boolean permitsLocalProvisioning(Intent request) {
-        if (request == null) {
-            return false;
-        }
         try {
-            PersistableBundle extras = IntentCompat.getParcelableExtra(request,
-                    DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, PersistableBundle.class);
-            return extras == null
-                    ? !request.hasExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE)
-                    : extras.keySet().stream().noneMatch(key -> key.startsWith("dg.remote."));
+            return remoteExtras(request) == null;
         } catch (RuntimeException unreadable) {
             return false;
         }
+    }
+
+    static PersistableBundle remoteExtras(Intent request) {
+        if (request == null) throw new IllegalArgumentException();
+        PersistableBundle extras = IntentCompat.getParcelableExtra(request,
+                DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, PersistableBundle.class);
+        if (extras == null && request.hasExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE)) {
+            throw new IllegalArgumentException();
+        }
+        if (extras == null || extras.keySet().stream().noneMatch(key -> key.startsWith("dg.remote."))) {
+            return null;
+        }
+        return extras;
     }
 }

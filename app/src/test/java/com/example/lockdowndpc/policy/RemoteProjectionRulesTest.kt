@@ -14,11 +14,14 @@ import com.example.lockdowndpc.remote.DocumentType
 import com.example.lockdowndpc.remote.JournalState
 import com.example.lockdowndpc.remote.JsonObject
 import com.example.lockdowndpc.remote.Refused
+import com.example.lockdowndpc.remote.RemoteClientWire
 import com.example.lockdowndpc.remote.RemoteCrypto
 import com.example.lockdowndpc.remote.RemoteDocument
 import com.example.lockdowndpc.remote.RemoteFailure
 import com.example.lockdowndpc.remote.RemoteOverride
 import com.example.lockdowndpc.remote.WireJson
+import com.example.lockdowndpc.remote.asObject
+import com.example.lockdowndpc.remote.obj
 import java.io.File
 import java.security.KeyPair
 import java.security.KeyPairGenerator
@@ -27,7 +30,6 @@ import java.security.spec.ECGenParameterSpec
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -143,17 +145,9 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertNull(RemotePolicyRuntime.bindFleet(context, binding, RemoteCrypto.keyId(rootSpki), rootSpki))
 
         fun submit(type: DocumentType, document: JsonObject, key: KeyPair): RemoteFailure? {
-            val bytes = WireJson.canonical(document)
-            val signature = Signature.getInstance("SHA256withECDSA").run {
-                initSign(key.private)
-                update(bytes)
-                sign()
-            }
-            val envelope = WireJson.canonical(mapOf("format" to "dg-signed/1",
-                "keyId" to RemoteCrypto.keyId(RemoteCrypto.encode(key.public.encoded)),
-                "payload" to RemoteCrypto.encode(bytes), "signature" to RemoteCrypto.encode(signature)))
             val exchange = requireNotNull(RemotePolicyRuntime.beginExchange(context))
-            return RemotePolicyRuntime.receive(context, exchange, exchange.nonce, listOf(RemoteDocument(type, envelope)))
+            val signed = RemoteDocument(type, signedEnvelope(document, key))
+            return RemotePolicyRuntime.receive(context, exchange, exchange.nonce, listOf(signed))
                 .decisions.single().failure
         }
 
@@ -164,13 +158,16 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         val prefs = context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE)
         val before = prefs.getString("state", null)
         val document = f.doc("policy-6") + ("deviceIds" to listOf(binding.deviceId))
-        val unsupported = document + ("policy" to policy(filter = null, extra = mapOf("locale" to "he")))
+        val sync = "sync" to mapOf("pullMinutes" to 120L)
+        val unsupported = document + ("policy" to policy(filter = null, extra = mapOf("locale" to "he", sync)))
         val code = RemotePolicyProjection.LOCALE_UNSUPPORTED
         assertEquals(RemoteFailure(code, "/policy/locale"), submit(DocumentType.POLICY, unsupported, signer))
         assertEquals(before, prefs.getString("state", null))
         assertEquals(code, RemotePolicyRuntime.policyRefusals.value)
+        assertNull(RemotePolicyRuntime.committedPullMinutes(context))
 
-        assertNull(submit(DocumentType.POLICY, document + ("policy" to policy(filter = null)), signer))
+        assertNull(submit(DocumentType.POLICY, document + ("policy" to policy(filter = null, extra = mapOf(sync))), signer))
+        assertEquals(120L, RemotePolicyRuntime.committedPullMinutes(context))
         assertNull(RemotePolicyRuntime.policyRefusals.value)
     }
 
@@ -321,14 +318,13 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertEquals("doc-version-rollback", RemotePolicyRuntime.bindFleet(context, binding, pinnedId, spki)?.code)
     }
 
-    @Test fun runtimeReanchorKeepsLiveRestrictionsAndWaitsInEnrollingAfterRestart() {
+    @Test fun runtimeReanchorSyncsUntilAReplacementPolicyPassesReadBack() {
         RemotePolicyRuntime.setGuardMacForTests(f::mac)
         RemotePolicyRuntime.setPinMacForTests(f::mac)
         assertTrue(Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 9))
         install(READER)
         assertTrue(dpm.setApplicationHidden(admin, READER, true))
-        val root = KeyPairGenerator.getInstance("EC").apply { initialize(ECGenParameterSpec("secp256r1")) }
-            .generateKeyPair()
+        val root = newKeyPair()
         val spki = RemoteCrypto.encode(root.public.encoded)
         val rootId = RemoteCrypto.keyId(spki)
         val binding = f.binding.copy(deviceId = RemoteCrypto.encode(ByteArray(32)))
@@ -339,17 +335,13 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         RemotePolicyRuntime.closeForTests()
         val status = RemotePolicyRuntime.reanchorStatus(context)
         assertEquals("journal-lost", status.reason?.code)
-        val payload = WireJson.canonical(mapOf("schemaVersion" to 1L, "type" to "re-anchor",
+        assertNull(RemotePolicyRuntime.prepareSync(context))
+        val commandFloor = 7L
+        val document = signedEnvelope(mapOf("schemaVersion" to 1L, "type" to "re-anchor",
             "fleetId" to binding.fleetId, "deviceId" to binding.deviceId, "nonce" to requireNotNull(status.nonce),
             "rootFingerprint" to rootId, "rootSpki" to spki,
-            "floors" to DocumentType.entries.associate { it.wire to 0L }))
-        val signature = Signature.getInstance("SHA256withECDSA").run {
-            initSign(root.private)
-            update(payload)
-            sign()
-        }
-        val document = WireJson.canonical(mapOf("format" to "dg-signed/1", "keyId" to rootId,
-            "payload" to RemoteCrypto.encode(payload), "signature" to RemoteCrypto.encode(signature)))
+            "floors" to DocumentType.entries.associate { it.wire to if (it == DocumentType.COMMAND) commandFloor else 0L }),
+            root)
 
         assertNull(RemotePolicyRuntime.reanchor(context, document, null))
         RemotePolicyRuntime.closeForTests()
@@ -358,9 +350,72 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
         assertFalse(onPolicyThread { RemotePolicyRuntime.reconcile(context) }.applied())
         assertTrue(hidden(READER))
-        assertNotNull(RemotePolicyRuntime.beginExchange(context))
+
+        fun prepare() = requireNotNull(RemotePolicyRuntime.prepareSync(context))
+        fun reply(request: RemotePolicyRuntime.SyncRequest, vararg documents: RemoteDocument) =
+            RemotePolicyRuntime.receiveAndApply(context, request.exchange,
+                RemoteClientWire.SyncReply(request.exchange.nonce, documents.toList()))
+        fun checkAwaiting(request: RemotePolicyRuntime.SyncRequest, keySetVersion: Long) {
+            val body = WireJson.parse(request.body).asObject()
+            for (field in listOf("fleetPolicyVersion", "committedSha256", "generationSha256", "verifiedGeneration")) {
+                assertTrue(body.containsKey(field))
+                assertNull(body[field])
+            }
+            assertEquals(emptyList<String>(), body["overrides"])
+            assertEquals(binding.deviceId, body["deviceId"])
+            assertEquals(keySetVersion, body["keySetVersion"])
+            assertEquals(commandFloor, body["lastCommandSequence"])
+            val packages = body.obj("report").obj("health").obj("packages")
+            assertEquals(AllowedAppsStore.getAllowedPackages(context).size.toLong(), packages["allowed"])
+            assertEquals(0L, packages["blocked"])
+        }
+
+        val policyKey = newKeyPair()
+        val commandKey = newKeyPair()
+        val keySet = (f.doc("keyset-2-current-root") - "successorRoot") + mapOf(
+            "fleetPolicyKeys" to listOf(RemoteCrypto.encode(policyKey.public.encoded)),
+            "serverKey" to RemoteCrypto.encode(commandKey.public.encoded))
+        val first = prepare()
+        checkAwaiting(first, 0L)
+        val withoutPolicy = reply(first, RemoteDocument(DocumentType.KEY_SET, signedEnvelope(keySet, root)))
+        assertTrue(withoutPolicy.retry)
+        assertTrue(RemotePolicyRuntime.reanchorStatus(context).awaitingPolicy)
         assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context))
         assertTrue(hidden(READER))
+
+        val second = prepare()
+        checkAwaiting(second, 2L)
+        val replacement = f.doc("policy-6") + mapOf(
+            "deviceIds" to listOf(binding.deviceId),
+            "policy" to policy(allowed = listOf(READER), filter = null))
+        val command = f.doc("lock-2") + mapOf(
+            "deviceId" to binding.deviceId, "nonce" to second.exchange.nonce, "sequence" to commandFloor + 1)
+        val applied = reply(second,
+            RemoteDocument(DocumentType.POLICY, signedEnvelope(replacement, policyKey)),
+            RemoteDocument(DocumentType.COMMAND, signedEnvelope(command, commandKey)))
+        assertFalse(applied.retry)
+        assertTrue(applied.followUp)
+        assertEquals(ManagementMode.REMOTE, ManagementModeStore.read(context))
+        assertFalse(RemotePolicyRuntime.reanchorStatus(context).awaitingPolicy)
+        assertFalse(hidden(READER))
+
+        val reported = WireJson.parse(prepare().body).asObject()
+        assertEquals(6L, reported["fleetPolicyVersion"])
+        assertEquals(reported["generationSha256"], reported.obj("verifiedGeneration")["verifiedSha256"])
+        assertEquals(commandFloor, reported["lastCommandSequence"])
+        assertEquals(listOf("remote-policy-unavailable"), reported.obj("report")["syncErrors"])
+    }
+
+    private fun signedEnvelope(document: JsonObject, key: KeyPair): ByteArray {
+        val payload = WireJson.canonical(document)
+        val signature = Signature.getInstance("SHA256withECDSA").run {
+            initSign(key.private)
+            update(payload)
+            sign()
+        }
+        return WireJson.canonical(mapOf("format" to "dg-signed/1",
+            "keyId" to RemoteCrypto.keyId(RemoteCrypto.encode(key.public.encoded)),
+            "payload" to RemoteCrypto.encode(payload), "signature" to RemoteCrypto.encode(signature)))
     }
 
     private fun newKeyPair() = KeyPairGenerator.getInstance("EC")
