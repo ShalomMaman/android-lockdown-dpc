@@ -11,10 +11,10 @@ The drill has two halves.
 | Half | What it covers | Automated here | Status |
 | --- | --- | --- | --- |
 | Offline | The two APKs form a legal in-place update pair, and the published envelope satisfies exactly the rules the client enforces | Yes, `tools/update_drill.py` | Reproducible on any workstation with the release tools |
-| On-device | Publish, scheduled check, silent Device Owner installation, and a device that comes back with policy verified | No | **Unproven until it is executed on hardware** |
+| On-device | Stage, trigger the app's scheduled check, and verify silent Device Owner installation and retained policy | `tools/device_update_drill.py` for the isolated production channel, with a witness | **Unproven until it is executed on hardware** |
 
-Nothing in this repository can prove the on-device half. Do not record the gate
-as met, and do not disable ADB, on the strength of the offline half alone.
+Do not record the gate as met or disable ADB on the strength of the offline half
+alone. Keep the evidence for the exact device and firmware used.
 
 ## What the offline half proves
 
@@ -99,10 +99,78 @@ A `SKIP` is never counted as a pass and never upgrades the verdict; an
 `INCOMPLETE` run means the environment was missing something, not that the
 update is sound.
 
-## Part 2 — on-device drill (manual)
+## Part 2 — scripted production-channel drill
 
-This half is not automated by this repository and is not proven by it. Execute
-it on the enrolled device, with ADB still enabled, and record what you observe.
+Use a dedicated physical bench device and an isolated, direct HTTPS update
+channel reserved for that device. Have a witness and keep ADB available for
+recovery. The installed baseline must be a single, hardened production release,
+signed with the same APK key and built to trust that channel. If a new baseline
+is needed, build it with `gradle/production.init.gradle.kts` at the source
+version and provision it before the drill. On the bench device, enable and verify
+the factory-reset restriction and the other expected policies. Open the console
+to let the app schedule its update job. Keep the old manifest current until
+the script asks you to stage the new one.
+
+Use JDK 17, the project Gradle wrapper, Python 3.10+, OpenSSL, Android SDK
+Build Tools, and authorized USB ADB. Select the device with `ANDROID_SERIAL`
+if more than one is connected. Load these four signing values at runtime from
+the secure credential store (for example, macOS Keychain).
+
+- `DEVICE_GUARD_STORE_FILE`
+- `DEVICE_GUARD_STORE_PASSWORD`
+- `DEVICE_GUARD_KEY_ALIAS`
+- `DEVICE_GUARD_KEY_PASSWORD`
+
+Keep the keystore outside the checkout. Supply the existing channel's
+`DEVICE_GUARD_UPDATE_MANIFEST_URL`, `DEVICE_GUARD_UPDATE_PUBLIC_KEY` and
+`DEVICE_GUARD_UPDATE_PUBLIC_KEY_SHA256` through the environment. Run the script
+from the checkout with shell tracing disabled, a new private output directory,
+and a version code above the installed version, source version, and any
+previously authorized version on this bench channel.
+
+```bash
+python3 tools/device_update_drill.py \
+  --version-code "$DRILL_VERSION_CODE" --output-dir "$NEW_DRILL_DIR"
+```
+
+1. The script uses ADB to read Device Owner and the owner user's effective
+   restrictions, then pulls the installed APK to check its identity, channel,
+   and signer. Confirm the baseline and isolated test setup when prompted.
+2. It builds `candidate.apk` with the production init script and the higher
+   version code, then checks the release boundary, matching signer, and
+   unchanged channel. At the staging prompt, watch the device. Sign the new
+   envelope with the separate metadata key using
+   [`tools/publish_update.py`](../tools/publish_update.py) and the instructions in
+   [Secure updates](secure-updates.md). Stage the exact candidate at an
+   immutable HTTPS URL first, then replace the isolated channel's manifest.
+3. The script verifies the served envelope against the candidate, checks that
+   the baseline is still installed, and runs
+   `adb shell cmd jobscheduler run -f -u OWNER_USER PACKAGE 1146441796`.
+   The app downloads, verifies, and installs the update through its normal path.
+   Observe the device continuously. Stop if an installation prompt appears.
+4. The script compares the installed APK byte-for-byte by digest and size with
+   the candidate. Check the console for both update audit entries and verify the
+   same policies and end-user behavior as before. Confirm the witness prompt
+   only after seeing the full sequence and no request for install approval.
+   The script then reads back Device Owner and effective restrictions with ADB.
+5. Save the single JSON line from standard output with the hardware case.
+   `PASS` exits 0. `FAIL` exits 1 with the stage and a sanitized reason.
+   The result covers the scripted checks and the witness observations. Record
+   the remaining hardware observations below, including a follow-up check that
+   the app reports the candidate as current. Keep ADB enabled when any check fails.
+
+ADB starts the app's scheduled check and reads back device state. Use the
+operator session to stage channel artifacts. Leave the installed app, app data,
+and policy in place throughout the run. If the periodic check
+installs the update during staging and before the controlled trigger, capture
+what was observed and repeat the scripted drill with a fresh higher version.
+If the device's ADB output cannot be interpreted, record the failed stage and
+use the manual procedure below to gather firmware-specific evidence.
+
+### Manual procedure
+
+Use this procedure for the pilot channel or to gather additional observations.
+Execute it on the enrolled device with ADB still enabled.
 
 **Step 0 — record the starting state.** Note the installed `versionName` and
 `versionCode`, that the app is Device Owner, that the policy screen reports the
@@ -194,6 +262,5 @@ package-mismatch, corrupted-signature, and skipped-check paths. The tests
 generate throwaway EC keys inside a temporary directory; no key material is
 stored in this repository.
 
-The on-device half has not been executed. No claim about silent installation,
-timing, or post-update policy verification on real hardware is supported by this
-repository yet. Record the result here when the drill runs.
+The on-device half still requires execution on hardware. Record the result
+against the tested device model, Android version, and firmware.

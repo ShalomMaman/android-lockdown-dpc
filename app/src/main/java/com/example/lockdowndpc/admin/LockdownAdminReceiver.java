@@ -10,8 +10,7 @@ import android.util.Log;
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
-import com.example.lockdowndpc.policy.RemoteProvisioning;
-import com.example.lockdowndpc.policy.RemoteTestScheduler;
+import com.example.lockdowndpc.policy.RemoteTransport;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 public final class LockdownAdminReceiver extends DeviceAdminReceiver {
@@ -32,16 +31,16 @@ public final class LockdownAdminReceiver extends DeviceAdminReceiver {
                 Log.w("LockdownAdminReceiver", "remote-enrolment-disabled");
                 return;
             }
-            if (RemoteProvisioning.store(context, intent)) {
+            if (RemoteTransport.store(context, intent)) {
                 if (PolicyComplianceActivity.isComplianceDone(context)) {
-                    RemoteTestScheduler.schedule(context);
+                    RemoteTransport.schedule(context);
                     return;
                 }
                 Log.w("LockdownAdminReceiver", "compliance-gate-skipped");
                 PendingResult pending = goAsync();
                 PolicyReconciliationCoordinator.reconcileForProvisioning(context, verified -> {
                     try {
-                        if (Boolean.TRUE.equals(verified)) RemoteTestScheduler.schedule(context);
+                        if (Boolean.TRUE.equals(verified)) RemoteTransport.schedule(context);
                     } finally {
                         if (pending != null) pending.finish();
                     }

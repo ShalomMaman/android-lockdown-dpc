@@ -41,7 +41,7 @@ class RemoteTestJobTest {
     @Test fun credentialLockedDeviceNeverStartsClientWork() {
         val context = RuntimeEnvironment.getApplication()
         shadowOf(context.getSystemService(UserManager::class.java)).setUserUnlocked(false)
-        assertFalse(RemoteClientCycle.run({ RemoteProvisioning.unlocked(context) }) {
+        assertFalse(RemoteClientCycle.run({ RemoteTestScheduler.unlocked(context) }) {
             throw AssertionError("Network work before first unlock")
         })
     }

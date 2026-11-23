@@ -260,7 +260,7 @@ internal object RemotePolicyRuntime {
             RemoteEngine.RecoveryResult(RemoteEngine.RecoveryOutcome.REFUSED, RemoteFailure("recovery-commit-failed"))) {
             val result = engine.recover(choices, code, now(context))
             if (result.outcome == RemoteEngine.RecoveryOutcome.COMMITTED) {
-                RemoteTestScheduler.schedule(context)
+                RemoteTransport.schedule(context)
                 result.copy(projection = engine.ensureProjected())
             } else result
         }

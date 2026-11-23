@@ -1,19 +1,27 @@
 package com.example.lockdowndpc.policy
 
-/**
- * Opens the enrolment gate for JVM tests. The application has no way to do
- * this: the switch is a private field that only this test-tree helper writes.
- */
-internal object RemoteTestGate {
-    fun open(open: Boolean) {
-        val field = RemoteEnrolmentGate::class.java.getDeclaredField("openedByTest")
-        field.isAccessible = true
-        field.setBoolean(null, open)
-    }
+import com.example.lockdowndpc.BuildConfig
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 
-    @JvmStatic
-    fun closeRuntime() {
-        AdminAuthority.CommittedPolicy.bindJournal(null)
-        RemotePolicyRuntime.closeForTests()
+/** Test-only replacement for the build constant at the enrolment boundary. */
+@Implements(RemoteEnrolmentGate::class)
+class RemoteTestGate {
+    companion object {
+        @Volatile private var opened = false
+
+        internal fun open(open: Boolean) {
+            opened = open
+        }
+
+        @JvmStatic
+        @Implementation
+        fun permits(): Boolean = BuildConfig.REMOTE_ENROLMENT_ENABLED || opened
+
+        @JvmStatic
+        fun closeRuntime() {
+            AdminAuthority.CommittedPolicy.bindJournal(null)
+            RemotePolicyRuntime.closeForTests()
+        }
     }
 }

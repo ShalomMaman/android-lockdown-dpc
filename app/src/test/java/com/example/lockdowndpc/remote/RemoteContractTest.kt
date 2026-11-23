@@ -205,16 +205,17 @@ class RemoteContractTest {
         assertTrue(f.contractSchema.readBytes().contentEquals(f.packagedSchema.readBytes()))
     }
 
-    /** Nothing in the application can open the build gate: the test switch is declared, read once and never written. */
+    /** Nothing in the application can open the build gate: it is the build constant alone, with no test switch. */
     @Test fun productionCodeNeverOpensTheEnrolmentGate() {
         val mentions = f.mainSources.walkTopDown().filter { it.isFile && it.readText().contains("openedByTest") }
             .map { it.name }.toList()
-        assertEquals(listOf("RemoteEnrolmentGate.java"), mentions)
+        assertEquals(emptyList<String>(), mentions)
         val gate = File(f.mainSources, "com/example/lockdowndpc/policy/RemoteEnrolmentGate.java").readText()
-        assertEquals(listOf("private static boolean openedByTest;",
-            "return BuildConfig.REMOTE_ENROLMENT_ENABLED || openedByTest;"),
-            gate.lines().map { it.trim() }.filter { "openedByTest" in it })
+        assertEquals(listOf("return BuildConfig.REMOTE_ENROLMENT_ENABLED;"),
+            gate.lines().map { it.trim() }.filter { "REMOTE_ENROLMENT_ENABLED" in it })
         assertFalse(gate.contains("setAccessible") || gate.contains("getDeclaredField"))
+        assertFalse("no boolean field may override the build constant",
+            Regex("""static\s+(volatile\s+)?boolean\s+\w+\s*[;=]""").containsMatchIn(gate))
     }
 
     /** Only tests may trust the published fixture keys: no production caller can switch the refusal off. */

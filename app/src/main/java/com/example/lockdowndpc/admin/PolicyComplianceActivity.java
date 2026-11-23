@@ -23,8 +23,7 @@ import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AllowedAppsStore;
 import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
-import com.example.lockdowndpc.policy.RemoteProvisioning;
-import com.example.lockdowndpc.policy.RemoteTestScheduler;
+import com.example.lockdowndpc.policy.RemoteTransport;
 import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 import java.util.function.IntConsumer;
@@ -67,7 +66,7 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
             return;
         }
         if (!RemoteEnrolmentGate.permitsLocalProvisioning(getIntent())) {
-            if (!RemoteProvisioning.store(this, getIntent())) {
+            if (!RemoteTransport.store(this, getIntent())) {
                 Log.w(TAG, "remote-enrolment-config-refused");
                 finish();
                 return;
@@ -77,7 +76,7 @@ public final class PolicyComplianceActivity extends AppCompatActivity {
                     report -> PolicyReconciliationCoordinator.reconcileForProvisioning(appContext, verified -> {
                         if (Boolean.TRUE.equals(verified)) {
                             markComplianceDone(appContext);
-                            RemoteTestScheduler.schedule(appContext);
+                            RemoteTransport.schedule(appContext);
                         }
                         report.accept(verified);
                     }), deliverResult);
