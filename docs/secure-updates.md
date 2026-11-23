@@ -75,7 +75,7 @@ publish a release.
 The manual commands below remain the recovery and independent-audit path. They
 are not the normal pilot publication procedure.
 
-`tools/publish_update.py` verifies APK identity and signer with the Android SDK tools before creating the signed manifest. It never overwrites an existing output unless `--force` is explicit.
+`tools/publish_update.py` verifies APK identity and signer, then runs the release-hardening check of `tools/verify_release_apk.py` (not debuggable, remote enrolment off, no lab code; `--dexdump` overrides the SDK lookup), before creating the signed manifest. It never overwrites an existing output unless `--force` is explicit.
 
 ```bash
 ./tools/publish_update.py \
