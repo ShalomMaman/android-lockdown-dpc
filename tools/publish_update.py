@@ -17,6 +17,7 @@ import tempfile
 import time
 from urllib.parse import urlsplit
 from zipfile import BadZipFile
+import zlib
 
 
 MAX_APK_BYTES = 100 * 1024 * 1024
@@ -205,6 +206,8 @@ def verify_release_hardening(apk: Path, aapt2: Path, dexdump: Path) -> None:
         subprocess.SubprocessError,
         OSError,
         BadZipFile,
+        ValueError,
+        zlib.error,
     ) as exc:
         raise PublishError(f"release APK verification failed: {exc}") from exc
 
