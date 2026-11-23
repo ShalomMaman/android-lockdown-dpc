@@ -11,8 +11,8 @@ final class RemotePolicyApplier {
     private RemotePolicyApplier() {}
 
     static boolean reconcile(Context context, String reason) {
-        // Keep the pre-journal containment path for a marker seen on a gated build.
-        var result = RemoteEnrolmentGate.permits()
+        // An unreadable marker still requires containment when the build gate is on.
+        var result = RemoteEnrolmentGate.permits() && !ManagementModeStore.hasUnreadableRemoteIntent(context)
                 ? RemotePolicyRuntime.reconcile(context)
                 : LockdownPolicyController.applyRemoteContainment(context);
         return PolicyReconciliationCoordinator.recordResult(context, reason, result);

@@ -11,6 +11,7 @@ import android.content.Intent
 import android.util.Log
 import com.example.lockdowndpc.BuildConfig
 import com.example.lockdowndpc.remote.RemoteClientWire
+import com.example.lockdowndpc.remote.RemoteClockSample
 import com.example.lockdowndpc.remote.RemoteHttpRefusal
 import com.example.lockdowndpc.remote.RemoteHttps
 import com.example.lockdowndpc.remote.WireJson
@@ -29,11 +30,15 @@ class RemoteTestJobService : JobService() {
         executor.execute {
             val retry = RemoteClientCycle.run(
                 ready = { !cancelled.get() && RemoteTestScheduler.eligible(applicationContext) },
-                attempt = { RemoteTestClient(applicationContext).run(cancelled::get) },
+                attempt = {
+                    val active = client ?: RemoteTestClient(applicationContext).also { client = it }
+                    active.run(cancelled::get)
+                },
             )
             if (cancellations.remove(params.jobId, cancelled) && !cancelled.get()) {
                 jobFinished(params, retry)
             }
+            RemoteTestScheduler.refreshPeriodic(applicationContext)
         }
         return true
     }
@@ -44,6 +49,8 @@ class RemoteTestJobService : JobService() {
     }
 
     private companion object {
+        // Only the single job executor accesses the client and its clock offset.
+        var client: RemoteTestClient? = null
         val executor = Executors.newSingleThreadExecutor { task ->
             Thread(task, "device-guard-remote-test").apply { isDaemon = true }
         }
@@ -53,7 +60,14 @@ class RemoteTestJobService : JobService() {
 class RemoteTestLifecycleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            RemoteTestScheduler.schedule(context)
+            val pending = goAsync()
+            PolicyReconciliationCoordinator.runOnPolicyThread {
+                try {
+                    RemoteTestScheduler.schedule(context.applicationContext)
+                } finally {
+                    pending?.finish()
+                }
+            }
         }
     }
 }
@@ -61,6 +75,7 @@ class RemoteTestLifecycleReceiver : BroadcastReceiver() {
 internal object RemoteTestScheduler {
     private const val PERIODIC = 0x44475201
     private const val IMMEDIATE = 0x44475202
+    private const val DEFAULT_PULL_MINUTES = 15L
 
     fun eligible(context: Context): Boolean =
         BuildConfig.REMOTE_ENROLMENT_ENABLED && RemoteProvisioning.supportsArtifact(context) &&
@@ -68,29 +83,50 @@ internal object RemoteTestScheduler {
             ManagementModeStore.hasCommittedRemoteIntent(context)
 
     @JvmStatic
-    fun schedule(context: Context) {
+    fun schedule(context: Context) = schedule(context, includeImmediate = true)
+
+    fun refreshPeriodic(context: Context) = schedule(context, includeImmediate = false)
+
+    private fun schedule(context: Context, includeImmediate: Boolean) {
         if (!eligible(context)) return
-        val scheduler = context.getSystemService(JobScheduler::class.java) ?: return
-        for (id in listOf(PERIODIC, IMMEDIATE)) {
-            if (scheduler.getPendingJob(id) == null && scheduler.schedule(job(context, id)) != JobScheduler.RESULT_SUCCESS) {
-                Log.w("RemoteTestScheduler", "remote-job-schedule-failed")
+        PolicyReconciliationCoordinator.callOnPolicyThread {
+            if (!eligible(context)) return@callOnPolicyThread
+            val scheduler = context.getSystemService(JobScheduler::class.java) ?: return@callOnPolicyThread
+            updatePeriodic(context, scheduler, RemotePolicyRuntime.committedPullMinutes(context))
+            if (includeImmediate && scheduler.getPendingJob(IMMEDIATE) == null) {
+                submit(scheduler, job(context, periodic = false))
             }
         }
     }
 
-    internal fun job(context: Context, periodic: Boolean): JobInfo = job(context, if (periodic) PERIODIC else IMMEDIATE)
+    internal fun updatePeriodic(context: Context, scheduler: JobScheduler, pullMinutes: Long?) {
+        val interval = intervalMillis(pullMinutes)
+        if (scheduler.getPendingJob(PERIODIC)?.intervalMillis != interval) {
+            submit(scheduler, job(context, periodic = true, pullMinutes = pullMinutes))
+        }
+    }
 
-    private fun job(context: Context, id: Int): JobInfo =
-        JobInfo.Builder(id, ComponentName(context, RemoteTestJobService::class.java))
+    private fun submit(scheduler: JobScheduler, job: JobInfo) {
+        if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
+            Log.w("RemoteTestScheduler", "remote-job-schedule-failed")
+        }
+    }
+
+    private fun intervalMillis(pullMinutes: Long?) = (pullMinutes ?: DEFAULT_PULL_MINUTES) * 60_000L
+
+    internal fun job(context: Context, periodic: Boolean, pullMinutes: Long? = null): JobInfo =
+        JobInfo.Builder(if (periodic) PERIODIC else IMMEDIATE, ComponentName(context, RemoteTestJobService::class.java))
             .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
             .setPersisted(true)
             .setBackoffCriteria(30_000, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
-            .apply { if (id == PERIODIC) setPeriodic(15 * 60_000L) }
+            .apply { if (periodic) setPeriodic(intervalMillis(pullMinutes)) }
             .build()
 }
 
 /** JobService delegates delays and process-death retry to JobScheduler. */
 internal object RemoteClientCycle {
+    private const val STALE = "sync-response-stale"
+
     fun run(ready: () -> Boolean, attempt: () -> Boolean): Boolean {
         if (!ready()) return false
         return try {
@@ -103,11 +139,64 @@ internal object RemoteClientCycle {
             true
         }
     }
+
+    fun sync(
+        clock: RemoteSyncClock,
+        cancelled: () -> Boolean,
+        prepare: () -> RemotePolicyRuntime.SyncRequest?,
+        send: (RemotePolicyRuntime.SyncRequest, Long) -> ByteArray?,
+        apply: (RemotePolicyRuntime.SyncRequest, ByteArray) -> RemotePolicyRuntime.SyncResult,
+        discard: (RemotePolicyRuntime.SyncRequest) -> Unit,
+        reportError: (String) -> Unit,
+    ): Boolean {
+        var clockRetryAvailable = true
+        var replies = 0
+        // Report applied changes promptly, with at most four replies per job.
+        while (replies < 4 && !cancelled()) {
+            val request = prepare() ?: return true
+            try {
+                if (cancelled()) return true
+                val bytes = send(request, clock.timestamp()) ?: return true
+                // A received reply still belongs to this exchange after onStopJob.
+                val result = apply(request, bytes)
+                if (result.retry) return true
+                if (!result.followUp) return false
+                replies++
+            } catch (error: RemoteHttpRefusal) {
+                if (error.status != 409 || error.code != STALE) throw error
+                reportError(STALE)
+                if (!clockRetryAvailable || !clock.correct(error.clockSample)) throw error
+                clockRetryAvailable = false
+            } finally {
+                discard(request)
+            }
+        }
+        return true
+    }
+}
+
+internal class RemoteSyncClock(private val wallMillis: () -> Long = System::currentTimeMillis) {
+    private var offsetMillis = 0L
+
+    fun timestamp(): Long = (wallMillis() + offsetMillis) / 1000
+
+    fun correct(sample: RemoteClockSample?): Boolean {
+        if (sample == null || sample.serverMillis <= 0 || sample.receivedMillis <= 0) return false
+        val estimate = sample.serverMillis - sample.receivedMillis
+        if (estimate !in -MAX_OFFSET_MS..MAX_OFFSET_MS) return false
+        offsetMillis = estimate
+        return true
+    }
+
+    private companion object {
+        const val MAX_OFFSET_MS = 24 * 60 * 60_000L
+    }
 }
 
 private class RemoteTestClient(private val context: Context) {
     private val store = RemoteClientStore(context)
     private val identity = AndroidRemoteIdentity(context)
+    private val clock = RemoteSyncClock()
 
     fun run(cancelled: () -> Boolean): Boolean {
         val config = store.config() ?: return false
@@ -115,29 +204,22 @@ private class RemoteTestClient(private val context: Context) {
         if (config.ticket != null && !enrol(api, config, config.ticket, cancelled)) return true
         val key = store.identity() ?: return true
 
-        // Report the result of a changed policy, key rotation or command promptly.
-        // Bound the number of immediate exchanges even if the server keeps changing.
-        repeat(4) {
-            if (cancelled()) return true
-            val request = RemotePolicyRuntime.prepareSync(context) ?: return true
-            try {
-                val timestamp = System.currentTimeMillis() / 1000
+        return RemoteClientCycle.sync(
+            clock, cancelled,
+            prepare = { RemotePolicyRuntime.prepareSync(context) },
+            send = { request, timestamp ->
                 val signature = identity.sign(key, RemoteClientWire.syncTranscript(timestamp, request.body))
-                if (cancelled()) return true
-                val bytes = api.request(RemoteClientWire.SYNC, request.body, mapOf(
+                if (cancelled()) null else api.request(RemoteClientWire.SYNC, request.body, mapOf(
                     RemoteClientWire.TIMESTAMP_HEADER to timestamp.toString(),
                     RemoteClientWire.SIGNATURE_HEADER to signature,
                 ))
-                val result = RemotePolicyRuntime.receiveAndApply(
-                    context, request.exchange, RemoteClientWire.syncReply(bytes), cancelled,
-                )
-                if (result.retry) return true
-                if (!result.followUp) return false
-            } finally {
-                RemotePolicyRuntime.discardExchange(context, request.exchange)
-            }
-        }
-        return true
+            },
+            apply = { request, bytes ->
+                RemotePolicyRuntime.receiveAndApply(context, request.exchange, RemoteClientWire.syncReply(bytes))
+            },
+            discard = { RemotePolicyRuntime.discardExchange(context, it.exchange) },
+            reportError = { RemotePolicyRuntime.recordSyncError(context, it) },
+        )
     }
 
     private fun enrol(api: RemoteHttps, config: RemoteClientConfig, ticket: String, cancelled: () -> Boolean): Boolean {
@@ -147,6 +229,7 @@ private class RemoteTestClient(private val context: Context) {
         if (cancelled() || !RemotePolicyRuntime.baselineVerified(context) || cancelled()) return false
         if (pending == null) {
             val body = WireJson.canonical(mapOf("ticket" to ticket))
+            if (cancelled()) return false
             val challenge = RemoteClientWire.challenge(api.request(RemoteClientWire.START, body))
             pending = RemoteClientStore.Pending(challenge)
             if (!store.savePending(pending)) return false
@@ -166,8 +249,8 @@ private class RemoteTestClient(private val context: Context) {
             return false
         }
         require(device.deviceId == proof.deviceId)
-        if (cancelled()) return false
         val fleet = URLEncoder.encode(device.fleetId, Charsets.UTF_8.name())
+        if (cancelled()) return false
         val root = RemoteClientWire.root(api.request(RemoteClientWire.KEY_SET + "?fleetId=" + fleet), device.fleetId)
         if (cancelled() || RemotePolicyRuntime.finishEnrolment(context, device, config.root, root) != null) return false
         return store.complete(config, proof)

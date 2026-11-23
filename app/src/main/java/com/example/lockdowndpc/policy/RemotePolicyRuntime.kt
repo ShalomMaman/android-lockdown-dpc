@@ -185,11 +185,19 @@ internal object RemotePolicyRuntime {
         onRemoteThread(context, Unit, revoke = false) { sync?.discard(exchange) }
     }
 
-    /** The job applies only the response belonging to its live exchange. */
+    fun committedPullMinutes(context: Context): Long? =
+        onRemoteThread(context, null, resumeMode = false, revoke = false) { engine.committedPullMinutes() }
+
+    fun recordSyncError(context: Context, code: String) {
+        onRemoteThread(context, Unit, resumeMode = false, revoke = false) {
+            syncErrors = (syncErrors + code).distinct()
+        }
+    }
+
+    /** Apply an arrived response through the live exchange and its journal, even if the job stopped. */
     fun receiveAndApply(
-        context: Context, exchange: RemoteSync.Exchange, reply: RemoteClientWire.SyncReply, cancelled: () -> Boolean,
+        context: Context, exchange: RemoteSync.Exchange, reply: RemoteClientWire.SyncReply,
     ): SyncResult = onRemoteThread(context, SyncResult(retry = true)) {
-        if (cancelled()) return@onRemoteThread SyncResult(retry = true)
         val previous = engine.state
         val response = receive(context, exchange, reply.nonce, reply.documents)
         syncErrors = listOfNotNull(response.failure?.code) +

@@ -53,6 +53,9 @@ internal class RemoteEngine(
 
     fun checkStores(): RemoteFailure? = journal.checkStores()
 
+    fun committedPullMinutes(): Long? =
+        state.policy?.body(schema)?.get("sync")?.asObject()?.get("pullMinutes") as Long?
+
     data class Pass(val verified: Boolean, val failure: RemoteFailure? = null)
     enum class RecoveryOutcome { UNCHANGED, REFUSED, COMMITTED }
     data class RecoveryResult(

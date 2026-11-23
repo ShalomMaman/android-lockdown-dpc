@@ -20,6 +20,7 @@ def verify(release: Path, remote_test: Path) -> None:
     remote_signer = verify_apk_has_single_signer(remote_test, apksigner)
     if release_signer == remote_signer:
         raise VerificationError("remote-test APK shares the release signer")
+
     def manifest(apk: Path) -> str:
         return subprocess.check_output(
             [str(aapt2), "dump", "xmltree", str(apk), "--file", "AndroidManifest.xml"],
@@ -27,9 +28,13 @@ def verify(release: Path, remote_test: Path) -> None:
         )
 
     test_manifest = manifest(remote_test)
-    component = "com.example.lockdowndpc.policy.RemoteTestJobService"
-    if component in manifest(release) or component not in test_manifest:
-        raise VerificationError("remote-test networking service has the wrong manifest scope")
+    name = re.compile(r'android:name\([^)]*\)="([^"]+)"')
+    release_names = set(name.findall(manifest(release)))
+    test_names = set(name.findall(test_manifest))
+    for component in ("RemoteTestJobService", "RemoteTestLifecycleReceiver"):
+        qualified = f"com.example.lockdowndpc.policy.{component}"
+        if qualified in release_names or qualified not in test_names:
+            raise VerificationError(f"{component} has the wrong manifest scope")
     for attribute in ("debuggable", "testOnly"):
         match = re.search(rf"android:{attribute}\([^)]*\)=(.+)", test_manifest)
         if match and not re.fullmatch(r"false|\(type 0x12\)0x0+", match[1].strip()):

@@ -87,6 +87,10 @@ public final class ManagementModeStore {
         return readMarker(context) == Marker.PRESENT;
     }
 
+    static synchronized boolean hasUnreadableRemoteIntent(Context context) {
+        return readMarker(context) == Marker.UNREADABLE;
+    }
+
     /** Called once the fleet binding has been stored by the remote journal. */
     static synchronized boolean commitRemote(Context context) {
         return commitManagedMode(context, ManagementMode.REMOTE);

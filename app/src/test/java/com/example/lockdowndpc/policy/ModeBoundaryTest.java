@@ -17,6 +17,7 @@ import android.os.PersistableBundle;
 import android.os.SystemClock;
 import android.os.UserManager;
 
+import com.example.lockdowndpc.BuildConfig;
 import com.example.lockdowndpc.admin.LockdownAdminReceiver;
 import com.example.lockdowndpc.admin.LockdownDeviceAdminService;
 import com.example.lockdowndpc.admin.ProvisioningModeActivity;
@@ -26,6 +27,7 @@ import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 import com.example.lockdowndpc.maintenance.MaintenanceCapability;
 import com.example.lockdowndpc.maintenance.MaintenanceCoordinator;
 import com.example.lockdowndpc.maintenance.MaintenanceGuard;
+import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.CloseReason;
 import com.example.lockdowndpc.maintenance.MaintenanceStateMachine.OpenRequest;
 import com.example.lockdowndpc.maintenance.MaintenanceStore;
 import com.example.lockdowndpc.maintenance.MaintenanceStoreFixture;
@@ -84,8 +86,9 @@ public class ModeBoundaryTest {
     }
 
     @After
-    public void lockSession() {
+    public void resetAuthorities() {
         AdminSession.lock();
+        RemoteTestGate.closeRuntime();
     }
 
     @Test
@@ -109,8 +112,18 @@ public class ModeBoundaryTest {
 
     @Test
     public void unreadableMarkerContainsNewlyInstalledAppAndClosesLiveMaintenance() throws Exception {
+        assertUnreadableMarkerContainment(true);
+    }
+
+    @Test
+    public void unreadableMarkerBlocksDebuggingEvenWhenPreviouslyAllowed() throws Exception {
+        assertUnreadableMarkerContainment(false);
+    }
+
+    private void assertUnreadableMarkerContainment(boolean debuggingRestricted) throws Exception {
         assertTrue(ManagementModeStore.selectLocal(context));
-        assertTrue(SystemPolicyStore.setRequested(context, SystemPolicyControl.DEVELOPER_OPTIONS_AND_ADB, true));
+        assertTrue(SystemPolicyStore.setRequested(context, SystemPolicyControl.DEVELOPER_OPTIONS_AND_ADB,
+                debuggingRestricted));
         assertTrue(AllowedAppsStore.setProtectionMode(context, AllowedAppsStore.ProtectionMode.ALLOW_SELECTED));
         assertTrue(AllowedAppsStore.setAllowedPackages(context, Set.of(), Set.of(), Set.of()));
         // A stale local pause must not release anything under the unreadable marker.
@@ -119,6 +132,7 @@ public class ModeBoundaryTest {
                 ManagementModeStore.MARKER_FILE);
         Files.write(marker.toPath(), new byte[]{0});
         assertEquals(ManagementMode.ENROLLING, ManagementModeStore.read(context));
+        assertFalse(ManagementModeStore.hasCommittedRemoteIntent(context));
 
         var service = Robolectric.buildService(LockdownDeviceAdminService.class).create();
         try {
@@ -269,6 +283,9 @@ public class ModeBoundaryTest {
             assertTrue(modeRecord().edit().putString(ManagementModeStore.MODE_KEY, "REMOTE").commit());
         }
         assertEquals(mode, ManagementModeStore.read(context));
+        // A prior journal went missing. Both variants must stay on their remote route.
+        assertTrue(context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_MARKER_PREFS, Context.MODE_PRIVATE)
+                .edit().putBoolean("journal_created", true).commit());
 
         assertEquals(ConsoleScreen.REMOTE_STATUS, MainActivityKt.initialScreen(context));
         assertFalse(AdminPinStore.setInitialPin(context, "123456"));
@@ -289,23 +306,30 @@ public class ModeBoundaryTest {
         } finally {
             context.unregisterReceiver(receiver);
         }
-        assertEquals(Intent.ACTION_BOOT_COMPLETED, ReconciliationRecord.read(context).trigger());
-        assertFalse(ReconciliationRecord.read(context).detail().contains(RemotePolicyApplier.UNAVAILABLE));
+        assertRemoteRoute(Intent.ACTION_BOOT_COMPLETED);
 
         ScheduleSweepJobService sweep = Robolectric.buildService(ScheduleSweepJobService.class).create().get();
         assertTrue(sweep.onStartJob(Shadow.newInstanceOf(JobParameters.class)));
         flushPolicyThread();
         ShadowJobService sweepState = Shadow.extract(sweep);
         assertTrue(sweepState.getIsJobFinished());
-        assertEquals("schedule-catch-up:sweep", ReconciliationRecord.read(context).trigger());
-        assertFalse(ReconciliationRecord.read(context).detail().contains(RemotePolicyApplier.UNAVAILABLE));
+        assertRemoteRoute("schedule-catch-up:sweep");
 
         OpenRequest request = new OpenRequest(capabilities, duration, true, true);
         assertEquals("maintenance-mode-refused", staleMaintenance.open(window, request).reason());
         assertEquals("maintenance-mode-refused",
                 MaintenanceGuard.open(context, staleMaintenance, window, request).reason());
-        assertNull(MaintenanceGuard.refresh(context));
         assertNull(MaintenanceStore.liveWindow(context));
+        var close = PolicyReconciliationCoordinator.callOnPolicyThread(() -> MaintenanceGuard.refresh(context));
+        if (BuildConfig.REMOTE_ENROLMENT_ENABLED) {
+            // A journal refusal preserves the device state. An explicit refresh closes the stale window.
+            assertNotNull(close);
+            assertEquals(CloseReason.MANAGEMENT_MODE, close.closeReason());
+            assertTrue(close.restoreVerified());
+        } else {
+            // The gate-off containment pass already restored and cleared the window.
+            assertNull(close);
+        }
         assertFalse(KioskController.restoreAfterBoot(context).allowed());
         assertFalse(LockdownPolicyController.pause(context).applied());
         assertEquals("local-only", legacy.getString("protection_enabled", null));
@@ -314,6 +338,18 @@ public class ModeBoundaryTest {
         assertNull(MaintenanceStore.readWindow(context));
         assertFalse(MaintenanceStore.restorePending(context));
         assertEquals(mode, ManagementModeStore.read(context));
+    }
+
+    private void assertRemoteRoute(String trigger) {
+        var record = ReconciliationRecord.read(context);
+        assertEquals(trigger, record.trigger());
+        assertFalse(record.detail().contains(RemotePolicyApplier.UNAVAILABLE));
+        if (BuildConfig.REMOTE_ENROLMENT_ENABLED) {
+            assertEquals(ReconciliationRecord.Outcome.FAILED, record.outcome());
+            assertEquals("journal-lost", record.detail());
+        } else {
+            assertFalse(record.detail().contains("journal-lost"));
+        }
     }
 
     private SharedPreferences marker() {

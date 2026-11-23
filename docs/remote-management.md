@@ -980,6 +980,8 @@ Each PR lands with its tests. Hardware groups go into
   It is a non-debuggable, non-test-only build type signed with a test key
   (never the release key) with the gate on. The release-build refusals of 11
   therefore hold, and only the test server accepts that signer.
+- `RemoteProvisioning.baseline()` keeps ADB available for the recovery drill.
+  Revisit that baseline before PR 9 enables remote enrolment in release.
 
 | # | PR | Depends on | Tests and gate |
 | --- | --- | --- | --- |

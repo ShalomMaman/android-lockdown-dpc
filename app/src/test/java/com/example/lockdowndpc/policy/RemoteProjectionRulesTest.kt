@@ -164,13 +164,16 @@ class RemoteProjectionRulesTest : RemotePassFixture() {
         val prefs = context.getSharedPreferences(RemotePolicyRuntime.JOURNAL_PREFS, Context.MODE_PRIVATE)
         val before = prefs.getString("state", null)
         val document = f.doc("policy-6") + ("deviceIds" to listOf(binding.deviceId))
-        val unsupported = document + ("policy" to policy(filter = null, extra = mapOf("locale" to "he")))
+        val sync = "sync" to mapOf("pullMinutes" to 120L)
+        val unsupported = document + ("policy" to policy(filter = null, extra = mapOf("locale" to "he", sync)))
         val code = RemotePolicyProjection.LOCALE_UNSUPPORTED
         assertEquals(RemoteFailure(code, "/policy/locale"), submit(DocumentType.POLICY, unsupported, signer))
         assertEquals(before, prefs.getString("state", null))
         assertEquals(code, RemotePolicyRuntime.policyRefusals.value)
+        assertNull(RemotePolicyRuntime.committedPullMinutes(context))
 
-        assertNull(submit(DocumentType.POLICY, document + ("policy" to policy(filter = null)), signer))
+        assertNull(submit(DocumentType.POLICY, document + ("policy" to policy(filter = null, extra = mapOf(sync))), signer))
+        assertEquals(120L, RemotePolicyRuntime.committedPullMinutes(context))
         assertNull(RemotePolicyRuntime.policyRefusals.value)
     }
 

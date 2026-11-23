@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.remote
 
+import android.net.http.X509TrustManagerExtensions
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.URI
@@ -10,7 +11,28 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
 import javax.net.ssl.X509TrustManager
 
-internal class RemoteHttpRefusal(val status: Int, val code: String?) : IOException()
+internal class RemoteHttpRefusal(
+    val status: Int,
+    val code: String?,
+    val clockSample: RemoteClockSample? = null,
+) : IOException()
+
+internal data class RemoteClockSample(val serverMillis: Long, val receivedMillis: Long)
+
+internal class RemotePinnedTrustManager(
+    platformTrustManager: X509TrustManager,
+    private val host: String,
+    private val pins: List<String>,
+) : X509TrustManager by platformTrustManager {
+    private val extensions = X509TrustManagerExtensions(platformTrustManager)
+
+    override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
+        val verifiedChain = extensions.checkServerTrusted(chain, authType, host)
+        if (verifiedChain.none { RemoteCrypto.encode(RemoteCrypto.sha256(it.publicKey.encoded)) in pins }) {
+            throw CertificateException("remote-tls-pin-mismatch")
+        }
+    }
+}
 
 /** The command key is authenticated in RemoteVerifier. TLS pins, when supplied, are separate. */
 internal class RemoteHttps(server: String, pins: List<String>) {
@@ -19,14 +41,7 @@ internal class RemoteHttps(server: String, pins: List<String>) {
         val factory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm())
         factory.init(null as java.security.KeyStore?)
         val platform = factory.trustManagers.filterIsInstance<X509TrustManager>().single()
-        val pinned = object : X509TrustManager by platform {
-            override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
-                platform.checkServerTrusted(chain, authType)
-                if (chain.none { RemoteCrypto.encode(RemoteCrypto.sha256(it.publicKey.encoded)) in pins }) {
-                    throw CertificateException("remote-tls-pin-mismatch")
-                }
-            }
-        }
+        val pinned = RemotePinnedTrustManager(platform, URI.create(base).host, pins)
         SSLContext.getInstance("TLS").apply { init(null, arrayOf(pinned), null) }.socketFactory
     }
 
@@ -48,10 +63,13 @@ internal class RemoteHttps(server: String, pins: List<String>) {
             }
             val status = connection.responseCode
             if (status != 200) {
-                val code = if (status == 410) connection.errorStream?.use {
+                // Reaching the response headers required HTTPS trust, hostname verification and any configured pins.
+                val clockSample = if (status == 409) connection.getHeaderFieldDate("Date", -1)
+                    .takeIf { it > 0 }?.let { RemoteClockSample(it, System.currentTimeMillis()) } else null
+                val code = if (status == 409 || status == 410) connection.errorStream?.use {
                     runCatching { WireJson.parse(it.bounded(1024)).asObject().text("code") }.getOrNull()
                 } else null
-                throw RemoteHttpRefusal(status, code)
+                throw RemoteHttpRefusal(status, code, clockSample)
             }
             return connection.inputStream.use { it.bounded(MAX_REPLY) }
         } finally {
