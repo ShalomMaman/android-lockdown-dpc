@@ -102,6 +102,9 @@ the key passphrase. The operator runbook is
 ## Offline fleet administration
 
 Run `python3 tools/fleet_admin.py --help` or add `--help` after a subcommand.
+Pass base64url values in the `--option=value` form (for example
+`--device-id=<id>`, `--nonce=<nonce>`): a value may start with `-`, which a
+separate argument would turn into an option.
 Use an external P-256 PEM and pass only the environment variable name via
 `--key-passphrase-env` for an encrypted PEM. Keep inventory, enrolment
 records, credentials and signed outputs outside the checkout.

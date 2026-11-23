@@ -377,7 +377,7 @@ class FleetAdminTest(unittest.TestCase):
         body_path = self.write_json("body.json", body)
         first = self.output / "policy-1.json"
         second = self.output / "policy-2.json"
-        options = ["--body", body_path, "--device-id", record["deviceId"]]
+        options = ["--body", body_path, f"--device-id={record['deviceId']}"]
         first_args = ["policy", *self.signing_args(self.policy_key, first, 1), *options]
         second_args = ["policy", *self.signing_args(self.policy_key, second, 2), *options,
                        "--previous", first, "--enrolment-record", enrolment, *trust]
@@ -434,7 +434,7 @@ class FleetAdminTest(unittest.TestCase):
         code_path = output / "recovery-code.txt"
         verifier_path = output / "recovery.json"
         device_id = b64url(hashlib.sha256(self.device_key[2]).digest())
-        args = ["recovery", *self.signing_args(self.policy_key, output, 1), "--device-id", device_id]
+        args = ["recovery", *self.signing_args(self.policy_key, output, 1), f"--device-id={device_id}"]
         result = self.run_cli(*args)
         code_contents = code_path.read_text()
         code = code_contents.strip()
@@ -460,7 +460,7 @@ class FleetAdminTest(unittest.TestCase):
         self.assertEqual(code_path.read_text(), code_contents)
         self.assertEqual(verifier_path.read_bytes(), original_verifier)
         wrong_output = self.output / "wrong"
-        wrong = ["recovery", *self.signing_args(self.server_key, wrong_output, 1), "--device-id", device_id]
+        wrong = ["recovery", *self.signing_args(self.server_key, wrong_output, 1), f"--device-id={device_id}"]
         self.assertIn("not a fleet policy key", self.run_cli(*wrong, status=2).stderr)
         self.assertFalse(wrong_output.exists())
 
@@ -482,8 +482,8 @@ class FleetAdminTest(unittest.TestCase):
         }
         policy = self.write_json("issued-policy.json", policy_envelope)
         args = ["reanchor", *self.signing_args(self.root_key, output),
-                "--device-id", device_id, "--nonce", reference["nonce"],
-                "--root-fingerprint", root_id,
+                f"--device-id={device_id}", f"--nonce={reference['nonce']}",
+                f"--root-fingerprint={root_id}",
                 "--keyset-floor", 1, "--policy-floor", 6, "--recovery-floor", 2, "--command-floor", 0]
         self.run_cli(*args, "--keyset-envelope", self.keyset_file, "--policy-envelope", policy)
         document = self.assert_envelope(output, self.root_key)
@@ -525,7 +525,7 @@ class FleetAdminTest(unittest.TestCase):
             *args, "--force", *keyset_args, "--policy-envelope", wrong_policy, status=2,
         ).stderr)
         self.assertEqual(self.assert_envelope(output, self.root_key), document)
-        args[args.index("--root-fingerprint") + 1] = device_id
+        args[args.index(f"--root-fingerprint={root_id}")] = f"--root-fingerprint={device_id}"
         self.assertIn("current root fingerprint", self.run_cli(*args, "--force", status=2).stderr)
 
 
