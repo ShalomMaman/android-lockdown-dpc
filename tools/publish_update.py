@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlsplit
+from zipfile import BadZipFile
 
 
 MAX_APK_BYTES = 100 * 1024 * 1024
@@ -73,6 +74,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--aapt2", type=Path, help="Explicit aapt2 binary")
     parser.add_argument("--apksigner", type=Path, help="Explicit apksigner binary")
+    parser.add_argument("--dexdump", type=Path, help="Explicit dexdump binary")
     parser.add_argument("--force", action="store_true", help="Atomically replace an existing output")
     return parser.parse_args(argv)
 
@@ -187,6 +189,24 @@ def verify_apk_signer(apk: Path, apksigner: Path, expected_sha256: str) -> None:
             "APK signing certificate does not exactly match the expected SHA-256: "
             f"expected {expected_sha256}, observed {observed}"
         )
+
+
+def verify_release_hardening(apk: Path, aapt2: Path, dexdump: Path) -> None:
+    # Deferred import avoids a circular import because verify_release_apk imports
+    # PublishError and build-tool helpers from this module.
+    import verify_release_apk
+
+    try:
+        verify_release_apk.verify_release(apk, aapt2, dexdump)
+    except (
+        verify_release_apk.VerificationError,
+        verify_release_apk.PublishError,
+        PublishError,
+        subprocess.SubprocessError,
+        OSError,
+        BadZipFile,
+    ) as exc:
+        raise PublishError(f"release APK verification failed: {exc}") from exc
 
 
 def sha256_and_size(path: Path) -> tuple[str, int]:
@@ -354,9 +374,10 @@ def publish(args: argparse.Namespace, now_epoch_seconds: int | None = None) -> d
         args.expected_metadata_key_sha256,
         "--expected-metadata-key-sha256",
     )
+    aapt2 = find_android_build_tool("aapt2", args.aapt2)
     package_name, version_code, version_name = read_apk_identity(
         apk,
-        find_android_build_tool("aapt2", args.aapt2),
+        aapt2,
     )
     if package_name != expected_package:
         raise PublishError(
@@ -368,6 +389,11 @@ def publish(args: argparse.Namespace, now_epoch_seconds: int | None = None) -> d
         apk,
         find_android_build_tool("apksigner", args.apksigner),
         expected_signer_sha256,
+    )
+    verify_release_hardening(
+        apk,
+        aapt2,
+        find_android_build_tool("dexdump", getattr(args, "dexdump", None)),
     )
     actual_metadata_key_sha256 = metadata_public_key_sha256(
         private_key,

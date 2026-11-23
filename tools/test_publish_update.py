@@ -5,11 +5,14 @@ import base64
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
+from zipfile import BadZipFile
 
 import publish_update
+import verify_release_apk
 
 
 class PublishUpdateTest(unittest.TestCase):
@@ -201,6 +204,11 @@ class PublishUpdateTest(unittest.TestCase):
                 ),
                 mock.patch.object(publish_update, "verify_apk_signer"),
                 mock.patch.object(
+                    verify_release_apk,
+                    "verify_release",
+                    return_value={"REMOTE_ENROLMENT_ENABLED": "false"},
+                ) as release_verifier,
+                mock.patch.object(
                     publish_update,
                     "metadata_public_key_sha256",
                     return_value="ef" * 32,
@@ -208,6 +216,12 @@ class PublishUpdateTest(unittest.TestCase):
                 mock.patch.object(publish_update, "sign_payload", return_value=b"der-signature"),
             ):
                 summary = publish_update.publish(args, now_epoch_seconds=1_800_000_000)
+
+            release_verifier.assert_called_once_with(
+                apk.resolve(),
+                Path("/mock/aapt2"),
+                Path("/mock/dexdump"),
+            )
 
             envelope = json.loads(output.read_text())
             payload = json.loads(_decode_url_base64(envelope["payload"]))
@@ -257,6 +271,165 @@ class PublishUpdateTest(unittest.TestCase):
             ):
                 publish_update.publish(args, now_epoch_seconds=1_800_000_000)
             signer.assert_not_called()
+
+    def test_publish_blocks_signing_when_release_verification_fails(self) -> None:
+        failures = (
+            (
+                verify_release_apk.VerificationError("release enables debuggable"),
+                "release APK verification failed: release enables debuggable",
+            ),
+            (
+                verify_release_apk.VerificationError("release DEX contains lab-only code"),
+                "release APK verification failed: release DEX contains lab-only code",
+            ),
+            (
+                subprocess.CalledProcessError(1, ["aapt2"]),
+                "release APK verification failed:",
+            ),
+            (
+                BadZipFile("File is not a zip file"),
+                "release APK verification failed: File is not a zip file",
+            ),
+        )
+        for error, expected_message in failures:
+            with self.subTest(error=type(error).__name__, detail=str(error)):
+                with tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    apk = root / "release.apk"
+                    key = root / "offline.pem"
+                    output = root / "update.json"
+                    apk.write_bytes(b"apk")
+                    key.write_text("key")
+                    args = argparse.Namespace(
+                        apk=apk,
+                        apk_url="https://updates.example.test/app.apk",
+                        expected_package="com.example.lockdowndpc",
+                        expected_signer_sha256="ab" * 32,
+                        expected_metadata_key_sha256="ef" * 32,
+                        private_key=key,
+                        key_passphrase_env=None,
+                        output=output,
+                        valid_for_hours=1,
+                        aapt2=Path("/unused/aapt2"),
+                        apksigner=Path("/unused/apksigner"),
+                        dexdump=Path("/unused/dexdump"),
+                        force=False,
+                    )
+                    with (
+                        mock.patch.object(
+                            publish_update,
+                            "find_android_build_tool",
+                            side_effect=lambda name, explicit: Path(f"/mock/{name}"),
+                        ),
+                        mock.patch.object(
+                            publish_update,
+                            "read_apk_identity",
+                            return_value=("com.example.lockdowndpc", 9, "0.5.0"),
+                        ),
+                        mock.patch.object(publish_update, "verify_apk_signer"),
+                        mock.patch.object(
+                            verify_release_apk,
+                            "verify_release",
+                            side_effect=error,
+                        ) as release_verifier,
+                        mock.patch.object(
+                            publish_update,
+                            "metadata_public_key_sha256",
+                            return_value="ef" * 32,
+                        ) as metadata_key,
+                        mock.patch.object(publish_update, "sign_payload") as signer,
+                        self.assertRaisesRegex(publish_update.PublishError, expected_message),
+                    ):
+                        publish_update.publish(args, now_epoch_seconds=1_800_000_000)
+
+                    release_verifier.assert_called_once_with(
+                        apk.resolve(),
+                        Path("/mock/aapt2"),
+                        Path("/mock/dexdump"),
+                    )
+                    metadata_key.assert_not_called()
+                    signer.assert_not_called()
+                    self.assertFalse(output.exists())
+
+    def test_publish_proceeds_when_release_verification_succeeds(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            apk = root / "release.apk"
+            key = root / "offline.pem"
+            output = root / "update.json"
+            apk.write_bytes(b"verified-release-apk")
+            key.write_text("external key placeholder")
+            args = argparse.Namespace(
+                apk=apk,
+                apk_url="https://updates.example.test/app.apk",
+                expected_package="com.example.lockdowndpc",
+                expected_signer_sha256="ab" * 32,
+                expected_metadata_key_sha256="ef" * 32,
+                private_key=key,
+                key_passphrase_env=None,
+                output=output,
+                valid_for_hours=1,
+                aapt2=Path("/unused/aapt2"),
+                apksigner=Path("/unused/apksigner"),
+                dexdump=Path("/unused/dexdump"),
+                force=False,
+            )
+            with (
+                mock.patch.object(
+                    publish_update,
+                    "find_android_build_tool",
+                    side_effect=lambda name, explicit: Path(f"/mock/{name}"),
+                ) as find_tool,
+                mock.patch.object(
+                    publish_update,
+                    "read_apk_identity",
+                    return_value=("com.example.lockdowndpc", 9, "0.5.0"),
+                ),
+                mock.patch.object(publish_update, "verify_apk_signer"),
+                mock.patch.object(
+                    verify_release_apk,
+                    "verify_release",
+                    return_value={"REMOTE_ENROLMENT_ENABLED": "false"},
+                ) as release_verifier,
+                mock.patch.object(
+                    publish_update,
+                    "metadata_public_key_sha256",
+                    return_value="ef" * 32,
+                ),
+                mock.patch.object(
+                    publish_update,
+                    "sign_payload",
+                    return_value=b"der-signature",
+                ) as signer,
+            ):
+                summary = publish_update.publish(args, now_epoch_seconds=1_800_000_000)
+
+            find_tool.assert_any_call("dexdump", Path("/unused/dexdump"))
+            release_verifier.assert_called_once_with(
+                apk.resolve(),
+                Path("/mock/aapt2"),
+                Path("/mock/dexdump"),
+            )
+            signer.assert_called_once()
+            self.assertTrue(output.is_file())
+            self.assertEqual("com.example.lockdowndpc", summary["packageName"])
+            self.assertEqual(9, summary["versionCode"])
+
+    def test_parse_args_accepts_optional_dexdump_override(self) -> None:
+        base_argv = [
+            "--apk", "release.apk",
+            "--apk-url", "https://updates.example.test/app.apk",
+            "--expected-package", "com.example.lockdowndpc",
+            "--expected-signer-sha256", "ab" * 32,
+            "--private-key", "offline.pem",
+            "--expected-metadata-key-sha256", "ef" * 32,
+            "--output", "update.json",
+        ]
+        default_args = publish_update.parse_args(base_argv)
+        self.assertIsNone(default_args.dexdump)
+
+        override_args = publish_update.parse_args(base_argv + ["--dexdump", "/opt/sdk/dexdump"])
+        self.assertEqual(Path("/opt/sdk/dexdump"), override_args.dexdump)
 
 
 def _decode_url_base64(value: str) -> bytes:

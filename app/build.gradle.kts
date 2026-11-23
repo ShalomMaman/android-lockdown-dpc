@@ -82,6 +82,8 @@ android {
     sourceSets {
         getByName("debug").java.srcDir("src/localBuild/java")
         getByName("release").java.srcDir("src/localBuild/java")
+        getByName("testDebug").java.srcDir("src/testLocalBuild/java")
+        getByName("testRelease").java.srcDir("src/testLocalBuild/java")
     }
 
     buildFeatures {

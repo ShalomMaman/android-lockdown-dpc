@@ -27,6 +27,7 @@ SIGNING_SETTINGS = (
 ADMIN_CLASS = "com.example.lockdowndpc.admin.LockdownAdminReceiver"
 UPDATE_JOB = str(0x44555044)  # UpdateScheduler's persisted periodic job
 MANIFEST_LIMIT = 64 * 1024  # MAX_MANIFEST_BYTES in UpdateEnvelopeVerifier.kt
+DEFAULT_MAX_VERSION_JUMP = 1000
 
 
 class DrillError(Exception):
@@ -113,8 +114,28 @@ def verify_staged_manifest(url: str, key: str, expected: dict, scratch: Path) ->
     return sha256_and_size(envelope)[0]
 
 
+def validate_version_jump(
+    candidate_version: int,
+    installed_version: int,
+    max_version_jump: int = DEFAULT_MAX_VERSION_JUMP,
+) -> None:
+    if type(max_version_jump) is not int or max_version_jump <= 0:
+        raise DrillError("--max-version-jump must be positive")
+    if candidate_version <= installed_version:
+        raise DrillError("candidate versionCode must be higher than the installed version")
+    jump = candidate_version - installed_version
+    if jump > max_version_jump:
+        raise DrillError(
+            f"candidate versionCode jump of {jump} exceeds max allowed jump of {max_version_jump} "
+            f"(installed {installed_version}, candidate {candidate_version})"
+        )
+
+
 def run(args: argparse.Namespace, evidence: dict, scratch: Path) -> None:
     evidence["stage"] = "signing-inputs"
+    max_version_jump = getattr(args, "max_version_jump", DEFAULT_MAX_VERSION_JUMP)
+    if type(max_version_jump) is not int or max_version_jump <= 0:
+        raise DrillError("--max-version-jump must be positive")
     build_env = signing_environment()
     channel_url = validate_clean_https_url(os.environ.get("DEVICE_GUARD_UPDATE_MANIFEST_URL", ""))
     channel_key = os.environ.get("DEVICE_GUARD_UPDATE_PUBLIC_KEY", "")
@@ -161,8 +182,7 @@ def run(args: argparse.Namespace, evidence: dict, scratch: Path) -> None:
         channel_url, channel_key,
     ):
         raise DrillError("installed release does not trust the specified HTTPS channel")
-    if args.version_code <= before_version:
-        raise DrillError("candidate versionCode must be higher than the installed version")
+    validate_version_jump(args.version_code, before_version, max_version_jump)
     signer = verify_apk_has_single_signer(baseline, apksigner)
     restrictions = effective_restrictions(adb("shell", "dumpsys", "user"), user)
     evidence["beforeVersionCode"] = before_version
@@ -232,12 +252,25 @@ def run(args: argparse.Namespace, evidence: dict, scratch: Path) -> None:
     evidence.update(deviceOwnerRetained=True, restrictionsUnchanged=True, silentUpdateWitnessed=True)
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version-code", type=int, required=True)
     parser.add_argument("--output-dir", type=Path, required=True, help="new directory for candidate.apk")
     parser.add_argument("--timeout", type=int, choices=range(10, 901), metavar="SECONDS", default=180)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--max-version-jump",
+        type=int,
+        default=DEFAULT_MAX_VERSION_JUMP,
+        help=(
+            "maximum allowed versionCode increase over the installed release "
+            f"(default: {DEFAULT_MAX_VERSION_JUMP})"
+        ),
+    )
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     evidence = {"case": "U-1", "timeUtc": datetime.now(timezone.utc).isoformat(), "verdict": "FAIL"}
     try:
         with tempfile.TemporaryDirectory(prefix="device-update-drill-") as scratch:
