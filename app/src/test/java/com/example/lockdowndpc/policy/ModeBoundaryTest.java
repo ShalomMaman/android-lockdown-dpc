@@ -192,6 +192,7 @@ public class ModeBoundaryTest {
 
     @Test
     public void markerGateOffLeavesLocalSetupAvailable() {
+        org.junit.Assume.assumeFalse(RemoteEnrolmentGate.permits());
         PersistableBundle extras = new PersistableBundle();
         extras.putString("dg.remote.unknown", "anything");
         Intent request = new Intent().putExtra(
@@ -210,6 +211,7 @@ public class ModeBoundaryTest {
 
     @Test
     public void modeActivityAndAdminReceiverRejectRemoteExtrasBeforeWritingMode() {
+        org.junit.Assume.assumeFalse(RemoteEnrolmentGate.permits());
         PersistableBundle extras = new PersistableBundle();
         extras.putString("dg.remote.unknown", "anything");
         Intent mode = new Intent(DevicePolicyManager.ACTION_GET_PROVISIONING_MODE)

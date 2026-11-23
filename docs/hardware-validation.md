@@ -1353,3 +1353,47 @@ authenticated `AdminSession`. Retrieve the device and restart at rung 1.
 4. State plainly, in the run summary, which cases were **blocked** and why. A
    matrix that silently omits a blocked group reads as coverage that does not
    exist.
+
+## Remote-test artifact
+
+Hardware validation is pending. Use a factory-reset lab device and a
+setup wizard covered by Group Q. Build `assembleRemoteTest` and run
+`verifyRemoteTestIsolation` in Android CI. The artifact has package
+`com.example.lockdowndpc.remotetest` and a separately generated test signer.
+Use the same test signer throughout the drill.
+
+1. Configure the reference test server for that package and the APK signer
+   fingerprint. Prepare its Android attestation roots, fresh revocation data,
+   fleet root, signed key set and one ticket per run. Make only the device
+   endpoints reachable through HTTPS with a certificate trusted by Android.
+   If using a lab proxy, preserve the request body and signature headers and
+   set the upstream Host expected by the loopback server.
+2. Build the [QR payload](provisioning.md#runbook-a--qr-enrolment-on-the-setup-wizard)
+   with the exact APK, the component
+   `com.example.lockdowndpc.remotetest/com.example.lockdowndpc.admin.LockdownAdminReceiver`,
+   the HTTPS base URL, root fingerprint and optional TLS pins. With the
+   server running, confirm the setup wizard completes after the baseline is
+   verified. Check the accepted attestation in the server's enrolment record
+   and confirm the first signed report identifies the baseline. The remote-test
+   key attests the APK identity. For offline inventory checks use the Android
+   12+ enrollment-specific ID and the device codename as `firmwareFamily`.
+3. Repeat on a reset device with the server offline. Confirm setup still
+   completes with the verified baseline. Restore the server and confirm
+   enrolment and sync resume through the scheduled retry.
+4. Deliver a signed fleet policy. Interrupt the device after the policy is
+   committed and before its read-back completes. On restart verify that the
+   committed policy is reapplied and read back. Check the report's committed
+   and verified generation hashes against the server's policy record.
+5. Set a secure screen lock, reboot, and leave the device at first unlock.
+   Confirm the server sees no requests before unlock and that sync resumes
+   afterwards. Run `lock_now` with the secure lock and confirm the lock screen
+   and `secureLock: true`. Repeat with no secure lock. Confirm the screen
+   turns off and the outcome is `secureLock: false` with
+   `lock-screen-off-only`. Queue `reapply` and confirm its verified generation
+   in the next report.
+6. Rotate the server command key in a signed key set and queue a command.
+   Confirm the report first acknowledges the new key-set version and then
+   reports one execution of the command sequence.
+
+Record results and stable failure codes in [the device matrix](device-matrix.md).
+Keep tickets, QR images, attestation records and device identifiers private.

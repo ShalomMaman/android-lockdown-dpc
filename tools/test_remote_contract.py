@@ -479,6 +479,27 @@ def check_recovery(case, data, initial=None):
 
 
 class RemoteContractTest(unittest.TestCase):
+    def test_reference_client_transcripts(self):
+        from fleet_admin import enrolment_transcript
+        from remote_contract import ticket_bytes
+
+        vector = vectors("client-wire")
+        enrol = vector["enrolment"]
+        transcript = enrolment_transcript({
+            "challenge": enrol["challenge"],
+            "ticketSha256": hash_hex(ticket_bytes(enrol["ticket"])),
+            "attestationChain": enrol["chain"],
+            "facts": enrol["facts"],
+        })
+        self.assertEqual(enrol["transcriptUtf8"].encode(), transcript)
+        self.assertTrue(signature_valid(vector["signerSpki"], transcript, decode(enrol["signature"])))
+        sync = vector["sync"]
+        body = canonical(sync["body"])
+        self.assertEqual(sync["bodyUtf8"].encode(), body)
+        transcript = canonical(["dg-sync/1", "POST", "/v1/sync", sync["timestamp"], hash_hex(body)])
+        self.assertEqual(sync["transcriptUtf8"].encode(), transcript)
+        self.assertTrue(signature_valid(vector["signerSpki"], transcript, decode(sync["signature"])))
+
     def test_bundle_preserves_directory_created_after_existence_check(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary) / "bundle"

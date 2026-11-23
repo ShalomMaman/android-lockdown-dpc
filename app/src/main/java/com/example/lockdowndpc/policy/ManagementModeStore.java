@@ -136,6 +136,13 @@ public final class ManagementModeStore {
     }
 
     /** Reserved for gated provisioning; a successful marker is never removed. */
+    static synchronized boolean markProvisioningRemoteIntent(Context context) {
+        if (!RemoteEnrolmentGate.permits()) return false;
+        Marker marker = readMarker(context);
+        return marker == Marker.PRESENT || (marker == Marker.ABSENT
+                && readMode(context) == ManagementMode.UNDECIDED && markRemoteIntent(context));
+    }
+
     static synchronized boolean markRemoteIntent(Context context) {
         if (!RemoteEnrolmentGate.permits()) {
             return false;

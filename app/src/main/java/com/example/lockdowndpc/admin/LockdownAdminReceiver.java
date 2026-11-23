@@ -10,6 +10,9 @@ import android.util.Log;
 import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
+import com.example.lockdowndpc.policy.RemoteProvisioning;
+import com.example.lockdowndpc.policy.RemoteTestScheduler;
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator;
 
 public final class LockdownAdminReceiver extends DeviceAdminReceiver {
     public static ComponentName componentName(Context context) {
@@ -25,7 +28,25 @@ public final class LockdownAdminReceiver extends DeviceAdminReceiver {
     public void onProfileProvisioningComplete(Context context, Intent intent) {
         super.onProfileProvisioningComplete(context, intent);
         if (!RemoteEnrolmentGate.permitsLocalProvisioning(intent)) {
-            Log.w("LockdownAdminReceiver", "remote-enrolment-disabled");
+            if (!RemoteEnrolmentGate.permits()) {
+                Log.w("LockdownAdminReceiver", "remote-enrolment-disabled");
+                return;
+            }
+            if (RemoteProvisioning.store(context, intent)) {
+                if (PolicyComplianceActivity.isComplianceDone(context)) {
+                    RemoteTestScheduler.schedule(context);
+                    return;
+                }
+                Log.w("LockdownAdminReceiver", "compliance-gate-skipped");
+                PendingResult pending = goAsync();
+                PolicyReconciliationCoordinator.reconcileForProvisioning(context, verified -> {
+                    try {
+                        if (Boolean.TRUE.equals(verified)) RemoteTestScheduler.schedule(context);
+                    } finally {
+                        if (pending != null) pending.finish();
+                    }
+                });
+            }
             return;
         }
         DevicePolicyManager dpm = context.getSystemService(DevicePolicyManager.class);

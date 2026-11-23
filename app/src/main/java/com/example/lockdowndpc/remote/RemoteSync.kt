@@ -25,6 +25,10 @@ internal class RemoteSync(private val verifier: RemoteVerifier, private val bind
         if (outstanding?.fresh(now) == false) outstanding = null
     }
 
+    fun discard(exchange: Exchange) {
+        if (outstanding === exchange) outstanding = null
+    }
+
     fun respond(
         exchange: Exchange, responseNonce: String, now: RemoteTime, documents: List<RemoteDocument>,
         trust: () -> RemoteTrust, floor: (DocumentType) -> Long,

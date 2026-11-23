@@ -1,0 +1,42 @@
+{
+  "fixture": "Public test only. The certificate bytes are placeholders. No private key is included.",
+  "signerSpki": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEo7cxdsY8Hry4PCekzUUH0feaTk1Eddqp0H_78fZUzxQtXL-nvN9iw6S7-rxRDf1O8UIaNdhIKMni5KXgeUFUtw",
+  "enrolment": {
+    "ticket": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYX",
+    "challenge": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+    "chain": [
+      "cHVibGljIHRlc3QgY2VydGlmaWNhdGUgcGxhY2Vob2xkZXI"
+    ],
+    "facts": {
+      "sdk": 35,
+      "firmwareFamily": "fixture",
+      "note": "בדיקה"
+    },
+    "transcriptUtf8": "[\"dg-enrol/1\",\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"1d64add2a6388367c9bc2d1f1b384b069a6ef382cdaaa89771dd103e28613a25\",\"5af50010c389db93f85baaa247f46ce570e6549d3bc7e0533615bf5cc31ef4d2\",\"93afae93e7d84588ccb5cee06e8dca1022ba884e900fbc807632f255f537d973\"]",
+    "signature": "MEYCIQC_w_8idFe4RqKprvD_K1WVStcZo5-rgL4FdYodcCsRDgIhAJXw0b44fyBF1wkcTs4cjgCuRwNUkFd-fqP-gsISz-ns"
+  },
+  "sync": {
+    "body": {
+      "fleetPolicyVersion": "baseline",
+      "committedSha256": "50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c",
+      "overrides": [
+        "network-off"
+      ],
+      "generationSha256": "41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb",
+      "deviceId": "5A5BpnZS-7Ag2TaiqOOOvAfeb_ANw1d-P33VRmyc8Rc",
+      "nonce": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "keySetVersion": 2,
+      "recoveryVersion": 1,
+      "verifiedGeneration": null,
+      "lastCommandSequence": 3,
+      "report": {
+        "mode": "REMOTE",
+        "commands": []
+      }
+    },
+    "bodyUtf8": "{\"committedSha256\":\"50d858e0985ecc7f60418aaf0cc5ab587f42c2570a884095a9e8ccacd0f6545c\",\"deviceId\":\"5A5BpnZS-7Ag2TaiqOOOvAfeb_ANw1d-P33VRmyc8Rc\",\"fleetPolicyVersion\":\"baseline\",\"generationSha256\":\"41acce4f35ad932540247e3c3f56c732e481280be5201f3b6e1a54c9e23fd1cb\",\"keySetVersion\":2,\"lastCommandSequence\":3,\"nonce\":\"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8\",\"overrides\":[\"network-off\"],\"recoveryVersion\":1,\"report\":{\"commands\":[],\"mode\":\"REMOTE\"},\"verifiedGeneration\":null}",
+    "timestamp": 1700000000,
+    "transcriptUtf8": "[\"dg-sync/1\",\"POST\",\"/v1/sync\",1700000000,\"581918e75533ac51765b8aad4240efec9f96ecb81483086c12ab8032aa722041\"]",
+    "signature": "MEYCIQDRloyz8ESnWJVFUDmv6dyWxqg8ZDnb3GXoIRTY5idhSwIhANSj-ZGLE_uAb67hoTcZdQ4ya6leeJoGEdtmopi_ec0F"
+  }
+}

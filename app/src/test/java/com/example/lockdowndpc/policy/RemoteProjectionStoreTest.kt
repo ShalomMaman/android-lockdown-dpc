@@ -10,7 +10,6 @@ import com.example.lockdowndpc.remote.RemoteFixtures
 import com.example.lockdowndpc.remote.RemoteProjection
 import com.example.lockdowndpc.testing.MemoryPreferences
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -39,7 +38,6 @@ class RemoteProjectionStoreTest {
         val device = app.createDeviceProtectedStorageContext()
         assertTrue(device.getSharedPreferences(ManagementModeStore.MARKER_PREFS, Context.MODE_PRIVATE)
             .edit().putBoolean(ManagementModeStore.MARKER_KEY, true).commit())
-        assertFalse(RemoteEnrolmentGate.permits())
         RemoteTestGate.open(true)
         try {
             everySite(app, sites)

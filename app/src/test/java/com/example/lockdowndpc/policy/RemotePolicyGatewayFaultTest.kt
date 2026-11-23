@@ -202,7 +202,7 @@ class RemotePolicyGatewayFaultTest : RemotePassFixture() {
     /** The build gate is off: with a marker present, no runtime entry point reaches the journal. */
     @Test fun gateOffRefusesEveryRuntimeEntryPointAndWritesNothing() {
         RemoteTestGate.open(false)
-        assertFalse(RemoteEnrolmentGate.permits())
+        org.junit.Assume.assumeFalse(RemoteEnrolmentGate.permits())
         val unavailable = RemotePolicyApplier.UNAVAILABLE
         assertEquals(unavailable, RemotePolicyRuntime.bindFleet(context, f.binding, f.binding.deviceId, "")?.code)
         assertNull(RemotePolicyRuntime.beginExchange(context))

@@ -6,9 +6,11 @@ import static android.app.admin.DevicePolicyManager.EXTRA_PROVISIONING_MODE;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.os.Build;
 import android.os.Bundle;
 
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
+import com.example.lockdowndpc.policy.RemoteProvisioning;
 
 import java.util.OptionalInt;
 
@@ -19,10 +21,17 @@ public final class ProvisioningModeActivity extends Activity {
         super.onCreate(savedInstanceState);
         Intent request = getIntent();
         setResult(RESULT_CANCELED);
-        if (RemoteEnrolmentGate.permitsLocalProvisioning(request)
-                && ACTION_GET_PROVISIONING_MODE.equals(request.getAction())) {
+        if (ACTION_GET_PROVISIONING_MODE.equals(request.getAction())) {
+            boolean local = RemoteEnrolmentGate.permitsLocalProvisioning(request);
+            boolean remote = !local && RemoteProvisioning.mark(this, request);
+            if (!local && !remote) {
+                finish();
+                return;
+            }
+            boolean requireModes = remote ? Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                    : request.hasExtra(EXTRA_PROVISIONING_ALLOWED_PROVISIONING_MODES);
             OptionalInt mode = ProvisioningFlow.selectMode(
-                    request.hasExtra(EXTRA_PROVISIONING_ALLOWED_PROVISIONING_MODES),
+                    requireModes,
                     request.getIntegerArrayListExtra(EXTRA_PROVISIONING_ALLOWED_PROVISIONING_MODES));
             if (mode.isPresent()) {
                 setResult(RESULT_OK, new Intent().putExtra(EXTRA_PROVISIONING_MODE, mode.getAsInt()));
