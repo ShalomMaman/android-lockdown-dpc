@@ -10,7 +10,7 @@ import android.os.Build;
 import android.os.Bundle;
 
 import com.example.lockdowndpc.policy.RemoteEnrolmentGate;
-import com.example.lockdowndpc.policy.RemoteProvisioning;
+import com.example.lockdowndpc.policy.RemoteTransport;
 
 import java.util.OptionalInt;
 
@@ -23,7 +23,7 @@ public final class ProvisioningModeActivity extends Activity {
         setResult(RESULT_CANCELED);
         if (ACTION_GET_PROVISIONING_MODE.equals(request.getAction())) {
             boolean local = RemoteEnrolmentGate.permitsLocalProvisioning(request);
-            boolean remote = !local && RemoteProvisioning.mark(this, request);
+            boolean remote = !local && RemoteTransport.mark(this, request);
             if (!local && !remote) {
                 finish();
                 return;

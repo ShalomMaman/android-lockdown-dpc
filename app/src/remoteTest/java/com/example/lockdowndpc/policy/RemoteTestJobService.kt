@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.policy
 
+import android.app.admin.DevicePolicyManager
 import android.app.job.JobInfo
 import android.app.job.JobParameters
 import android.app.job.JobScheduler
@@ -8,6 +9,7 @@ import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.UserManager
 import android.util.Log
 import com.example.lockdowndpc.BuildConfig
 import com.example.lockdowndpc.remote.RemoteClientWire
@@ -78,11 +80,16 @@ internal object RemoteTestScheduler {
     private const val DEFAULT_PULL_MINUTES = 15L
 
     fun eligible(context: Context): Boolean =
-        BuildConfig.REMOTE_ENROLMENT_ENABLED && RemoteProvisioning.supportsArtifact(context) &&
-            RemoteProvisioning.unlocked(context) && RemoteProvisioning.deviceOwner(context) &&
+        BuildConfig.REMOTE_ENROLMENT_ENABLED && RemoteTransport.supportsArtifact(context) &&
+            unlocked(context) && deviceOwner(context) &&
             ManagementModeStore.hasCommittedRemoteIntent(context)
 
-    @JvmStatic
+    fun unlocked(context: Context): Boolean =
+        context.getSystemService(UserManager::class.java)?.isUserUnlocked == true
+
+    fun deviceOwner(context: Context): Boolean =
+        context.getSystemService(DevicePolicyManager::class.java)?.isDeviceOwnerApp(context.packageName) == true
+
     fun schedule(context: Context) = schedule(context, includeImmediate = true)
 
     fun refreshPeriodic(context: Context) = schedule(context, includeImmediate = false)

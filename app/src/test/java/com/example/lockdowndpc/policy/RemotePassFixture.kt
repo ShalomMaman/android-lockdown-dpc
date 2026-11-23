@@ -36,7 +36,7 @@ import org.robolectric.shadows.ShadowSigningInfo
  * thread, against a scriptable Device Owner.
  */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [32], shadows = [LockdownPolicyApplyTest.FilterDevicePolicy::class])
+@Config(sdk = [32], shadows = [LockdownPolicyApplyTest.FilterDevicePolicy::class, RemoteTestGate::class])
 abstract class RemotePassFixture {
     internal val f = RemoteFixtures
     internal lateinit var context: Context

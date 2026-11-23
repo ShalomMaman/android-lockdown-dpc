@@ -57,7 +57,9 @@ android {
 
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -74,6 +76,12 @@ android {
             buildConfigField("String", "UPDATE_MANIFEST_URL", "".asBuildConfigString())
             buildConfigField("String", "UPDATE_PUBLIC_KEY", "".asBuildConfigString())
         }
+    }
+
+    // Local variants do not compile the remote-test transport, even before R8.
+    sourceSets {
+        getByName("debug").java.srcDir("src/localBuild/java")
+        getByName("release").java.srcDir("src/localBuild/java")
     }
 
     buildFeatures {
@@ -102,6 +110,32 @@ android {
                 "jdk.compiler/com.sun.tools.javac.api",
             ).map { modulePackage -> "--add-opens=$modulePackage=ALL-UNNAMED" })
         }
+    }
+}
+
+androidComponents {
+    finalizeDsl { extension ->
+        val release = extension.buildTypes.getByName("release")
+        check(!release.isDebuggable && release.isMinifyEnabled && release.isShrinkResources) {
+            "Release must be non-debuggable with code and resource shrinking enabled."
+        }
+    }
+    onVariants(selector().withBuildType("release")) { variant ->
+        // buildConfigFields can only be read after configuration, so check it in a task
+        // that every release build of this variant runs first.
+        val fields = variant.buildConfigFields
+        val variantName = variant.name
+        val capitalized = variantName.replaceFirstChar { it.uppercase() }
+        val gateCheck = tasks.register("verify${capitalized}RemoteEnrolmentGate") {
+            group = "verification"
+            doLast {
+                val gate = fields?.get()?.get("REMOTE_ENROLMENT_ENABLED")
+                check(gate?.type == "boolean" && gate.value.toString() == "false") {
+                    "$variantName must set REMOTE_ENROLMENT_ENABLED=false."
+                }
+            }
+        }
+        tasks.matching { it.name == "pre${capitalized}Build" }.configureEach { dependsOn(gateCheck) }
     }
 }
 
@@ -142,6 +176,17 @@ tasks.register<Exec>("verifyRemoteTestIsolation") {
         rootProject.file("tools/verify_remote_test_apk.py"),
         layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile,
         layout.buildDirectory.file("outputs/apk/remoteTest/app-remoteTest.apk").get().asFile,
+    )
+}
+
+tasks.register<Exec>("verifyReleaseHardening") {
+    dependsOn("assembleRelease")
+    group = "verification"
+    description = "Checks the release APK manifest and compiled remote-enrolment boundary."
+    commandLine(
+        "python3",
+        rootProject.file("tools/verify_release_apk.py"),
+        layout.buildDirectory.file("outputs/apk/release/app-release.apk").get().asFile,
     )
 }
 

@@ -1062,6 +1062,14 @@ is what makes withdrawing ADB defensible.
 
 ### U-1 A higher version installs silently
 
+For the isolated production channel, follow the
+[`device_update_drill.py` procedure](update-drill.md#part-2--scripted-production-channel-drill)
+and attach its JSON result to the standard hardware evidence. The script checks
+that remote enrolment is off, that the installed APK matches the candidate, and
+that Device Owner and the owner's effective restrictions survive. The witness
+confirms the absence of an install prompt, the audit entries, and the continued
+operation of the configured policies. Keep ADB available throughout.
+
 **Steps**
 
 1. Note the installed `versionCode`.

@@ -28,7 +28,8 @@ def verify(release: Path, remote_test: Path) -> None:
         )
 
     test_manifest = manifest(remote_test)
-    name = re.compile(r'android:name\([^)]*\)="([^"]+)"')
+    android = r"(?:android:|http://schemas\.android\.com/apk/res/android:)"
+    name = re.compile(rf'{android}name\([^)]*\)="([^"]+)"')
     release_names = set(name.findall(manifest(release)))
     test_names = set(name.findall(test_manifest))
     for component in ("RemoteTestJobService", "RemoteTestLifecycleReceiver"):
@@ -36,7 +37,7 @@ def verify(release: Path, remote_test: Path) -> None:
         if qualified in release_names or qualified not in test_names:
             raise VerificationError(f"{component} has the wrong manifest scope")
     for attribute in ("debuggable", "testOnly"):
-        match = re.search(rf"android:{attribute}\([^)]*\)=(.+)", test_manifest)
+        match = re.search(rf"{android}{attribute}\([^)]*\)=(.+)", test_manifest)
         if match and not re.fullmatch(r"false|\(type 0x12\)0x0+", match[1].strip()):
             raise VerificationError(f"remote-test APK enables {attribute}")
 

@@ -18,7 +18,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [32], manifest = Config.NONE)
+@Config(sdk = [32], manifest = Config.NONE, shadows = [RemoteTestGate::class])
 class RemoteProjectionStoreTest {
     private val f = RemoteFixtures
 
