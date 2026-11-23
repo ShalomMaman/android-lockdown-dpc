@@ -81,7 +81,7 @@ public final class AllowedAppsStore {
     /**
      * System packages an administrator explicitly opted into managing.
      *
-     * <p>Empty by default. Device Guard does not enumerate and hide every system
+     * <p>Empty by default. Maakeh does not enumerate and hide every system
      * package: that is unrecoverable on many OEM builds. An operator who needs a
      * specific system app under allow/block control names it here.
      */
@@ -287,7 +287,7 @@ public final class AllowedAppsStore {
      * Remembers a display label <em>without</em> joining the managed-package set.
      *
      * <p>The inventory screen lists system packages too, and a system package that
-     * Device Guard has hidden disappears from bulk {@code PackageManager} queries,
+     * Maakeh has hidden disappears from bulk {@code PackageManager} queries,
      * so its label has to survive somewhere for the row to stay readable. It must
      * not become a {@link #getManagedPackages} member to get that: the policy
      * engine puts every managed package under the allow/block rules, which in

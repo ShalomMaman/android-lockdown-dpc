@@ -10,7 +10,7 @@ The procedure that fills the cells is [`hardware-validation.md`](hardware-valida
 The behaviour being validated is described in [`kiosk-mode.md`](kiosk-mode.md)
 and [`production-roadmap.md`](production-roadmap.md).
 
-**Current state: every cell is "not tested."** Device Guard has been installed
+**Current state: every cell is "not tested."** Maakeh has been installed
 on pilot handsets, but no execution of the complete hardware-validation runbook
 has been recorded with the required firmware identity and evidence. Ad-hoc use
 does not populate this ledger, so nothing below is a support claim.
@@ -22,7 +22,7 @@ does not populate this ledger, so nothing below is a support claim.
 | Not tested | `—` | No run exists. Also the state for a capability whose console entry point is absent from the build tested — the runbook calls that *blocked*, and blocked collapses to *not tested* here, because no evidence was produced either way. |
 | Passed with evidence | `pass` + link | A run of the named cases completed on this firmware build with the expected result, and the evidence is linked. |
 | Failed with defect reference | `fail` + issue | A run produced a result other than expected. The linked issue holds the machine reason string and the photograph. A cell stays `fail` until a *new* run on a *new* build passes; closing the defect in code does not clear it. |
-| Not supported | `n/s` | The release or firmware genuinely does not implement the capability, Device Guard reports that honestly, and nothing faults. This is a documented outcome, not a defect — but it constrains what may be sold into that fleet. |
+| Not supported | `n/s` | The release or firmware genuinely does not implement the capability, Maakeh reports that honestly, and nothing faults. This is a documented outcome, not a defect — but it constrains what may be sold into that fleet. |
 
 A summary cell carries the **weakest** state among the capability rows behind it.
 One `fail` makes the summary `fail`; one `—` among otherwise-passing rows makes
@@ -105,7 +105,7 @@ because that is the unit that behaves.
 | Model and marketing name | Settings → About phone |
 | Android release and API level | Settings → About phone |
 | Firmware build | Settings → About phone → Build number (runbook PRE-2), verbatim |
-| Device Guard version | `versionName` / `versionCode` under test |
+| Maakeh version | `versionName` / `versionCode` under test |
 | Run date and operator/witness | The run summary |
 | Evidence link | The hardware-validation issue comment holding the photographs and machine reason strings |
 
@@ -167,7 +167,7 @@ when any of these changes:
 | OEM firmware update on a tested model | The full kiosk group and C-6, C-10, C-18. A firmware update is a new record, not an amendment to the old one. |
 | Android major upgrade on a tested model | Everything. A new row in the summary table. |
 | A new model, even from a tested family | Everything. |
-| A Device Guard release that changes lock task, the HOME preference, escape-surface hiding or the update channel | The affected capability rows on every record that is still in service. |
+| A Maakeh release that changes lock task, the HOME preference, escape-surface hiding or the update channel | The affected capability rows on every record that is still in service. |
 | A change to `KIOSK_ESCAPE_SURFACES`, `ESSENTIAL_SYSTEM` or the management records | C-6, C-9, C-15, C-17. |
 | A new `UserManager` restriction added to `SystemPolicyControl` | C-12 on the lowest release in the fleet, where `unsupported` is the likely and correct answer. |
 

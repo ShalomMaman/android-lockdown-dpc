@@ -14,7 +14,7 @@ the schedule enforces, how it fails closed, and the limits it accepts.
 - Every policy pass recomputes the windows from the clock. No stored "in
   window" flag is trusted, so a reboot, a clock change or a time zone change
   converges on the next pass.
-- The always-available core is never suspended: Device Guard itself, the
+- The always-available core is never suspended: Maakeh itself, the
   trusted management and VPN applications, essential system packages, the
   default dialer, SMS and clock applications (system packages only), the home
   launcher, the active input method, active device administrators, the WebView
@@ -87,8 +87,8 @@ suspended, which errs on the restrictive side.
 
 ## Triggers and retries
 
-- **Boundary alarm.** Each boundary arms a primary alarm (exact when Device
-  Guard may schedule exact alarms, otherwise a short inexact window) and an
+- **Boundary alarm.** Each boundary arms a primary alarm (exact when
+  Maakeh may schedule exact alarms, otherwise a short inexact window) and an
   inexact fallback that can fire in Doze. The fallback is always armed, because
   Android cancels exact alarms without any broadcast when the permission is
   revoked.
@@ -108,7 +108,7 @@ an inexact alarm fires. On an idle device or one saving battery that can be
 minutes, or up to about an hour, after the boundary, and OEM battery managers
 may delay it further. Android 14 and newer deny exact alarm access to a fresh
 installation by default, and `USE_EXACT_ALARM` is reserved for alarm clock and
-calendar applications, so Device Guard does not declare it. The console states
+calendar applications, so Maakeh does not declare it. The console states
 the exact-alarm state as it is, promises no bound, and points the administrator
 to **Alarms and reminders** in Android Settings. The screen-on check, the sweep
 and the retry narrow the gap but cannot close it: each runs the pass in the
@@ -148,7 +148,7 @@ confirmed. Turning the schedule off leaves automatic date and time required.
   next window records every target again. This errs on the strict side; it never opens an app.
 - **Android 8.0 and 8.1 share one suspension state.** On these versions a window target that
   another component had already suspended is recorded and released at the end of the window,
-  even if that component still wants it suspended. Every Device Guard step that keeps a package
+  even if that component still wants it suspended. Every Maakeh step that keeps a package
   suspended outside windows is excluded from the release, so this only affects suspensions made
   by other apps (for example an OEM wellbeing tool).
 

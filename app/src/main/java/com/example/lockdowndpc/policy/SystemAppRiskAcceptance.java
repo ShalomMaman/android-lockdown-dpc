@@ -4,7 +4,7 @@ package com.example.lockdowndpc.policy;
  * An administrator's explicit acceptance of the identity risk of one
  * unclassified OEM system package, as required by
  * {@code docs/production-roadmap.md#system-application-safety-model}: "Before
- * accepting an advanced system-package choice, Device Guard should record the
+ * accepting an advanced system-package choice, Maakeh should record the
  * package name, signer digest, version, enabled/hidden state and the firmware
  * build."
  *

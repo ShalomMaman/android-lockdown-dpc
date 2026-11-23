@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Issue and verify Device Guard remote-management files offline."""
+"""Issue and verify Maakeh remote-management files offline."""
 
 from __future__ import annotations
 
@@ -132,7 +132,7 @@ class SigningKey:
 def check_output(output: Path, *inputs: Path) -> None:
     path = output.expanduser().resolve()
     if path.is_relative_to(CONTRACT.parents[1]):
-        raise FleetError("write fleet files outside the Device Guard checkout")
+        raise FleetError("write fleet files outside the Maakeh checkout")
     for source in inputs:
         other = source.expanduser().resolve()
         if path == other or (path.exists() and other.exists() and path.samefile(other)):
@@ -652,7 +652,7 @@ def add_enrolment_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--revocation-list", type=Path, help="Offline Google attestation status JSON")
     parser.add_argument("--revocation-max-age-days", type=int, default=DEFAULT_REVOCATION_MAX_AGE_DAYS,
                         help="Maximum age of the local revocation list by modification time (default: %(default)s)")
-    parser.add_argument("--expected-package", help="Expected Device Guard application ID")
+    parser.add_argument("--expected-package", help="Expected Maakeh application ID")
     parser.add_argument("--expected-signer-sha256", help="Expected APK signing certificate SHA-256")
 
 

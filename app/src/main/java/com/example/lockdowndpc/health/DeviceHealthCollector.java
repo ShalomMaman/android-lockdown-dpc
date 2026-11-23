@@ -116,7 +116,7 @@ public final class DeviceHealthCollector {
     /**
      * Three states rather than a boolean.
      *
-     * <p>"The platform could not be asked" is not "Device Guard is not the
+     * <p>"The platform could not be asked" is not "Maakeh is not the
      * owner": the first sends an operator to look, the second sends them to
      * re-provision a device that may be perfectly healthy.
      */

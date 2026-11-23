@@ -6,7 +6,7 @@ explicit about what the administrator console can and cannot configure today.
 
 ## Execution tracking
 
-The public [Device Guard Production Roadmap](https://github.com/users/ShalomMaman/projects/3)
+The public [Maakeh Production Roadmap](https://github.com/users/ShalomMaman/projects/3)
 is the execution source of truth. This document preserves the rationale and
 security boundary; the linked Issues own scope, priority and acceptance:
 
@@ -37,7 +37,7 @@ security boundary; the linked Issues own scope, priority and acceptance:
 - **1.0:** [final production identity and signing](https://github.com/ShalomMaman/android-lockdown-dpc/issues/25).
   [Privacy-preserving fleet health](https://github.com/ShalomMaman/android-lockdown-dpc/issues/24)
   is implemented in this release as a local, on-device report plus an
-  operator-initiated redacted export: Device Guard gains no telemetry, no
+  operator-initiated redacted export: Maakeh gains no telemetry, no
   analytics endpoint and no default off-device transmission, and a fleet view is
   assembled by whoever collects the exports. That is a security boundary, not a
   deferral.
@@ -52,7 +52,7 @@ pinning. The remaining gates are hardware gates.
 The application picker is no longer a third-party-only picker. It enumerates
 installed and previously managed packages and presents system applications
 behind the safety tiers described below, while still refusing to make protected
-core components selectable. Device Guard itself and a verified management
+core components selectable. Maakeh itself and a verified management
 transport are never selectable.
 
 The `ADMIN_SELECTED_SYSTEM` classification is now written by an administrator
@@ -113,7 +113,7 @@ importance cannot be inferred from `FLAG_SYSTEM` alone.
 
 The system inventory should use three safety tiers:
 
-- **Protected core** — Device Guard, System UI, package/permission installers,
+- **Protected core** — Maakeh, System UI, package/permission installers,
   settings providers, active input method, WebView provider, Google Play
   services where required, and verified management transports. These cannot be
   blocked from the normal console.
@@ -123,7 +123,7 @@ The system inventory should use three safety tiers:
 - **Unclassified OEM component** — visible for diagnosis but not blockable until
   it is reviewed or an advanced administrator explicitly accepts the risk.
 
-Before accepting an advanced system-package choice, Device Guard should record
+Before accepting an advanced system-package choice, Maakeh should record
 the package name, signer digest, version, enabled/hidden state and the firmware
 build. The UI must explain that an OEM component can be required even when it
 has a harmless-looking label. Applying the selection must use the existing
@@ -137,7 +137,7 @@ pure classifier the console consults before it draws a row. The decision worth
 recording is that **what an administrator can see and what they can change are
 deliberately different sets**, resolved in a fixed order:
 
-1. **Protected core** — Device Guard, `ESSENTIAL_SYSTEM`, verified management
+1. **Protected core** — Maakeh, `ESSENTIAL_SYSTEM`, verified management
    transports, and two *runtime* facts: the active input method and the active
    WebView provider, read from the device rather than from a catalogue. An OEM
    keyboard absent from every catalogue is still unblockable, because the
@@ -166,7 +166,7 @@ otherwise hide every system package an operator merely scrolled past under
 saving hands off to `LockdownPolicyController`, which owns the requested →
 applied/failed contract.
 
-Packages Device Guard has hidden are omitted from bulk `PackageManager` queries,
+Packages Maakeh has hidden are omitted from bulk `PackageManager` queries,
 so the inventory is the union of what the platform reports and every package we
 have persisted a reason to remember — otherwise a blocked application would
 vanish from the screen that blocked it.
@@ -357,7 +357,7 @@ proven, but no complete runbook-qualified hardware record has been entered in
    on physical Device Owner devices.
 6. Exercise single-app and single-site kiosk escape and recovery paths on
    physical hardware.
-7. Confirm that a wrong system selection cannot hide Device Guard, the active
+7. Confirm that a wrong system selection cannot hide Maakeh, the active
    WebView provider, the active keyboard, System UI or the management transport.
 8. Document recovery when the update endpoint, Wi-Fi, VPN, WebView or target
    kiosk application is unavailable.

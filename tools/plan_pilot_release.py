@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a fail-closed publication plan for one Device Guard pilot APK."""
+"""Create a fail-closed publication plan for one Maakeh pilot APK."""
 
 from __future__ import annotations
 
@@ -148,7 +148,7 @@ def plan(args: argparse.Namespace) -> dict[str, str | int]:
         "current_apk_size": current_apk_size,
         "tag": tag,
         "asset_name": asset_name,
-        "release_name": f"Device Guard Pilot {version_name}",
+        "release_name": f"Maakeh Pilot {version_name}",
         "release_url": release_url,
         "metadata_key_sha256": str(channel["metadataPublicKeySha256"]),
         "signer_sha256": str(channel["apkSignerSha256"]),

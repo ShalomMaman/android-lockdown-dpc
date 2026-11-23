@@ -35,7 +35,7 @@ public final class SystemAppClassifier {
 
     /** Safety tier from the roadmap's system-application safety model. */
     public enum Tier {
-        /** Android, Device Guard, keyboard, WebView, management. Never blockable. */
+        /** Android, Maakeh, keyboard, WebView, management. Never blockable. */
         PROTECTED_CORE,
         /** A built-in catalogue already rules on this package; the rule is not hand-edited. */
         POLICY_RULED,

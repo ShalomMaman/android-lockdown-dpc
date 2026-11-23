@@ -13,7 +13,7 @@ import java.util.regex.Pattern;
  * The stored night and work hours configuration: the shared schedule, and the
  * packages an administrator keeps available inside its windows.
  *
- * <p>Holds no Android types. The allowlist is Device Guard's own and is kept
+ * <p>Holds no Android types. The allowlist is Maakeh's own and is kept
  * next to the shared schedule JSON, not inside it, so the schema stays exactly
  * the one the home filter reads.
  *

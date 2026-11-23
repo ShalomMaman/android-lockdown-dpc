@@ -92,10 +92,10 @@ public record DeviceHealthSnapshot(
     }
 
     /**
-     * Whether Device Guard is the Device Owner of this device.
+     * Whether Maakeh is the Device Owner of this device.
      *
      * <p>Three states rather than a boolean, because "the platform could not be
-     * asked" is not the same claim as "Device Guard is not the owner". The first
+     * asked" is not the same claim as "Maakeh is not the owner". The first
      * is an unproven device; the second is an unmanaged one, and reporting the
      * first as the second sends an operator to re-provision a device that may be
      * fine.
@@ -110,7 +110,7 @@ public record DeviceHealthSnapshot(
      * The policy half of the report.
      *
      * @param verification        what the last pass proved
-     * @param ownership           whether Device Guard is still the Device Owner
+     * @param ownership           whether Maakeh is still the Device Owner
      * @param lastVerifiedAtMillis epoch millis of the last verified pass, 0 for never
      * @param verificationErrors  the machine-readable errors of the last pass
      * @param packages            how many packages the pass blocked and allowed

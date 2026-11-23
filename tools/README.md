@@ -10,7 +10,7 @@ P-256 key, current signed envelope, candidate APK identity and exact signer. It
 requires a strictly higher `versionCode` and emits only validated, line-safe
 release names and workflow outputs. It never reads private key material.
 
-`publish_update.py` creates the compact, signed JSON envelope consumed by the Device Guard updater. It reads package and version metadata from the APK with `aapt2`, calculates SHA-256 and size by streaming the file, and asks OpenSSL to sign only the canonical payload with `SHA256withECDSA`.
+`publish_update.py` creates the compact, signed JSON envelope consumed by the Maakeh updater. It reads package and version metadata from the APK with `aapt2`, calculates SHA-256 and size by streaming the file, and asks OpenSSL to sign only the canonical payload with `SHA256withECDSA`.
 
 The tool requires Python 3, OpenSSL, Android SDK Build Tools (`aapt2` and `apksigner`), and a working Java runtime for `apksigner`. Set `JAVA_HOME` when Java is not available system-wide.
 

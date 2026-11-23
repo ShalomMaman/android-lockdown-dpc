@@ -51,10 +51,10 @@
     <!-- Installation and visibility state -->
     <string name="sysinv_installed">מותקנת</string>
     <string name="sysinv_not_installed">לא מותקנת</string>
-    <string name="sysinv_hidden_by_policy">מוסתרת על ידי מגן המכשיר</string>
+    <string name="sysinv_hidden_by_policy">מוסתרת על ידי מעקה</string>
 
     <!-- Reasons -->
-    <string name="sysinv_reason_device_guard">מגן המכשיר עצמו; לעולם אי אפשר לחסום אותו.</string>
+    <string name="sysinv_reason_device_guard">מעקה עצמו; לעולם אי אפשר לחסום אותו.</string>
     <string name="sysinv_reason_essential_system">רכיב חיוני של ⁦Android⁩. חסימה שלו עלולה להשאיר את המכשיר במצב שאי אפשר לתקן מהמסך הזה.</string>
     <string name="sysinv_reason_management">אמצעי ניהול מאומת. חסימה שלו תבטל את הגישה מרחוק למכשיר.</string>
     <string name="sysinv_reason_active_input_method">המקלדת הפעילה. חסימה שלה תשאיר את המכשיר בלי אפשרות להקליד.</string>
@@ -86,7 +86,7 @@
     <!-- Save confirmation -->
     <string name="sysinv_save">שמירת הבחירה</string>
     <string name="sysinv_save_confirm_title">להחיל את בחירת אפליקציות המערכת?</string>
-    <string name="sysinv_save_confirm_body">מגן המכשיר יבקש להחיל את המדיניות ואז יאמת אותה. ההגנה תדווח כפעילה רק אחרי ש⁦Android⁩ יאשר כל שינוי.</string>
+    <string name="sysinv_save_confirm_body">מעקה יבקש להחיל את המדיניות ואז יאמת אותה. ההגנה תדווח כפעילה רק אחרי ש⁦Android⁩ יאשר כל שינוי.</string>
     <string name="sysinv_save_confirm_action">שמירה והחלה</string>
     <string name="sysinv_save_confirm_cancel">חזרה</string>
     <string name="sysinv_row_description">%1$s, מזהה חבילה %2$s, %3$s, %4$s</string>

@@ -107,7 +107,7 @@ private const val ICON_SIZE_DP = 40
  * The searchable application inventory (Issue #18).
  *
  * It lists every application on the device — user, system and updated-system —
- * plus the packages Device Guard has hidden, which `PackageManager` omits from
+ * plus the packages Maakeh has hidden, which `PackageManager` omits from
  * bulk queries and which would otherwise disappear from the very screen that
  * blocked them.
  *

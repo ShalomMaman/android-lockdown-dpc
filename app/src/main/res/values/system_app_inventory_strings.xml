@@ -47,10 +47,10 @@
     <!-- Installation and visibility state -->
     <string name="sysinv_installed">Installed</string>
     <string name="sysinv_not_installed">Not installed</string>
-    <string name="sysinv_hidden_by_policy">Hidden by Device Guard</string>
+    <string name="sysinv_hidden_by_policy">Hidden by Maakeh</string>
 
     <!-- Reasons -->
-    <string name="sysinv_reason_device_guard">Device Guard itself; it can never be blocked.</string>
+    <string name="sysinv_reason_device_guard">Maakeh itself; it can never be blocked.</string>
     <string name="sysinv_reason_essential_system">Essential Android component. Blocking it can leave the device unrepairable from this console.</string>
     <string name="sysinv_reason_management">Verified management transport. Blocking it would remove remote access to this device.</string>
     <string name="sysinv_reason_active_input_method">Active keyboard. Blocking it would leave the device with no way to type.</string>
@@ -82,7 +82,7 @@
     <!-- Save confirmation -->
     <string name="sysinv_save">Save the selection</string>
     <string name="sysinv_save_confirm_title">Apply this system selection?</string>
-    <string name="sysinv_save_confirm_body">Device Guard will request this policy and then verify it. Protection is only reported as active once every change has been confirmed by Android.</string>
+    <string name="sysinv_save_confirm_body">Maakeh will request this policy and then verify it. Protection is only reported as active once every change has been confirmed by Android.</string>
     <string name="sysinv_save_confirm_action">Save and apply</string>
     <string name="sysinv_save_confirm_cancel">Go back</string>
     <string name="sysinv_row_description">%1$s, package %2$s, %3$s, %4$s</string>

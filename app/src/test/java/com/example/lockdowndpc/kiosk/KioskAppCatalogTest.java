@@ -26,7 +26,7 @@ public final class KioskAppCatalogTest {
     @Test
     public void rejectsDeviceGuardItself() {
         assertFalse(KioskAppCatalog.isSelectable(new KioskAppCatalog.Candidate(
-                "com.example.lockdowndpc", "Device Guard", true, true, true, true)));
+                "com.example.lockdowndpc", "Maakeh", true, true, true, true)));
     }
 
     @Test

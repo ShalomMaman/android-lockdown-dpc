@@ -164,7 +164,7 @@ def validate_admin_component(value: str) -> str:
     if class_name.startswith("."):
         raise ProvisioningError(
             "--admin-component must name the receiver class in full; the leading-dot form "
-            "resolves against the application ID, which is not the Device Guard receiver "
+            "resolves against the application ID, which is not the Maakeh receiver "
             "namespace and would enrol a class that does not exist"
         )
     if not is_dotted_name(class_name):
@@ -486,7 +486,7 @@ def create(args: argparse.Namespace) -> dict[str, object]:
     root = repository_root()
     if root is not None and output.is_relative_to(root):
         raise ProvisioningError(
-            "output must not be written inside the Device Guard repository; a provisioning "
+            "output must not be written inside the Maakeh repository; a provisioning "
             "payload can carry credentials and is never committed"
         )
 

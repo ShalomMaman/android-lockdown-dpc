@@ -1,18 +1,24 @@
-# Device Guard for Android
+<p align="center"><img src="docs/brand/maakeh-logo.jpg" alt="Maakeh | מעקה logo: a shield with a guard rail along a road" width="260"></p>
+
+# Maakeh | מעקה for Android
+
+*Freedom within safe boundaries.*
+
+The name comes from the verse "וְעָשִׂיתָ מַעֲקֶה לְגַגֶּךָ" (Deuteronomy 22:8): build a guard rail for your roof. A rail is not a cage. It lets people live freely up top because the edge is safe.
 
 **Open-source Android Device Owner (DPC) for verified app allowlisting, system-app controls, secure kiosk mode, and signed self-updates.**
 
 [![Android CI](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml/badge.svg)](https://github.com/ShalomMaman/android-lockdown-dpc/actions/workflows/android-ci.yml)
 [![Latest pilot release](https://img.shields.io/github/v/release/ShalomMaman/android-lockdown-dpc?include_prereleases&label=pilot&color=2563EB)](https://github.com/ShalomMaman/android-lockdown-dpc/releases)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg)](LICENSE)
 [![Android 8+](https://img.shields.io/badge/Android-8.0%2B-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/about/versions/oreo)
 
 [Download the current pilot APK](https://github.com/ShalomMaman/android-lockdown-dpc/releases) · [Provision a test device](docs/provisioning.md) · [Ask the community](https://github.com/ShalomMaman/android-lockdown-dpc/discussions) · [Report a vulnerability](SECURITY.md)
 
 > [!IMPORTANT]
-> The currently published Device Guard build is a public pilot, not a production-certified mobile device management product. Device Owner enrolment can require a factory reset, and kiosk or system-policy changes can make a test device difficult to recover. Use a dedicated test device and read the [deployment boundary](#project-status) before provisioning.
+> The currently published Maakeh build is a public pilot, not a production-certified mobile device management product. Device Owner enrolment can require a factory reset, and kiosk or system-policy changes can make a test device difficult to recover. Use a dedicated test device and read the [deployment boundary](#project-status) before provisioning.
 
-Device Guard turns a dedicated Android phone or tablet into a locally managed device. An authorized administrator chooses which applications remain available, controls selected Android system capabilities, or locks the device to one application or one website. Policy is protected by a local administrator PIN and is verified after Android applies it; a partial result is never presented as successful protection.
+Maakeh turns a dedicated Android phone or tablet into a locally managed device. An authorized administrator chooses which applications remain available, controls selected Android system capabilities, or locks the device to one application or one website. Policy is protected by a local administrator PIN and is verified after Android applies it; a partial result is never presented as successful protection.
 
 The project is local-first and open source. It has no analytics service, no advertising SDK, and no required management cloud. English is the default interface, with a complete Hebrew translation and right-to-left layout.
 
@@ -21,28 +27,28 @@ The project is local-first and open source. It has no analytics service, no adve
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/assets/screenshots/administrator-dashboard-en.png" width="320" alt="Device Guard administrator dashboard showing inactive protection, Device Owner status, and management actions">
+      <img src="docs/assets/screenshots/administrator-dashboard-en.png" width="320" alt="Maakeh administrator dashboard showing inactive protection, Device Owner status, and management actions">
       <br><sub>Verified administrator dashboard and protection state</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/assets/screenshots/application-inventory-en.png" width="320" alt="Device Guard application inventory showing search, filters, user apps, and reviewed Android system components">
+      <img src="docs/assets/screenshots/application-inventory-en.png" width="320" alt="Maakeh application inventory showing search, filters, user apps, and reviewed Android system components">
       <br><sub>Searchable user and system application inventory</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/assets/screenshots/system-policy-controls-en.png" width="320" alt="Device Guard system policy controls showing requested and confirmed Android restriction states">
+      <img src="docs/assets/screenshots/system-policy-controls-en.png" width="320" alt="Maakeh system policy controls showing requested and confirmed Android restriction states">
       <br><sub>System controls with requested-versus-confirmed status</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/assets/screenshots/kiosk-profile-en.png" width="320" alt="Device Guard operating profile screen offering managed filtering, single-app kiosk, and single-site kiosk">
+      <img src="docs/assets/screenshots/kiosk-profile-en.png" width="320" alt="Maakeh operating profile screen offering managed filtering, single-app kiosk, and single-site kiosk">
       <br><sub>Managed filtering, single-app kiosk, and single-site kiosk</sub>
     </td>
   </tr>
 </table>
 
 <p align="center">
-  <img src="docs/assets/screenshots/management-lock-he.png" width="320" alt="Device Guard administrator lock screen in Hebrew with a right-to-left layout">
+  <img src="docs/assets/screenshots/management-lock-he.png" width="320" alt="Maakeh administrator lock screen in Hebrew with a right-to-left layout">
   <br><sub>Complete Hebrew localization and right-to-left management flow</sub>
 </p>
 
@@ -58,7 +64,7 @@ These are unedited screen captures from the current `main` development build run
 
 Kiosk mode is opt-in. Installing an update or rebooting a device never enables kiosk by itself.
 
-## Why Device Guard?
+## Why Maakeh?
 
 - **Verified policy state.** Restrictions, package visibility, uninstall blocking, WebView availability, link routing, and supported system controls are read back from Android. The console reports `active` only after the critical policy is confirmed.
 - **A safer application inventory.** Administrators can search user and system applications. Protected Android components cannot be blocked; reviewed system applications can; unknown OEM components require explicit risk acceptance.
@@ -108,11 +114,11 @@ adb shell dpm set-device-owner \
   com.example.lockdowndpc/.admin.LockdownAdminReceiver
 ```
 
-Open Device Guard, create an administrator PIN, store the recovery code away from the device, choose a policy profile, and apply protection. For repeatable deployments and QR enrolment constraints, follow the [Device Owner provisioning runbook](docs/provisioning.md).
+Open Maakeh, create an administrator PIN, store the recovery code away from the device, choose a policy profile, and apply protection. For repeatable deployments and QR enrolment constraints, follow the [Device Owner provisioning runbook](docs/provisioning.md).
 
 ## Security boundary
 
-Device Guard uses Android's official Device Owner and Device Policy APIs. It does not use Accessibility to simulate control, and it does not claim to make consumer hardware impossible to reset or reflash.
+Maakeh uses Android's official Device Owner and Device Policy APIs. It does not use Accessibility to simulate control, and it does not claim to make consumer hardware impossible to reset or reflash.
 
 - Never commit APK-signing keys, update-metadata keys, administrator PINs, recovery codes, device credentials, or customer data.
 - Keep ADB available until the signed on-device update and recovery drill has passed on the exact firmware family being deployed.
@@ -156,4 +162,4 @@ Follow the [production roadmap](docs/production-roadmap.md), [hardware validatio
 
 Contributions, device-test evidence, documentation improvements, OEM compatibility reports, and security-focused review are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md), the [support guide](SUPPORT.md), and the [Code of Conduct](CODE_OF_CONDUCT.md) before participating. Large policy or architecture changes should start with an Issue so recovery and migration effects can be reviewed first.
 
-Device Guard is licensed under the [Apache License 2.0](LICENSE).
+Maakeh is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) (SPDX: `AGPL-3.0-only`). Releases published before this change remain available under Apache-2.0; see [NOTICE](NOTICE).

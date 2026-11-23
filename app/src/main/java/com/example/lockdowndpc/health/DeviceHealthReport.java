@@ -39,7 +39,7 @@ import com.example.lockdowndpc.health.DeviceHealthSnapshot.Updates;
  *
  * <p><b>There is no network code in this class, in this package, or behind it.</b>
  * The export is a string. Producing it is an operator action, taken on the device
- * by an authenticated administrator; Device Guard never generates, schedules,
+ * by an authenticated administrator; Maakeh never generates, schedules,
  * uploads or transmits a health report on its own, and there is no endpoint for
  * it to transmit one to. That is the whole point of doing fleet health this way:
  * the fleet answer is assembled by whoever collects the exports, not by the
@@ -275,7 +275,7 @@ public final class DeviceHealthReport {
 
         StringBuilder out = new StringBuilder();
         out.append(EXPORT_FORMAT).append(NEW_LINE);
-        out.append("# operator-initiated local export; Device Guard transmits nothing on its own")
+        out.append("# operator-initiated local export; Maakeh transmits nothing on its own")
                 .append(NEW_LINE);
         entry(out, "generated-at", generatedAtMillis);
         entry(out, "status", assessment.status().name());

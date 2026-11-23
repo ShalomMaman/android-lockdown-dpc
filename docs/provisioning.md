@@ -1,6 +1,6 @@
 # Device Owner provisioning
 
-Device Guard only enforces policy when Android has made it the **Device Owner**.
+Maakeh only enforces policy when Android has made it the **Device Owner**.
 Every restriction, the kiosk profiles and the signed self-update path check
 `isDeviceOwnerApp` first and refuse to act otherwise, so provisioning is the
 first operation of a deployment and the one that cannot be repaired remotely.
@@ -29,10 +29,10 @@ Three consequences shape everything below:
 
 - Enrolment is destructive. Plan it before the device holds any customer data.
 - A device that fails halfway must be factory reset again rather than patched.
-- The `afw#` Google Play enrolment token does not apply: Device Guard is
+- The `afw#` Google Play enrolment token does not apply: Maakeh is
   distributed as a self-hosted APK, not through managed Google Play.
 
-Device Guard requires Android 8.0 (API 26) or newer.
+Maakeh requires Android 8.0 (API 26) or newer.
 
 ## The identity being provisioned
 
@@ -129,7 +129,7 @@ never committed.
 
 - `PROVISIONING_LEAVE_ALL_SYSTEM_APPS_ENABLED` defaults to **true**. Letting
   provisioning disable system applications can remove the OEM dialer, settings
-  or WebView provider and leave an unusable handset. Device Guard controls
+  or WebView provider and leave an unusable handset. Maakeh controls
   applications through verified policy instead.
 - `PROVISIONING_SKIP_ENCRYPTION` defaults to **false**. Storage encryption stays
   on unless an operator asks for the opposite in writing.
@@ -197,10 +197,10 @@ APK version code, the operator, and the outcome. Never record the Wi-Fi
 passphrase, the administrator PIN or a recovery code.
 
 > **Android 12 (API 31) and later.** Use an APK that includes both setup wizard
-> handlers. Device Guard selects fully managed device mode and cancels setup
+> handlers. Maakeh selects fully managed device mode and cancels setup
 > if Android supplies an allowed-mode list that excludes it. After Android
 > grants Device Owner, the compliance handler shows a progress screen and
-> applies Device Guard's baseline policy through the same verified pass the
+> applies Maakeh's baseline policy through the same verified pass the
 > console uses, recorded as `provisioning-compliance`. Protection is switched
 > on by that pass. The wizard continues only when Android has read the whole
 > policy back; an unverified or crashed pass cancels setup, and the failure is
@@ -215,8 +215,8 @@ passphrase, the administrator PIN or a recovery code.
 
 ## Home filter
 
-1. Use Android 10 (API 29) or later. Complete **Runbook A** to enroll Device
-   Guard as Device Owner, set the administrator PIN, and verify the device has
+1. Use Android 10 (API 29) or later. Complete **Runbook A** to enroll
+   Maakeh as Device Owner, set the administrator PIN, and verify the device has
    only the intended user and no work or private profile.
 2. Install a current official Tailscale Android build (`com.tailscale.ipn`),
    sign in to the intended tailnet, and verify you can reach the home proxy
@@ -234,7 +234,7 @@ passphrase, the administrator PIN or a recovery code.
    Keep the proxy private key on the server. Select **Enable home filter**.
 4. Optionally enter an HTTPS check URL and its expected response. Use an
    endpoint that returns HTTP 200 with the exact configured UTF-8 text only
-   when reached through the home filter. Use a TLS certificate Device Guard
+   when reached through the home filter. Use a TLS certificate Maakeh
    already trusts, and keep the response at or below 1 KiB without redirects.
    The app checks it in the background, with a four-second deadline, and
    does not log the response body.
@@ -245,7 +245,7 @@ passphrase, the administrator PIN or a recovery code.
    that ignore the PAC and verify the home gateway denies unauthorized egress,
    including alternate DNS and IPv6 routes.
 
-Device Guard reads back the VPN signer, per-app uninstall block, always-on VPN
+Maakeh reads back the VPN signer, per-app uninstall block, always-on VPN
 with lockdown and no exemptions, managed configuration, opportunistic
 (automatic) Private DNS, recommended PAC URL, selected CA when configured, and
 device restrictions. The [Tailscale Android managed configuration schema] and
@@ -255,7 +255,7 @@ device restrictions. The [Tailscale Android managed configuration schema] and
 that the installed client applies them. The Android schema currently has no
 published sign-out or account-switching restriction. Check these paths with the
 deployed client and keep the administrator PIN available for local recovery.
-An older Device Guard profile without routing settings must be disabled and
+An older Maakeh profile without routing settings must be disabled and
 configured again. A corrupt configuration records an apply failure and leaves
 the existing device policy in place pending administrator recovery.
 
@@ -270,15 +270,15 @@ filter is enabled. Pausing app protection keeps the home-filter restrictions,
 including install and uninstall controls, app settings, date and time, work
 profile creation and, on Android 15 (API 35) or later, Private Space creation.
 Maintenance cannot relax these controls. While all app installation is
-restricted, plan Device Guard and Tailscale updates with the administrator.
+restricted, plan Maakeh and Tailscale updates with the administrator.
 **Remove certificate** removes the selected CA. **Turn off home filter** clears
 the profile's VPN, managed settings, proxy and selected CA, and releases its
-restrictions. Other Device Guard policies continue to govern their own
+restrictions. Other Maakeh policies continue to govern their own
 restrictions. The Private DNS mode remains automatic after disable.
 
 Android exposes the effective PAC URL through `ConnectivityManager`. This
 read-back cannot distinguish a matching Wi-Fi PAC from the global PAC, so
-Device Guard also requires evidence that the global setter ran successfully.
+Maakeh also requires evidence that the global setter ran successfully.
 A matching Wi-Fi PAC can also leave removal unconfirmed. Some apps ignore
 Android's recommended proxy, and Android may exempt system traffic from VPN
 lockdown. Restrict device egress at the family gateway, use a full tunnel,
@@ -370,10 +370,10 @@ turn-off as off.
 Chrome can be approved only while the filter is on, nothing is pending, and its
 CA (if the profile has one) is installed. `DISALLOW_CONFIG_CREDENTIALS`
 restricts CA removal in Android Settings during the approval, subject to the
-confirmation limit below. Device Guard sets and reads it back before saving a
+confirmation limit below. Maakeh sets and reads it back before saving a
 Chrome approval. Each pass confirms the restriction before checking the CA
-for Chrome's release. The teardown guard must allow teardown before Device
-Guard lifts the restriction, so a refused hide keeps it in force. Every save
+for Chrome's release. The teardown guard must allow teardown before
+Maakeh lifts the restriction, so a refused hide keeps it in force. Every save
 writes a format marker, and one parser reads the record for every use
 (enforcement, kiosk eligibility, the teardown guard, the console and edits): a
 file that exists without the marker — zero bytes, damaged, or an older format —
@@ -408,7 +408,7 @@ cannot be configured as the home filter's VPN.
 **Known limits.**
 
 - After a reboot, a Chrome that was shown before it may stay visible until
-  the first protected pass runs (Device Guard does no direct-boot work). Its
+  the first protected pass runs (Maakeh does no direct-boot work). Its
   managed configuration — the mandatory filter proxy — and the always-on VPN
   lockdown still apply in that window, and the first pass hides it unless it
   continues the last verified pass.
@@ -486,11 +486,11 @@ three:
    adb shell dumpsys device_policy | sed -n '1,40p'
    ```
 
-   A provisioned device shows a device owner entry naming the Device Guard
+   A provisioned device shows a device owner entry naming the Maakeh
    package and `LockdownAdminReceiver`. On builds that support it,
    `adb shell dpm list-owners` prints the same fact more compactly.
 
-2. **The console.** Open Device Guard. The status surface reads
+2. **The console.** Open Maakeh. The status surface reads
    `isDeviceOwnerApp` directly, so it shows ownership rather than an assumption.
 
 3. **A verified policy apply.** After Android 12+ QR enrolment, check the
@@ -538,7 +538,7 @@ of the OEM matrix, not noise.
 ## Recovering a device with the wrong component or identity
 
 There is no supported operator-side transfer of Device Owner to a different
-application. Device Guard implements no ownership transfer, and Android will not
+application. Maakeh implements no ownership transfer, and Android will not
 let an external tool reassign it.
 
 - **Wrong application ID (pilot enrolled where production was intended, or the
@@ -549,16 +549,16 @@ let an external tool reassign it.
   provisioning, handled above.
 - **Right identity, wrong policy.** Not a provisioning problem. Fix it in the
   console with an authenticated administrator session.
-- **Device Guard is the owner but the device must be released.** Device Guard
+- **Maakeh is the owner but the device must be released.** Maakeh
   implements no self-removal: there is no ownership transfer, no
   `clearDeviceOwnerApp` and no remote wipe in this codebase. Releasing a device
   is a wipe.
 - `adb shell dpm remove-active-admin …` only works for test-only builds. A
-  release-signed Device Guard will refuse, by design: an active kiosk that ADB
+  release-signed Maakeh will refuse, by design: an active kiosk that ADB
   could dismantle would not be a kiosk.
 
-**Wiping an already-managed device is harder than wiping a fresh one.** Device
-Guard enforces `DISALLOW_FACTORY_RESET` on every profile, pilot included, so
+**Wiping an already-managed device is harder than wiping a fresh one.**
+Maakeh enforces `DISALLOW_FACTORY_RESET` on every profile, pilot included, so
 once protection has been applied the Settings reset entry is gone. The remaining
 path is the bootloader/recovery wipe for that model, entered with the hardware
 key combination. `DISALLOW_SAFE_BOOT` is enforced as well, so Safe Boot is not

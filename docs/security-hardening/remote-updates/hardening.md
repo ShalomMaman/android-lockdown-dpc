@@ -1,4 +1,4 @@
-# Security Hardening Review: Device Guard remote updates
+# Security Hardening Review: Maakeh remote updates
 
 ## Evidence Basis
 

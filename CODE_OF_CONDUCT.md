@@ -2,7 +2,7 @@
 
 ## Our commitment
 
-Device Guard welcomes contributors, operators, security reviewers, educators,
+Maakeh welcomes contributors, operators, security reviewers, educators,
 and Android developers. We are committed to a respectful, harassment-free
 community for everyone, regardless of experience, identity, background, or
 ability.
@@ -41,7 +41,7 @@ and begin the report title with `Conduct report:`. Do not use a public Issue.
 ## Scope
 
 This code applies in repository Issues, Pull Requests, Discussions, Releases,
-and other public spaces where someone represents the Device Guard project.
+and other public spaces where someone represents the Maakeh project.
 
 This policy is inspired by the
 [Contributor Covenant](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)

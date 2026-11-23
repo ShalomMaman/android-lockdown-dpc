@@ -25,7 +25,7 @@ public final class MaintenanceAppPolicy {
      * <p>The inventory's store facet also contains Android package installers,
      * which are essential system components and are never hidden. The
      * intersection is therefore the reversible set: every package here is both
-     * a store and part of Device Guard's built-in hidden catalogue.
+     * a store and part of Maakeh's built-in hidden catalogue.
      */
     public static Set<String> managedStorePackages() {
         LinkedHashSet<String> packages = new LinkedHashSet<>(LockdownPackages.ALWAYS_BLOCKED);

@@ -1,4 +1,4 @@
-# Device Guard remote contract v1
+# Maakeh remote contract v1
 
 This is the offline contract for [PR 4](../remote-management.md#12-v1-delivery-plan).
 `v1.schema.json` uses JSON Schema Draft 2020-12. Its top level accepts one

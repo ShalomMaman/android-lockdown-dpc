@@ -1,6 +1,6 @@
 # Support
 
-Device Guard is a public pilot. Community support is provided on a best-effort
+Maakeh is a public pilot. Community support is provided on a best-effort
 basis; no device model or firmware is supported unless its evidence appears in
 the [device matrix](docs/device-matrix.md).
 
@@ -10,7 +10,7 @@ the [device matrix](docs/device-matrix.md).
   [GitHub Discussion](https://github.com/ShalomMaman/android-lockdown-dpc/discussions).
 - **Reproducible defects:** open a
   [bug report](https://github.com/ShalomMaman/android-lockdown-dpc/issues/new?template=bug_report.yml)
-  with the Device Guard version, Android version, device model, and sanitized
+  with the Maakeh version, Android version, device model, and sanitized
   reproduction steps.
 - **Feature proposals:** open a
   [feature request](https://github.com/ShalomMaman/android-lockdown-dpc/issues/new?template=feature_request.yml).

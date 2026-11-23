@@ -18,7 +18,7 @@ import com.example.lockdowndpc.R
  *
  *  * API 33+ — the call is forwarded to the platform `LocaleManager`, so the value
  *    set here and the value set from Settings > System > Languages > App languages
- *    are the same value. `res/xml/locales_config.xml` is what makes Device Guard
+ *    are the same value. `res/xml/locales_config.xml` is what makes Maakeh
  *    appear in that system list.
  *  * API 26-32 — AppCompat persists the locales itself and re-applies them to every
  *    `AppCompatActivity` at attach time. The `AppLocalesMetadataHolderService`

@@ -239,7 +239,7 @@ public final class DeviceHealthAssessor {
      * that domain, except the system controls, whose three outcomes are
      * independent facts about different controls. One finding per domain is what
      * keeps the report an answer instead of a log: an unenrolled device says
-     * "Device Guard is not the Device Owner", not that plus six consequences of it.
+     * "Maakeh is not the Device Owner", not that plus six consequences of it.
      *
      * @param nowMillis the current wall clock, passed in so staleness is testable
      */

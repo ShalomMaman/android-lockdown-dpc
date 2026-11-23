@@ -20,7 +20,7 @@
 
     <!-- Screen chrome -->
     <string name="mgmtid_title">Management identity</string>
-    <string name="mgmtid_subtitle">Device Guard exempts the management transport from blocking. This screen shows whether that exemption rests on a signing certificate that was checked, or only on a package name.</string>
+    <string name="mgmtid_subtitle">Maakeh exempts the management transport from blocking. This screen shows whether that exemption rests on a signing certificate that was checked, or only on a package name.</string>
     <string name="mgmtid_admin_row">Management identity</string>
     <string name="mgmtid_admin_supporting">Prove the management transport by its signing certificate</string>
     <string name="mgmtid_loading">Reading the installed signing certificates…</string>

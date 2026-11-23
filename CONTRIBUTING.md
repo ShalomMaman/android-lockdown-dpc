@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping improve Device Guard.
+Thank you for helping improve Maakeh.
 
 ## Before you start
 
@@ -25,4 +25,4 @@ Thank you for helping improve Device Guard.
 
 English is the source locale and Hebrew is a complete RTL translation. New user-facing strings must use Android resources, update both locales, preserve placeholder and plural parity, and render correctly in both LTR and RTL layouts.
 
-By submitting a contribution, you agree that it is licensed under Apache License 2.0.
+By submitting a contribution, you agree that it is licensed under the GNU Affero General Public License v3.0 only (AGPL-3.0-only).

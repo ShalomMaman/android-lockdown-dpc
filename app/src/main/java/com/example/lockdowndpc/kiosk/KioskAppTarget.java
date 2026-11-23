@@ -11,7 +11,7 @@ package com.example.lockdowndpc.kiosk;
  * @param installed               present with {@code FLAG_INSTALLED} for this user
  * @param enabled                 application component state is enabled
  * @param launchable              resolves a MAIN/LAUNCHER entry point
- * @param essentialSystemComponent classified as a package Device Guard must never
+ * @param essentialSystemComponent classified as a package Maakeh must never
  *                                take over (system UI, settings provider, IME, …)
  * @param deviceGuardItself       the DPC's own package
  */

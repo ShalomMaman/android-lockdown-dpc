@@ -1939,7 +1939,7 @@ public final class LockdownPolicyController {
      * the teardown guard require: on while Chrome is approved (or the record is
      * unreadable), released only when the guard would allow a teardown, and
      * otherwise left as it is — so a refused hide keeps the lock. Nothing else
-     * in Device Guard sets this restriction, so releasing it cannot undo
+     * in Maakeh sets this restriction, so releasing it cannot undo
      * another requirement.
      *
      * @return whether Android reports the lock as required ({@code true} when

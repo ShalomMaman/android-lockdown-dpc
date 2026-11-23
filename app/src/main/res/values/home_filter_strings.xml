@@ -27,7 +27,7 @@
     <string name="home_filter_remove_ca">Remove certificate</string>
     <string name="home_filter_retry">Reapply and check</string>
     <string name="home_filter_confirm_enable">Set the VPN to always on and block traffic when it disconnects. Keep the PIN available. Internet access may stop until the VPN works. Install only a certificate from the family filter you trust.</string>
-    <string name="home_filter_confirm_disable">Remove the VPN and proxy settings from this profile, and remove the selected certificate from Android. Other Device Guard controls still follow their own settings.</string>
+    <string name="home_filter_confirm_disable">Remove the VPN and proxy settings from this profile, and remove the selected certificate from Android. Other Maakeh controls still follow their own settings.</string>
     <string name="home_filter_confirm_ca">Install only the public CA certificate from the family filter you trust. Apps that trust this certificate can have their encrypted traffic inspected by that filter.</string>
     <string name="home_filter_confirm_remove_ca">Remove the selected certificate from Android. Apps that need it to use the filter may lose access.</string>
     <string name="home_filter_invalid_settings">Check the VPN package, signer, Tailscale settings and PAC URL. For the optional check, enter both an HTTPS URL and the expected response.</string>

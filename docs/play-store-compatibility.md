@@ -6,8 +6,8 @@ Google Play services and the active WebView provider are untouched. Play Core,
 in-app update, licensing and integrity flows can all reach for the Store
 package itself.
 
-This document describes the explicit, administrator-controlled exception Device
-Guard offers for that case, and — more importantly — the boundary it does not
+This document describes the explicit, administrator-controlled exception
+Maakeh offers for that case, and — more importantly — the boundary it does not
 cross. It is the durable reference for
 [Issue #64](https://github.com/ShalomMaman/android-lockdown-dpc/issues/64).
 
@@ -56,7 +56,7 @@ While Google Play compatibility is on and verified:
 
 ## What the mode costs
 
-**Device Guard cannot install its own signed updates while the installation lock
+**Maakeh cannot install its own signed updates while the installation lock
 is on.** Android applies `DISALLOW_INSTALL_APPS` to the device owner as well,
 which is the same reason that control is opt-in in the first place
 ([`secure-updates.md`](secure-updates.md)). An operator who turns this mode on
@@ -67,12 +67,12 @@ physical service visit. The console says so before the choice is confirmed.
 
 Android's Device Owner APIs can hide or suspend a whole package. They cannot
 portably hide one launcher entry while leaving the package usable by other
-applications. Device Guard therefore makes two different claims, and they are
+applications. Maakeh therefore makes two different claims, and they are
 not the same claim:
 
 | Deployment | What is true |
 | --- | --- |
-| Managed app filtering on an ordinary launcher | The Store package is **available**, so its icon may remain visible and it may be openable. Installation is blocked and verified. Device Guard does **not** claim the Store is hidden. |
+| Managed app filtering on an ordinary launcher | The Store package is **available**, so its icon may remain visible and it may be openable. Installation is blocked and verified. Maakeh does **not** claim the Store is hidden. |
 | Single-app or single-site kiosk | The Store is not part of the surface a user can reach. The lock-task allowlist holds the DPC and, at most, the pinned target; the Store can never be either. The package stays available to dependent applications. |
 
 The kiosk statement rests on rules that exist independently of this feature:

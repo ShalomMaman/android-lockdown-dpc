@@ -7,7 +7,7 @@ import java.util.List;
  *
  * <p>Most capabilities are expressed entirely as Android user restrictions and
  * are handled by the system-policy gateway. Application-store access is the
- * exception: Device Guard also hides known stores as applications, so opening
+ * exception: Maakeh also hides known stores as applications, so opening
  * that capability has to restore their visibility and closing it has to hide
  * them again. Keeping that second device boundary behind a seam lets the
  * coordinator preserve its central rule: a window is never reported as open or

@@ -42,7 +42,7 @@ Android 9 is required. The pilot package cannot silently become the separate pro
 flowchart LR
   Operator -->|USB or temporary ADB TCP| ADB[Android debug bridge]
   ADB -->|install APK| PM[Package Manager]
-  PM --> DPC[Device Guard DPC]
+  PM --> DPC[Maakeh]
   DPC --> Policy[Local policy enforcement]
 ```
 

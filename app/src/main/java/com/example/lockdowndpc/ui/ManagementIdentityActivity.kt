@@ -63,7 +63,7 @@ import java.util.Locale
 /**
  * The authenticated management identity console (Issue #27).
  *
- * Device Guard exempts the management transport from blocking. Until this
+ * Maakeh exempts the management transport from blocking. Until this
  * screen existed, nothing in the console could configure the certificate that
  * exemption is supposed to rest on, so the shipped Tailscale record authenticated
  * a package *name* and any application installed under that name inherited the

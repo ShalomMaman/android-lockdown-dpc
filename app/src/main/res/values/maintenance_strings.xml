@@ -119,7 +119,7 @@
 
     <!-- Capability: application stores and installers -->
     <string name="maint_capability_app_store_access_title">Application stores and installers</string>
-    <string name="maint_capability_app_store_access_consequence">Every installer on the device can run again for the length of the window, including an application store. Device Guard can also install its own signed updates while this is open.</string>
+    <string name="maint_capability_app_store_access_consequence">Every installer on the device can run again for the length of the window, including an application store. Maakeh can also install its own signed updates while this is open.</string>
 
     <!-- Capability: local package install -->
     <string name="maint_capability_local_apk_install_title">Installing a local package file</string>

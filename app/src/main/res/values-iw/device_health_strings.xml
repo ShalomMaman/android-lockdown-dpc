@@ -20,7 +20,7 @@
     <!-- Screen frame -->
     <string name="health_title">בריאות המכשיר</string>
     <string name="health_generated_at">הופק במכשיר הזה ב־%1$s</string>
-    <string name="health_local_only">הדוח הזה מורכב במכשיר עצמו. מגן המכשיר אינו אוסף נתוני שימוש, אין לו שרת ניתוח נתונים, והוא אינו שולח דבר לשום מקום מיוזמתו. ייצוא נכתב רק כאשר מנהל מבקש זאת.</string>
+    <string name="health_local_only">הדוח הזה מורכב במכשיר עצמו. מעקה אינו אוסף נתוני שימוש, אין לו שרת ניתוח נתונים, והוא אינו שולח דבר לשום מקום מיוזמתו. ייצוא נכתב רק כאשר מנהל מבקש זאת.</string>
     <string name="health_status_headline">%1$s — %2$s</string>
     <string name="health_line">%1$s: %2$s</string>
     <string name="health_finding_line">%1$s — %2$s</string>
@@ -69,7 +69,7 @@
     <string name="health_field_reconciliation_at">מתי</string>
     <string name="health_field_android_release">גרסת ⁦Android⁩</string>
     <string name="health_field_build_fingerprint">גרסת הקושחה</string>
-    <string name="health_field_app_version">גרסת מגן המכשיר</string>
+    <string name="health_field_app_version">גרסת מעקה</string>
 
     <!-- Shared values -->
     <string name="health_value_never">מעולם לא</string>
@@ -80,8 +80,8 @@
     <string name="health_value_system_controls">%1$d התבקשו, %2$d הוחלו, %3$d בתקלה, %4$d בהתראה, %5$d אינם זמינים בגרסת ⁦Android⁩ הזאת</string>
 
     <!-- Ownership -->
-    <string name="health_ownership_device_owner">מגן המכשיר הוא ⁦Device Owner⁩</string>
-    <string name="health_ownership_not_device_owner">מגן המכשיר אינו ⁦Device Owner⁩</string>
+    <string name="health_ownership_device_owner">מעקה הוא ⁦Device Owner⁩</string>
+    <string name="health_ownership_not_device_owner">מעקה אינו ⁦Device Owner⁩</string>
     <string name="health_ownership_unknown">לא ניתן היה לקרוא את הבעלות</string>
 
     <!-- Policy verification -->
@@ -128,8 +128,8 @@
 
     <!-- Findings -->
     <string name="health_finding_snapshot_unavailable">לא ניתן היה לקרוא את מצב המכשיר הזה, ולכן אי אפשר לדווח על שום דבר בו כתקין.</string>
-    <string name="health_finding_device_owner_missing">מגן המכשיר אינו ⁦Device Owner⁩ של המכשיר הזה, ולכן אי אפשר לאכוף שום מדיניות.</string>
-    <string name="health_finding_device_owner_unknown">מגן המכשיר לא הצליח לקרוא אם הוא עדיין ⁦Device Owner⁩ של המכשיר הזה.</string>
+    <string name="health_finding_device_owner_missing">מעקה אינו ⁦Device Owner⁩ של המכשיר הזה, ולכן אי אפשר לאכוף שום מדיניות.</string>
+    <string name="health_finding_device_owner_unknown">מעקה לא הצליח לקרוא אם הוא עדיין ⁦Device Owner⁩ של המכשיר הזה.</string>
     <string name="health_finding_policy_verification_failed">מעבר המדיניות האחרון קרא בחזרה את הפלטפורמה ולא הסכים איתה.</string>
     <string name="health_finding_policy_verification_unknown">לא ניתן היה לקרוא את מצב המדיניות השמור.</string>
     <string name="health_finding_policy_never_verified">ההגנה דלוקה, אבל אף מעבר לא קרא בחזרה את הפלטפורמה כדי לאשר זאת.</string>
@@ -174,7 +174,7 @@
     <string name="health_row_supporting">מדיניות, קיוסק, עדכונים וזהות ניהול בתשובה אחת</string>
     <string name="health_export_action">העתקת ייצוא מצונזר</string>
     <string name="health_export_title">להעתיק את הדוח הזה?</string>
-    <string name="health_export_body">הייצוא משמיט את קוד המנהל, את קוד השחזור, את כתובת הקיוסק מעבר למקור שלה, את רשימת האפליקציות המותקנות וכל טקסט חופשי. הוא מונח בלוח ההעתקה של המכשיר הזה ולא בשום מקום אחר. מגן המכשיר אינו שולח אותו לשום מקום.</string>
+    <string name="health_export_body">הייצוא משמיט את קוד המנהל, את קוד השחזור, את כתובת הקיוסק מעבר למקור שלה, את רשימת האפליקציות המותקנות וכל טקסט חופשי. הוא מונח בלוח ההעתקה של המכשיר הזה ולא בשום מקום אחר. מעקה אינו שולח אותו לשום מקום.</string>
     <string name="health_export_confirm">העתקה</string>
     <string name="health_export_cancel">ביטול</string>
     <string name="health_export_copied">הדוח המצונזר הועתק ללוח ההעתקה</string>

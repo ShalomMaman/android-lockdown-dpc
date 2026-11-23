@@ -122,7 +122,7 @@ public final class ChromeFilterExemption {
 
     /**
      * Whether the exemption may act at all. Chrome as the WebView provider is
-     * never hidden by Device Guard, so it stays with the existing code path.
+     * never hidden by Maakeh, so it stays with the existing code path.
      */
     public static boolean inScope(int sdk, String webViewProvider) {
         return sdk >= MIN_SDK && !BuiltInBlockExemptions.CHROME.equals(webViewProvider);
