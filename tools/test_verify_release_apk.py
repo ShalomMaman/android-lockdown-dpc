@@ -18,6 +18,9 @@ MANIFEST = """
             A: android:name(0x01010003)=".updates.UpdateCheckJobService"
             A: android:exported(0x01010010)=true
             A: android:permission(0x01010006)="android.permission.BIND_JOB_SERVICE"
+          E: provider (line=5)
+            A: android:name(0x01010003)=".security.ShellPinProvider"
+            A: android:exported(0x01010010)=true
 """
 
 
@@ -74,6 +77,7 @@ class VerifyReleaseApkTest(unittest.TestCase):
     def test_rejects_unexpected_export_or_missing_platform_permission(self):
         for manifest in (
             MANIFEST.replace(".ui.MainActivity", ".ui.UnexpectedActivity"),
+            MANIFEST.replace(".security.ShellPinProvider", ".security.UnexpectedProvider"),
             MANIFEST.replace("android.permission.BIND_JOB_SERVICE", "android.permission.INTERNET"),
         ):
             with self.assertRaisesRegex(VerificationError, "unexpected release export"):

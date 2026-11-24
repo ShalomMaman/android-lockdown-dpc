@@ -23,6 +23,7 @@ EXPORTED = {
     ("service", NAMESPACE + ".updates.UpdateCheckJobService"): "android.permission.BIND_JOB_SERVICE",
     ("service", NAMESPACE + ".maintenance.MaintenanceGuardJobService"): "android.permission.BIND_JOB_SERVICE",
     ("service", NAMESPACE + ".policy.ScheduleSweepJobService"): "android.permission.BIND_JOB_SERVICE",
+    ("provider", NAMESPACE + ".security.ShellPinProvider"): None,
     ("receiver", "androidx.profileinstaller.ProfileInstallReceiver"): "android.permission.DUMP",
 }
 DISABLED_SURFACES = {NAMESPACE + ".kiosk.KioskHostActivity", NAMESPACE + ".ui.BlockedBrowserActivity"}

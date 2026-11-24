@@ -366,6 +366,8 @@
     <string name="audit_kiosk_admin_entry">התבקשה כניסת מנהל ממסך הקיוסק</string>
     <string name="audit_pin_set">קוד המנהל הוגדר</string>
     <string name="audit_pin_replaced">קוד המנהל הוחלף</string>
+    <string name="audit_pin_set_shell">קוד המנהל הוגדר ממחשב (⁦ADB⁩)</string>
+    <string name="audit_pin_replaced_shell">קוד המנהל הוחלף ממחשב (⁦ADB⁩)</string>
     <string name="audit_apply">מדיניות ההגנה הופעלה או רועננה</string>
     <string name="audit_pause">מדיניות ההגנה הושהתה</string>
     <string name="audit_recovery">נוצר קוד שחזור חדש</string>

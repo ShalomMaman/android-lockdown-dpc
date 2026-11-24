@@ -149,6 +149,42 @@ public final class AdminPinStore {
         return true;
     }
 
+    /**
+     * Atomically verifies {@code current} through the normal lockout policy and,
+     * on a plain PIN match (no recovery-code grant), writes {@code newPin}.
+     */
+    static synchronized ReplaceResult replaceWithCurrent(Context context, String current, String newPin) {
+        return PROCESS.replaceWithCurrentLocked(context, current, newPin, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    private ReplaceResult replaceWithCurrentLocked(
+            Context context,
+            String current,
+            String newPin,
+            HmacKeySource keySource
+    ) {
+        if (!isValidPin(newPin)) {
+            throw new IllegalArgumentException(PIN_FORMAT_ERROR);
+        }
+        Verification verification = verifyLocked(context, current, keySource);
+        if (verification.status() != Status.SUCCESS) {
+            return new ReplaceResult(verification, false);
+        }
+        if (verification.recoveryGrant() != null) {
+            clearRecoveryGrant();
+            return new ReplaceResult(verification, false);
+        }
+        if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
+            return new ReplaceResult(verification, false);
+        }
+        SharedPreferences prefs = prefs(context);
+        if (!hasPin(prefs) || liveRecoveryGrant(context) != null) {
+            return new ReplaceResult(verification, false);
+        }
+        writePin(prefs, newPin, keySource);
+        return new ReplaceResult(verification, true);
+    }
+
     /** Returns the new recovery code, or null when the grant can no longer authorize a reset. */
     public static String completeRecoveryPinReset(Context context, RecoveryGrant grant, String pin) {
         return PROCESS.completeRecoveryPinReset(context, grant, pin, AdminPinStore::getOrCreateHmacKey);
@@ -579,11 +615,20 @@ public final class AdminPinStore {
     public static final class RecoveryGrant {
         private final SharedPreferences prefs;
         private final Credential recovery;
-        private final long issuedAt = SystemClock.elapsedRealtime();
+        private final long issuedAt;
 
         private RecoveryGrant(SharedPreferences prefs, Credential recovery) {
+            this(prefs, recovery, SystemClock.elapsedRealtime());
+        }
+
+        private RecoveryGrant(SharedPreferences prefs, Credential recovery, long issuedAt) {
             this.prefs = prefs;
             this.recovery = recovery;
+            this.issuedAt = issuedAt;
+        }
+
+        static RecoveryGrant forTest() {
+            return new RecoveryGrant(null, null, 0L);
         }
 
         private long remainingMillis() {
@@ -601,4 +646,6 @@ public final class AdminPinStore {
     }
 
     public record Verification(Status status, long remainingMillis, RecoveryGrant recoveryGrant) {}
+
+    record ReplaceResult(Verification verification, boolean replaced) {}
 }

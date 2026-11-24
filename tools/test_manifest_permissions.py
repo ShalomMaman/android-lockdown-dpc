@@ -61,6 +61,20 @@ class ManifestPermissionsTest(unittest.TestCase):
             ".admin.PolicyComplianceActivity", "android.app.action.ADMIN_POLICY_COMPLIANCE"
         )
 
+    def test_shell_pin_provider_uses_application_id_authority_and_is_exported(self):
+        manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
+        providers = [
+            provider
+            for provider in manifest.findall("application/provider")
+            if provider.get(ANDROID_NAME) == ".security.ShellPinProvider"
+        ]
+        self.assertEqual(1, len(providers))
+        provider = providers[0]
+        self.assertEqual("true", provider.get(f"{ANDROID}exported"))
+        self.assertEqual("${applicationId}.shellpin", provider.get(f"{ANDROID}authorities"))
+        self.assertEqual("false", provider.get(f"{ANDROID}directBootAware"))
+        self.assertIsNone(provider.get(f"{ANDROID}permission"))
+
     def assert_provisioning_activity(self, name, action):
         manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
         handlers = [
