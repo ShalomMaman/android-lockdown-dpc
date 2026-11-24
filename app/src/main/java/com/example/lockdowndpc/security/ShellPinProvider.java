@@ -14,6 +14,8 @@ import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.policy.AuditEvent;
 import com.example.lockdowndpc.policy.AuditLog;
 
+import java.util.Set;
+
 /**
  * Shell-only {@link ContentProvider} that allows setup automation over ADB to
  * set, verify, or replace the local administrator PIN without UI interaction.
@@ -45,7 +47,16 @@ public final class ShellPinProvider extends ContentProvider {
     static final String STATUS_MISMATCH = "mismatch";
     static final String STATUS_LOCKED = "locked";
     static final String STATUS_NOT_CONFIGURED = "not-configured";
+    static final String STATUS_PIN_SAVED_RECOVERY_FAILED = "pin-saved-recovery-failed";
     static final String STATUS_ERROR = "error";
+
+    private static final Set<String> ALLOWED_SECURITY_ERROR_CODES = Set.of(
+            "admin-pin-save-failed",
+            "recovery-code-mode-refused",
+            "recovery-pin-reset-pending",
+            "recovery-code-save-failed",
+            "recovery-code-create-failed"
+    );
 
     interface PinStore {
         boolean hasPin();
@@ -54,7 +65,7 @@ public final class ShellPinProvider extends ContentProvider {
 
         AdminPinStore.Verification verify(String pin);
 
-        boolean replacePinAfterVerification(String pin);
+        AdminPinStore.ReplaceResult replaceWithCurrent(String currentPin, String newPin);
 
         String rotateRecoveryCode();
 
@@ -74,6 +85,10 @@ public final class ShellPinProvider extends ContentProvider {
 
         static Result locked(long remainingMillis) {
             return new Result(STATUS_LOCKED, null, remainingMillis, null);
+        }
+
+        static Result pinSavedRecoveryFailed(String code) {
+            return new Result(STATUS_PIN_SAVED_RECOVERY_FAILED, null, null, code);
         }
 
         static Result error(String code) {
@@ -154,12 +169,7 @@ public final class ShellPinProvider extends ContentProvider {
         if (!store.setInitialPin(pin)) {
             return Result.statusOnly(STATUS_REFUSED);
         }
-        String recovery = store.rotateRecoveryCode();
-        if (recovery == null || recovery.isEmpty()) {
-            return Result.error("recovery-code-unavailable");
-        }
-        store.recordAudit(false);
-        return Result.ok(recovery);
+        return finishPinWrite(store, false);
     }
 
     private static Result handleVerify(String pin, PinStore store) {
@@ -167,21 +177,34 @@ public final class ShellPinProvider extends ContentProvider {
     }
 
     private static Result handleReplace(String currentPin, String newPin, PinStore store) {
-        Result verified = mapVerification(store.verify(currentPin), store);
-        if (!STATUS_MATCH.equals(verified.status())) {
-            return verified;
-        }
         if (!AdminPinStore.isValidPin(newPin)) {
             return Result.statusOnly(STATUS_INVALID_PIN);
         }
-        if (!store.replacePinAfterVerification(newPin)) {
+        AdminPinStore.ReplaceResult replaceResult = store.replaceWithCurrent(currentPin, newPin);
+        if (replaceResult == null) {
+            return Result.error("replace-failed");
+        }
+        Result verified = mapVerification(replaceResult.verification(), store);
+        if (!STATUS_MATCH.equals(verified.status())) {
+            return verified;
+        }
+        if (!replaceResult.replaced()) {
             return Result.statusOnly(STATUS_REFUSED);
         }
-        String recovery = store.rotateRecoveryCode();
-        if (recovery == null || recovery.isEmpty()) {
-            return Result.error("recovery-code-unavailable");
+        return finishPinWrite(store, true);
+    }
+
+    private static Result finishPinWrite(PinStore store, boolean replaced) {
+        store.recordAudit(replaced);
+        String recovery;
+        try {
+            recovery = store.rotateRecoveryCode();
+        } catch (RuntimeException exception) {
+            return Result.pinSavedRecoveryFailed(safeErrorCode(exception));
         }
-        store.recordAudit(true);
+        if (recovery == null || recovery.trim().isEmpty()) {
+            return Result.pinSavedRecoveryFailed("recovery-code-unavailable");
+        }
         return Result.ok(recovery);
     }
 
@@ -204,12 +227,13 @@ public final class ShellPinProvider extends ContentProvider {
         };
     }
 
-    private static String safeErrorCode(Exception exception) {
+    static String safeErrorCode(Exception exception) {
         if (exception instanceof SecurityException) {
             String message = exception.getMessage();
-            if (message != null && !message.trim().isEmpty()) {
+            if (message != null && ALLOWED_SECURITY_ERROR_CODES.contains(message)) {
                 return message;
             }
+            return "security-exception";
         }
         String name = exception.getClass().getSimpleName();
         return name.isEmpty() ? "Exception" : name;
@@ -297,8 +321,8 @@ public final class ShellPinProvider extends ContentProvider {
         }
 
         @Override
-        public boolean replacePinAfterVerification(String pin) {
-            return AdminPinStore.replacePinAfterVerification(context, pin);
+        public AdminPinStore.ReplaceResult replaceWithCurrent(String currentPin, String newPin) {
+            return AdminPinStore.replaceWithCurrent(context, currentPin, newPin);
         }
 
         @Override
@@ -317,7 +341,9 @@ public final class ShellPinProvider extends ContentProvider {
                 AuditLog.append(
                         context,
                         replaced ? AuditEvent.PIN_REPLACED : AuditEvent.PIN_SET,
-                        context.getString(replaced ? R.string.audit_pin_replaced : R.string.audit_pin_set)
+                        context.getString(replaced
+                                ? R.string.audit_pin_replaced_shell
+                                : R.string.audit_pin_set_shell)
                 );
             } catch (RuntimeException ignored) {
                 // Best-effort audit record; never fail the PIN operation or log credentials.

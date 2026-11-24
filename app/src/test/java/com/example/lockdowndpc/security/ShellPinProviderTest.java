@@ -133,6 +133,20 @@ public final class ShellPinProviderTest {
     }
 
     @Test
+    public void verifyWithRecoveryGrantMapsToMismatchAndClearsGrant() {
+        FakePinStore store = new FakePinStore();
+        store.nextVerification = new AdminPinStore.Verification(
+                AdminPinStore.Status.SUCCESS, 0L, AdminPinStore.RecoveryGrant.forTest());
+
+        ShellPinProvider.Result result = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_VERIFY, null, "1111-2222-3333", store);
+
+        assertEquals(ShellPinProvider.STATUS_MISMATCH, result.status());
+        assertNull(result.remainingMillis());
+        assertEquals(1, store.clearRecoveryGrantCalls);
+    }
+
+    @Test
     public void replaceRefusedOnWrongCurrentPin() {
         FakePinStore store = new FakePinStore();
         store.hasPin = true;
@@ -143,6 +157,23 @@ public final class ShellPinProviderTest {
 
         assertEquals(ShellPinProvider.STATUS_MISMATCH, result.status());
         assertEquals("999999", store.lastVerifiedPin);
+        assertNull(store.writtenReplacementPin);
+        assertEquals(0, store.rotateCalls);
+        assertEquals(0, store.auditCalls);
+    }
+
+    @Test
+    public void replaceWithRecoveryGrantMapsToMismatchAndClearsGrant() {
+        FakePinStore store = new FakePinStore();
+        store.hasPin = true;
+        store.nextVerification = new AdminPinStore.Verification(
+                AdminPinStore.Status.SUCCESS, 0L, AdminPinStore.RecoveryGrant.forTest());
+
+        ShellPinProvider.Result result = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_REPLACE, "1111-2222-3333", "654321", store);
+
+        assertEquals(ShellPinProvider.STATUS_MISMATCH, result.status());
+        assertEquals(1, store.clearRecoveryGrantCalls);
         assertNull(store.writtenReplacementPin);
         assertEquals(0, store.rotateCalls);
         assertEquals(0, store.auditCalls);
@@ -178,6 +209,23 @@ public final class ShellPinProviderTest {
     }
 
     @Test
+    public void replaceReturnsRefusedWhenStoreDeclinesWrite() {
+        FakePinStore store = new FakePinStore();
+        store.hasPin = true;
+        store.nextVerification = new AdminPinStore.Verification(AdminPinStore.Status.SUCCESS, 0L, null);
+        store.replaceResult = false;
+
+        ShellPinProvider.Result result = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_REPLACE, "123456", "654321", store);
+
+        assertEquals(ShellPinProvider.STATUS_REFUSED, result.status());
+        assertNull(result.recovery());
+        assertNull(store.writtenReplacementPin);
+        assertEquals(0, store.rotateCalls);
+        assertEquals(0, store.auditCalls);
+    }
+
+    @Test
     public void replaceUpdatesPinAndRotatesRecoveryOnMatch() {
         FakePinStore store = new FakePinStore();
         store.hasPin = true;
@@ -197,14 +245,93 @@ public final class ShellPinProviderTest {
     }
 
     @Test
-    public void exceptionsReturnSafeErrorCodesWithoutLeakingSecrets() {
-        FakePinStore securityFailureStore = new FakePinStore();
-        securityFailureStore.throwOnSetInitial = new SecurityException("admin-pin-save-failed");
+    public void setInitialReportsPinSavedWhenRecoveryRotationFailsOrReturnsEmpty() {
+        FakePinStore throwingStore = new FakePinStore();
+        throwingStore.throwOnRotate = new SecurityException("recovery-code-save-failed");
 
-        ShellPinProvider.Result securityResult = ShellPinProvider.handleCall(
-                SHELL_UID, ShellPinProvider.METHOD_SET_INITIAL, null, "123456", securityFailureStore);
-        assertEquals(ShellPinProvider.STATUS_ERROR, securityResult.status());
-        assertEquals("admin-pin-save-failed", securityResult.code());
+        ShellPinProvider.Result thrown = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_SET_INITIAL, null, "123456", throwingStore);
+        assertEquals(ShellPinProvider.STATUS_PIN_SAVED_RECOVERY_FAILED, thrown.status());
+        assertNull(thrown.recovery());
+        assertEquals("recovery-code-save-failed", thrown.code());
+        assertEquals("123456", throwingStore.writtenInitialPin);
+        assertEquals(1, throwingStore.auditCalls);
+        assertFalse(throwingStore.lastAuditReplaced);
+
+        FakePinStore emptyStore = new FakePinStore();
+        emptyStore.nextRecoveryCode = "";
+
+        ShellPinProvider.Result empty = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_SET_INITIAL, null, "123456", emptyStore);
+        assertEquals(ShellPinProvider.STATUS_PIN_SAVED_RECOVERY_FAILED, empty.status());
+        assertNull(empty.recovery());
+        assertEquals("recovery-code-unavailable", empty.code());
+        assertEquals("123456", emptyStore.writtenInitialPin);
+        assertEquals(1, emptyStore.auditCalls);
+        assertFalse(emptyStore.lastAuditReplaced);
+    }
+
+    @Test
+    public void replaceReportsPinSavedWhenRecoveryRotationFailsOrReturnsEmpty() {
+        FakePinStore throwingStore = new FakePinStore();
+        throwingStore.hasPin = true;
+        throwingStore.nextVerification = new AdminPinStore.Verification(AdminPinStore.Status.SUCCESS, 0L, null);
+        throwingStore.throwOnRotate = new SecurityException("recovery-code-create-failed");
+
+        ShellPinProvider.Result thrown = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_REPLACE, "123456", "654321", throwingStore);
+        assertEquals(ShellPinProvider.STATUS_PIN_SAVED_RECOVERY_FAILED, thrown.status());
+        assertNull(thrown.recovery());
+        assertEquals("recovery-code-create-failed", thrown.code());
+        assertEquals("654321", throwingStore.writtenReplacementPin);
+        assertEquals(1, throwingStore.auditCalls);
+        assertTrue(throwingStore.lastAuditReplaced);
+
+        FakePinStore emptyStore = new FakePinStore();
+        emptyStore.hasPin = true;
+        emptyStore.nextVerification = new AdminPinStore.Verification(AdminPinStore.Status.SUCCESS, 0L, null);
+        emptyStore.nextRecoveryCode = null;
+
+        ShellPinProvider.Result empty = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_REPLACE, "123456", "654321", emptyStore);
+        assertEquals(ShellPinProvider.STATUS_PIN_SAVED_RECOVERY_FAILED, empty.status());
+        assertNull(empty.recovery());
+        assertEquals("recovery-code-unavailable", empty.code());
+        assertEquals("654321", emptyStore.writtenReplacementPin);
+        assertEquals(1, emptyStore.auditCalls);
+        assertTrue(emptyStore.lastAuditReplaced);
+    }
+
+    @Test
+    public void exceptionsReturnSafeErrorCodesWithoutLeakingSecrets() {
+        String[] allowedCodes = {
+                "admin-pin-save-failed",
+                "recovery-code-mode-refused",
+                "recovery-pin-reset-pending",
+                "recovery-code-save-failed",
+                "recovery-code-create-failed"
+        };
+        for (String allowedCode : allowedCodes) {
+            FakePinStore securityFailureStore = new FakePinStore();
+            securityFailureStore.throwOnSetInitial = new SecurityException(allowedCode);
+
+            ShellPinProvider.Result securityResult = ShellPinProvider.handleCall(
+                    SHELL_UID, ShellPinProvider.METHOD_SET_INITIAL, null, "123456", securityFailureStore);
+            assertEquals(ShellPinProvider.STATUS_ERROR, securityResult.status());
+            assertEquals(allowedCode, securityResult.code());
+        }
+
+        FakePinStore unknownSecurityStore = new FakePinStore();
+        unknownSecurityStore.throwOnSetInitial = new SecurityException("unexpected detail 123456");
+
+        ShellPinProvider.Result unknownSecurityResult = ShellPinProvider.handleCall(
+                SHELL_UID, ShellPinProvider.METHOD_SET_INITIAL, null, "123456", unknownSecurityStore);
+        assertEquals(ShellPinProvider.STATUS_ERROR, unknownSecurityResult.status());
+        assertEquals("security-exception", unknownSecurityResult.code());
+        assertFalse(unknownSecurityResult.code().contains("123456"));
+
+        assertEquals("security-exception", ShellPinProvider.safeErrorCode(new SecurityException()));
+        assertEquals("security-exception", ShellPinProvider.safeErrorCode(new SecurityException("   ")));
 
         FakePinStore runtimeFailureStore = new FakePinStore();
         runtimeFailureStore.throwOnSetInitial = new IllegalStateException("sensitive 123456");
@@ -240,12 +367,15 @@ public final class ShellPinProviderTest {
         AdminPinStore.Verification nextVerification =
                 new AdminPinStore.Verification(AdminPinStore.Status.INVALID, 0L, null);
         RuntimeException throwOnSetInitial;
+        RuntimeException throwOnReplace;
+        RuntimeException throwOnRotate;
 
         String writtenInitialPin;
         String writtenReplacementPin;
         String lastVerifiedPin;
         int rotateCalls;
         int auditCalls;
+        int clearRecoveryGrantCalls;
         boolean lastAuditReplaced;
 
         @Override
@@ -276,20 +406,38 @@ public final class ShellPinProviderTest {
         }
 
         @Override
-        public boolean replacePinAfterVerification(String pin) {
+        public AdminPinStore.ReplaceResult replaceWithCurrent(String currentPin, String newPin) {
             touched = true;
-            if (!replaceResult) {
-                return false;
+            lastVerifiedPin = currentPin;
+            if (throwOnReplace != null) {
+                throw throwOnReplace;
             }
-            writtenReplacementPin = pin;
-            return true;
+            if (nextVerification == null
+                    || nextVerification.status() != AdminPinStore.Status.SUCCESS
+                    || nextVerification.recoveryGrant() != null) {
+                return new AdminPinStore.ReplaceResult(nextVerification, false);
+            }
+            if (!replaceResult) {
+                return new AdminPinStore.ReplaceResult(nextVerification, false);
+            }
+            writtenReplacementPin = newPin;
+            return new AdminPinStore.ReplaceResult(nextVerification, true);
         }
 
         @Override
         public String rotateRecoveryCode() {
             touched = true;
             rotateCalls++;
+            if (throwOnRotate != null) {
+                throw throwOnRotate;
+            }
             return nextRecoveryCode;
+        }
+
+        @Override
+        public void clearRecoveryGrant() {
+            touched = true;
+            clearRecoveryGrantCalls++;
         }
 
         @Override

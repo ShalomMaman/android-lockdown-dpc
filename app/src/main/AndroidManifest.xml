@@ -250,16 +250,19 @@
         </receiver>
 
         <!--
-            Shell-only administrator PIN bridge for scripted setup over ADB.
-            Exported without a manifest permission because Android has no
-            shell-only permission; ShellPinProvider.call checks
-            Binder.getCallingUid() == Process.SHELL_UID (2000) as its first
-            line and refuses every other caller, including root (UID 0). This
-            grants the same power as a person holding the phone at first setup:
-            set-initial only works when no PIN is configured, replace requires
-            the current PIN through the normal lockout policy, and USB
-            debugging is disabled on locked devices so the provider is only
-            reachable during setup.
+            Shell-only administrator PIN bridge for scripted setup and
+            maintenance over ADB. Exported without a manifest permission
+            because Android has no shell-only permission; ShellPinProvider.call
+            checks Binder.getCallingUid() == Process.SHELL_UID (2000) as its
+            first line and refuses every other caller, including root (UID 0).
+            Anyone with an authorized ADB connection (or a tool running as the
+            shell UID) can reach this provider whenever USB debugging is
+            allowed: DISALLOW_DEBUGGING_FEATURES is on by default only on
+            production builds, pilot builds keep ADB enabled as the break-glass
+            path, and an explicit production maintenance window can clear it.
+            Within that boundary, set-initial only works when no PIN is
+            configured, and replace and verify enforce the same progressive
+            lockout policy as the on-screen PIN prompt.
         -->
         <provider
             android:name=".security.ShellPinProvider"

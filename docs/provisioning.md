@@ -477,11 +477,11 @@ self-update drill in the production roadmap has passed on real hardware.
 
 ## Setting the admin PIN from a computer
 
-While USB debugging is enabled during initial setup, an operator or provisioning
-script can set, verify, or replace the local administrator PIN over ADB through
-Maakeh's shell-only provider (`<applicationId>.shellpin`, e.g.
-`com.example.lockdowndpc.shellpin` on pilot builds or
-`il.co.shalommaman.deviceguard.shellpin` on production builds).
+Whenever USB debugging is allowed, anyone with an authorized ADB connection (or
+a tool running as the shell UID) can set, verify, or replace the local
+administrator PIN over ADB through Maakeh's shell-only provider
+(`<applicationId>.shellpin`, e.g. `com.example.lockdowndpc.shellpin` on pilot
+builds or `il.co.shalommaman.deviceguard.shellpin` on production builds).
 
 ```bash
 # Set the initial administrator PIN (6 to 12 digits; refuses if a PIN already exists)
@@ -496,11 +496,18 @@ adb shell content call --uri content://<authority> --method replace \
 ```
 
 The provider accepts only the ADB shell caller (UID `2000`) and refuses every
-other UID, including `root` (UID `0`). On success, `set-initial` and `replace`
-return `status=ok` together with the generated `recovery` code — store that
-recovery code safely off the device. USB debugging is disabled on locked
-devices, so this path is only reachable during setup or an explicit maintenance
-window.
+other UID, including `root` (UID `0`). `DISALLOW_DEBUGGING_FEATURES` is enabled
+by default only on production builds: pilot builds keep ADB enabled as the
+break-glass path, and a production maintenance window can clear it temporarily,
+so treat the provider as reachable whenever USB debugging is allowed on the
+device. Within that boundary, `set-initial` only works when no PIN is
+configured, and `verify` and `replace` enforce the same progressive lockout
+policy as the on-screen PIN prompt (and do not accept a recovery code). On
+success, `set-initial` and `replace` return `status=ok` together with the
+generated `recovery` code — store that recovery code safely off the device. If
+the PIN was saved but rotating the recovery code failed, the call returns
+`status=pin-saved-recovery-failed` with an error `code` so the caller knows the
+new PIN took effect and must generate a recovery code separately.
 
 > **Security note.** The PIN passed via `--extra` appears briefly in the
 > device's shell process list (and in the computer's shell history if typed

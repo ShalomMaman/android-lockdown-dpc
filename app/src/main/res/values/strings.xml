@@ -343,6 +343,8 @@
     <string name="audit_kiosk_admin_entry">Administrator entry was requested from the kiosk screen</string>
     <string name="audit_pin_set">The administrator PIN was set</string>
     <string name="audit_pin_replaced">The administrator PIN was replaced</string>
+    <string name="audit_pin_set_shell">The administrator PIN was set from a computer (ADB)</string>
+    <string name="audit_pin_replaced_shell">The administrator PIN was replaced from a computer (ADB)</string>
     <string name="audit_apply">The protection policy was applied or refreshed</string>
     <string name="audit_pause">The protection policy was paused</string>
     <string name="audit_recovery">A new recovery code was generated</string>
