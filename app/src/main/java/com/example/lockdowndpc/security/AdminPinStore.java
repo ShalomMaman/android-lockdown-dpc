@@ -149,6 +149,19 @@ public final class AdminPinStore {
         return true;
     }
 
+    /** Replaces the PIN after the caller has verified the current PIN directly. */
+    static synchronized boolean replacePinAfterVerification(Context context, String pin) {
+        if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
+            return false;
+        }
+        SharedPreferences prefs = prefs(context);
+        if (!hasPin(prefs) || PROCESS.liveRecoveryGrant(context) != null) {
+            return false;
+        }
+        writePin(prefs, pin, AdminPinStore::getOrCreateHmacKey);
+        return true;
+    }
+
     /** Returns the new recovery code, or null when the grant can no longer authorize a reset. */
     public static String completeRecoveryPinReset(Context context, RecoveryGrant grant, String pin) {
         return PROCESS.completeRecoveryPinReset(context, grant, pin, AdminPinStore::getOrCreateHmacKey);

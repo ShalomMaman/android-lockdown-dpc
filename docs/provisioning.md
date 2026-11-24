@@ -475,6 +475,38 @@ ADB remains the pilot's break-glass recovery path and is deliberately still
 enabled by the pilot profile. It cannot be withdrawn until the signed
 self-update drill in the production roadmap has passed on real hardware.
 
+## Setting the admin PIN from a computer
+
+While USB debugging is enabled during initial setup, an operator or provisioning
+script can set, verify, or replace the local administrator PIN over ADB through
+Maakeh's shell-only provider (`<applicationId>.shellpin`, e.g.
+`com.example.lockdowndpc.shellpin` on pilot builds or
+`il.co.shalommaman.deviceguard.shellpin` on production builds).
+
+```bash
+# Set the initial administrator PIN (6 to 12 digits; refuses if a PIN already exists)
+adb shell content call --uri content://<authority> --method set-initial --extra pin:s:<PIN>
+
+# Verify the administrator PIN (goes through the normal progressive lockout policy)
+adb shell content call --uri content://<authority> --method verify --extra pin:s:<PIN>
+
+# Replace the administrator PIN (requires the current PIN and rotates the recovery code)
+adb shell content call --uri content://<authority> --method replace \
+  --extra current:s:<CURRENT_PIN> --extra pin:s:<NEW_PIN>
+```
+
+The provider accepts only the ADB shell caller (UID `2000`) and refuses every
+other UID, including `root` (UID `0`). On success, `set-initial` and `replace`
+return `status=ok` together with the generated `recovery` code — store that
+recovery code safely off the device. USB debugging is disabled on locked
+devices, so this path is only reachable during setup or an explicit maintenance
+window.
+
+> **Security note.** The PIN passed via `--extra` appears briefly in the
+> device's shell process list (and in the computer's shell history if typed
+> interactively). Run these commands only over USB on a trusted computer, and
+> never log or commit the PIN or the returned recovery code.
+
 ## Prove Device Owner took effect
 
 Never report an enrolment as successful because the wizard finished. Confirm all
