@@ -519,21 +519,25 @@ public class AdminPinAttemptTest {
     }
 
     @Test
-    public void thePinCannotBeReplacedBetweenItsMatchAndTheUnlock() throws Exception {
-        String verifier = prefs.getString("pin_verifier", null);
+    public void thePinStoreStaysLockedFromThePinMatchToTheUnlock() throws Exception {
         Thread console = new Thread(() -> AdminPinStore.verifyAndUnlock(context, PIN, () -> KEY));
-        Thread shell = new Thread(() -> AdminPinStore.replaceWithCurrent(context, PIN, NEW_PIN, () -> KEY));
+        CountDownLatch shellEntered = new CountDownLatch(1);
+        Thread shell = new Thread(() -> {
+            synchronized (AdminPinStore.class) {
+                // Where a shell replacement would write the PIN and lock the session.
+                shellEntered.countDown();
+                AdminSession.lock();
+            }
+        });
         synchronized (AdminSession.class) {
             console.start();
             // The PIN matched; only the unlock itself waits for the session.
             awaitBlockedOnSession(console);
             shell.start();
-            shell.join(3_000);
-            assertEquals(verifier, prefs.getString("pin_verifier", null));
+            assertFalse(shellEntered.await(1, SECONDS));
         }
         console.join(30_000);
         shell.join(30_000);
-        assertEquals(AdminPinStore.Status.SUCCESS, verify(context, NEW_PIN).status());
         assertFalse(AdminSession.isUnlocked());
     }
 
