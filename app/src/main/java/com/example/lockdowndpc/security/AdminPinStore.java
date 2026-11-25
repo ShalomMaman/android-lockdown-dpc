@@ -44,6 +44,10 @@ import javax.crypto.spec.PBEKeySpec;
  * shorten it. Every write that carries failed-attempt or recovery state is
  * committed synchronously: an asynchronous {@code apply()} can be lost if the
  * device reboots (or is rebooted deliberately) right after a failed attempt.
+ *
+ * <p>An attempt is charged as a failure before the candidate is hashed and is
+ * refunded only after it matched, so ending the process during verification
+ * never yields a free guess. An attempt that cannot be charged is refused.
  */
 public final class AdminPinStore {
     public static final String PIN_FORMAT_ERROR = "pin-must-contain-6-to-12-digits";
@@ -154,7 +158,12 @@ public final class AdminPinStore {
      * on a plain PIN match (no recovery-code grant), writes {@code newPin}.
      */
     static synchronized ReplaceResult replaceWithCurrent(Context context, String current, String newPin) {
-        return PROCESS.replaceWithCurrentLocked(context, current, newPin, AdminPinStore::getOrCreateHmacKey);
+        return replaceWithCurrent(context, current, newPin, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    static synchronized ReplaceResult replaceWithCurrent(
+            Context context, String current, String newPin, HmacKeySource keySource) {
+        return PROCESS.replaceWithCurrentLocked(context, current, newPin, keySource);
     }
 
     private ReplaceResult replaceWithCurrentLocked(
@@ -338,19 +347,50 @@ public final class AdminPinStore {
             return new Verification(Status.LOCKED, evaluation.remainingMillis(), null);
         }
 
+        if (pin == null || pin.isEmpty()) {
+            // Never a credential, and Android's PBKDF2 rejects an empty password.
+            // Nothing is compared, so an empty submission does not use an attempt.
+            return new Verification(Status.ERROR, 0L, null);
+        }
+
+        // Fetched before the charge: without the key nothing can be compared.
+        SecretKey hmacKey;
         try {
-            SecretKey hmacKey = keySource.get();
+            hmacKey = keySource.get();
+        } catch (Exception exception) {
+            return new Verification(Status.ERROR, 0L, null);
+        }
+        if (hmacKey == null) {
+            return new Verification(Status.ERROR, 0L, null);
+        }
+
+        // The caller holds AdminPinStore.class from the read above until the
+        // outcome is stored, so every comparison has its own charged attempt.
+        PinLockoutPolicy.LockoutState charged = PinLockoutPolicy.afterFailure(
+                evaluation.state(),
+                boot,
+                SystemClock.elapsedRealtime(),
+                System.currentTimeMillis()
+        );
+        if (!persistTighterLockout(prefs, charged)) {
+            long delay = charged.penaltyMillis();
+            return new Verification(delay == 0 ? Status.ERROR : Status.LOCKED, delay, null);
+        }
+
+        try {
             if (matches(pin, prefs.getString(KEY_SALT, ""),
                     prefs.getString(KEY_VERIFIER, ""), hmacKey)) {
-                clearLockoutAfterMatch(prefs);
+                refundAfterMatch(prefs, PinLockoutPolicy.LockoutState.CLEARED);
                 return new Verification(Status.SUCCESS, 0L, null);
             }
 
             String recoverySalt = prefs.getString(KEY_RECOVERY_SALT, null);
             String recoveryVerifier = prefs.getString(KEY_RECOVERY_VERIFIER, null);
-            String normalizedRecovery = pin == null ? "" : pin.replace("-", "").replace(" ", "");
+            String normalizedRecovery = pin.replace("-", "").replace(" ", "");
             if (recoverySalt != null && recoveryVerifier != null
                     && matches(normalizedRecovery, recoverySalt, recoveryVerifier, hmacKey)) {
+                // A recovery code only opens a grant; the earlier count stays until the PIN is reset.
+                refundAfterMatch(prefs, stored);
                 synchronized (ManagementModeStore.class) {
                     if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
                         return new Verification(Status.ERROR, 0L, null);
@@ -361,32 +401,36 @@ public final class AdminPinStore {
                 }
             }
         } catch (Exception exception) {
+            // Keep the charge: the PIN may already have been compared.
             return new Verification(Status.ERROR, 0L, null);
         }
 
-        PinLockoutPolicy.LockoutState next = PinLockoutPolicy.afterFailure(
+        long delay = charged.penaltyMillis();
+        if (delay == 0) {
+            return new Verification(Status.INVALID, 0L, null);
+        }
+        // Restart the penalty now so the time spent hashing does not shorten it.
+        persistTighterLockout(prefs, PinLockoutPolicy.afterFailure(
                 evaluation.state(),
                 boot,
                 SystemClock.elapsedRealtime(),
                 System.currentTimeMillis()
-        );
-        persistTighterLockout(prefs, next);
-        long delay = next.penaltyMillis();
-        return new Verification(delay == 0 ? Status.INVALID : Status.LOCKED, delay, null);
+        ));
+        return new Verification(Status.LOCKED, delay, null);
     }
 
-    private static void clearLockoutAfterMatch(SharedPreferences prefs) {
+    /** The match stands when this write fails; the attempt then stays charged. */
+    private static void refundAfterMatch(SharedPreferences prefs, PinLockoutPolicy.LockoutState state) {
         try {
-            if (DurablePreferences.commit(prefs,
-                    putLockout(edit(prefs), PinLockoutPolicy.LockoutState.CLEARED), KEY_FAILURES,
+            if (DurablePreferences.commit(prefs, putLockout(edit(prefs), state), KEY_FAILURES,
                     KEY_LOCKOUT_BOOT_KIND, KEY_LOCKOUT_BOOT_VALUE, KEY_LOCKOUT_ELAPSED_UNTIL,
                     KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL)) {
                 unpersistedLockouts.remove(prefs);
             } else {
-                Log.w(TAG, "Could not persist lockout counter reset after a valid PIN");
+                Log.w(TAG, "Could not persist lockout counter reset after a valid credential");
             }
         } catch (RuntimeException exception) {
-            Log.w(TAG, "Could not persist lockout counter reset after a valid PIN", exception);
+            Log.w(TAG, "Could not persist lockout counter reset after a valid credential", exception);
         }
     }
 
@@ -479,19 +523,21 @@ public final class AdminPinStore {
         );
     }
 
-    private static void persistTighterLockout(SharedPreferences prefs, PinLockoutPolicy.LockoutState state) {
+    /** Returns true only when the state is on disk. */
+    private static boolean persistTighterLockout(SharedPreferences prefs, PinLockoutPolicy.LockoutState state) {
         // Android normally updates the in-memory map even when the disk write fails.
         // Never roll that tightening back. Keep the state here if the editor failed.
         try {
             if (putLockout(edit(prefs), state).commit()) {
                 unpersistedLockouts.remove(prefs);
-                return;
+                return true;
             }
             Log.w(TAG, "Could not persist stricter PIN lockout");
         } catch (RuntimeException exception) {
             Log.w(TAG, "Could not persist stricter PIN lockout", exception);
         }
         unpersistedLockouts.put(prefs, state);
+        return false;
     }
 
     private static SharedPreferences.Editor putLockout(

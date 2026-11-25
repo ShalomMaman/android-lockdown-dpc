@@ -42,6 +42,8 @@ public class LegacyAdminPinTest {
     private static final String PIN = "123456";
     private static final String NEW_PIN = "654321";
     private static final String RECOVERY_CODE = "1234-5678-9012";
+    /** A recovery-code match charges the attempt and then refunds it. */
+    private static final int VERIFY_COMMITS = 2;
     private static final SecretKey KEY = new SecretKeySpec(new byte[32], "HmacSHA256");
     private final AdminPinStore store = new AdminPinStore();
     private Context context;
@@ -72,8 +74,8 @@ public class LegacyAdminPinTest {
     @Test
     public void processDeathDiscardsTheGrantAndLeavesTheOldRecoveryCodeValid() throws Exception {
         seedRecoveryCode(pinStore);
-        var before = pinStore.getAll();
         var grant = verifyRecovery(store, context);
+        var before = pinStore.getAll();
 
         var restarted = new AdminPinStore();
         assertNull(restarted.completeRecoveryPinReset(context, null, NEW_PIN, () -> KEY));
@@ -86,8 +88,8 @@ public class LegacyAdminPinTest {
     @Test
     public void expiredGrantCannotResetThePinAndTheOldRecoveryCodeStillVerifies() throws Exception {
         seedRecoveryCode(pinStore);
-        var before = pinStore.getAll();
         var grant = verifyRecovery(store, context);
+        var before = pinStore.getAll();
         ShadowSystemClock.advanceBy(Duration.ofMillis(AdminSession.SESSION_MILLIS));
 
         assertNull(store.completeRecoveryPinReset(context, grant, NEW_PIN, () -> KEY));
@@ -112,8 +114,8 @@ public class LegacyAdminPinTest {
     @Test
     public void recoveryResetRejectsReusingEitherPreviousCredential() throws Exception {
         seedRecoveryCode(pinStore);
-        var before = pinStore.getAll();
         var grant = verifyRecovery(store, context);
+        var before = pinStore.getAll();
         for (String rejected : new String[]{PIN, RECOVERY_CODE.replace("-", "")}) {
             var error = assertThrows(IllegalArgumentException.class,
                     () -> store.completeRecoveryPinReset(context, grant, rejected, () -> KEY));
@@ -129,22 +131,25 @@ public class LegacyAdminPinTest {
     @Test
     public void recoveryResetDoesNotTrustTheInMemoryUpdateOnDiskFailure() throws Exception {
         seedRecoveryCode(pinStore);
-        var before = pinStore.getAll();
-        MemoryPreferences failed = new MemoryPreferences(before);
+        MemoryPreferences failed = new MemoryPreferences(pinStore.getAll());
+        failed.failCommit = false;
         SharedPreferences pendingStore = failed.preferences();
         Context faulted = withStore("admin_security", pendingStore);
         var grant = verifyRecovery(store, faulted);
+        var before = pendingStore.getAll();
+        var untouched = pinStore.getAll();
 
+        failed.failCommit = true;
         assertThrows(SecurityException.class,
                 () -> store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
         assertEquals(before, pendingStore.getAll());
-        assertEquals(before, pinStore.getAll());
-        assertEquals(0, failed.successfulCommits);
+        assertEquals(untouched, pinStore.getAll());
+        assertEquals(VERIFY_COMMITS, failed.successfulCommits);
         assertNotNull(verifyRecovery(new AdminPinStore(), context));
 
         failed.failCommit = false;
         assertNotNull(store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
-        assertEquals(1, failed.successfulCommits);
+        assertEquals(VERIFY_COMMITS + 1, failed.successfulCommits);
     }
 
     @Test
@@ -168,7 +173,7 @@ public class LegacyAdminPinTest {
 
         assertNotNull(store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
         assertTrue(Files.notExists(backup));
-        assertEquals(1, commits.get());
+        assertEquals(VERIFY_COMMITS + 1, commits.get());
     }
 
     @Test
@@ -176,7 +181,6 @@ public class LegacyAdminPinTest {
         seedRecoveryCode(pinStore);
         assertTrue(pinStore.edit().putBoolean("recovery_pin_reset_pending", true)
                 .putInt("pin_failures", 2).commit());
-        var before = pinStore.getAll();
         Path backup = recoveryPreferencesFile(".bak");
         Path child = backup.resolve("keep");
         AtomicInteger commits = new AtomicInteger();
@@ -186,12 +190,14 @@ public class LegacyAdminPinTest {
                     Files.createFile(child);
                 }));
         var grant = verifyRecovery(store, faulted);
+        var before = pinStore.getAll();
+        assertEquals(2, pinStore.getInt("pin_failures", -1));
 
         assertThrows(SecurityException.class,
                 () -> store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
         assertTrue(Files.exists(child));
         assertEquals(before, pinStore.getAll());
-        assertEquals(2, commits.get());
+        assertEquals(VERIFY_COMMITS + 2, commits.get());
 
         Files.delete(child);
         Files.delete(backup);
@@ -201,7 +207,6 @@ public class LegacyAdminPinTest {
     @Test
     public void readbackRejectsDuplicateCredentialKeys() throws Exception {
         seedRecoveryCode(pinStore);
-        var before = pinStore.getAll();
         Path file = recoveryPreferencesFile("");
         AtomicInteger commits = new AtomicInteger();
         Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, false, commits,
@@ -211,11 +216,12 @@ public class LegacyAdminPinTest {
                     Files.writeString(file, xml.replace("</map>", duplicate + "</map>"));
                 }));
         var grant = verifyRecovery(store, faulted);
+        var before = pinStore.getAll();
 
         assertThrows(SecurityException.class,
                 () -> store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY));
         assertEquals(before, pinStore.getAll());
-        assertEquals(2, commits.get());
+        assertEquals(VERIFY_COMMITS + 2, commits.get());
     }
 
     private Path recoveryPreferencesFile(String suffix) {
@@ -226,24 +232,23 @@ public class LegacyAdminPinTest {
         seedRecoveryCode(pinStore);
         assertTrue(pinStore.edit().putBoolean("recovery_pin_reset_pending", true)
                 .putInt("pin_failures", 2).commit());
-        var before = pinStore.getAll();
         AtomicInteger commits = new AtomicInteger();
         Context faulted = withStore("admin_security", diskWritingPreferences(pinStore, commitResult, commits, () -> {}));
 
         AdminSession.unlock();
         var grant = verifyRecovery(store, faulted);
         assertFalse(AdminSession.isUnlocked());
-        assertEquals(0, commits.get());
-        assertEquals(before, pinStore.getAll());
+        assertEquals(VERIFY_COMMITS, commits.get());
+        assertEquals(2, pinStore.getInt("pin_failures", -1));
 
         String newCode = store.completeRecoveryPinReset(faulted, grant, NEW_PIN, () -> KEY);
         assertNotNull(newCode);
-        assertEquals(1, commits.get());
+        assertEquals(VERIFY_COMMITS + 1, commits.get());
         assertFalse(pinStore.contains("recovery_pin_reset_pending"));
         assertEquals(0, pinStore.getInt("pin_failures", -1));
         assertFalse(AdminSession.isUnlocked());
         assertNull(store.completeRecoveryPinReset(faulted, grant, PIN, () -> KEY));
-        assertEquals(1, commits.get());
+        assertEquals(VERIFY_COMMITS + 1, commits.get());
 
         assertEquals(AdminPinStore.Status.INVALID, verify(context));
         assertEquals(AdminPinStore.Status.INVALID, store.verifyCredential(context, RECOVERY_CODE, () -> KEY).status());
@@ -251,8 +256,9 @@ public class LegacyAdminPinTest {
         assertNotNull(store.verifyCredential(context, newCode, () -> KEY).recoveryGrant());
     }
 
+    /** Applies the commit result and the hook to the reset, after the verification's own writes. */
     private static SharedPreferences diskWritingPreferences(
-            SharedPreferences prefs, boolean commitResult, AtomicInteger commits, AfterCommit afterFirstCommit) {
+            SharedPreferences prefs, boolean commitResult, AtomicInteger commits, AfterCommit afterResetCommit) {
         return (SharedPreferences) Proxy.newProxyInstance(SharedPreferences.class.getClassLoader(),
                 new Class<?>[]{SharedPreferences.class}, (proxy, method, args) -> {
                     if (!method.getName().equals("edit")) {
@@ -264,10 +270,10 @@ public class LegacyAdminPinTest {
                                 if (editMethod.getName().equals("commit")) {
                                     int attempt = commits.incrementAndGet();
                                     assertTrue(editor.commit());
-                                    if (attempt == 1) {
-                                        afterFirstCommit.run();
+                                    if (attempt == VERIFY_COMMITS + 1) {
+                                        afterResetCommit.run();
                                     }
-                                    return commitResult;
+                                    return attempt <= VERIFY_COMMITS || commitResult;
                                 }
                                 editMethod.invoke(editor, editArgs);
                                 return wrapper;
@@ -287,7 +293,7 @@ public class LegacyAdminPinTest {
         return verification.recoveryGrant();
     }
 
-    private static void seedRecoveryCode(SharedPreferences prefs) throws Exception {
+    static void seedRecoveryCode(SharedPreferences prefs) throws Exception {
         byte[] salt = new byte[16];
         assertTrue(prefs.edit()
                 .putString("recovery_salt", Base64.encodeToString(salt, Base64.NO_WRAP))
@@ -325,20 +331,24 @@ public class LegacyAdminPinTest {
     @Test
     public void validPinUnlocksEvenWhenClearingFailuresCannotBePersisted() {
         assertTrue(pinStore.edit().putInt("pin_failures", 2).commit());
-        SharedPreferences failedPinStore = new MemoryPreferences(pinStore.getAll()).preferences();
+        MemoryPreferences failed = new MemoryPreferences(pinStore.getAll());
+        SharedPreferences failedPinStore = failed.preferences();
+        failed.failCommit = false;
+        failed.afterCommit = keys -> failed.failCommit = true;
 
         assertEquals(AdminPinStore.Status.SUCCESS, verify(withStore("admin_security", failedPinStore)));
-        assertEquals(2, failedPinStore.getInt("pin_failures", -1));
+        assertEquals(3, failedPinStore.getInt("pin_failures", -1));
     }
 
     @Test
     public void failedDiskWritesStillCountWrongPinsAndLockOutTheCorrectPin() {
-        SharedPreferences failedPinStore = new MemoryPreferences(pinStore.getAll()).preferences();
+        MemoryPreferences failed = new MemoryPreferences(pinStore.getAll());
+        SharedPreferences failedPinStore = failed.preferences();
         Context faulted = withStore("admin_security", failedPinStore);
         int threshold = PinLockoutPolicy.FIRST_PENALTY_FAILURE;
 
         for (int attempt = 1; attempt < threshold; attempt++) {
-            assertEquals(AdminPinStore.Status.INVALID, AdminPinStore.verify(faulted, "654321", () -> KEY).status());
+            assertEquals(AdminPinStore.Status.ERROR, AdminPinStore.verify(faulted, "654321", () -> KEY).status());
             assertEquals(attempt, failedPinStore.getInt("pin_failures", -1));
         }
         var rejected = AdminPinStore.verify(faulted, "654321", () -> KEY);
@@ -347,6 +357,8 @@ public class LegacyAdminPinTest {
         assertEquals(threshold, failedPinStore.getInt("pin_failures", -1));
         assertEquals(AdminPinStore.Status.LOCKED, verify(faulted));
 
+        failed.failCommit = false;
+        assertEquals(AdminPinStore.Status.LOCKED, verify(faulted));
         ShadowSystemClock.advanceBy(Duration.ofMillis(rejected.remainingMillis()));
         assertEquals(AdminPinStore.Status.SUCCESS, verify(faulted));
     }
@@ -358,7 +370,7 @@ public class LegacyAdminPinTest {
         Context faulted = withStore("admin_security", failed.preferences());
 
         for (int attempt = 1; attempt < PinLockoutPolicy.FIRST_PENALTY_FAILURE; attempt++) {
-            assertEquals(AdminPinStore.Status.INVALID, AdminPinStore.verify(faulted, "654321", () -> KEY).status());
+            assertEquals(AdminPinStore.Status.ERROR, AdminPinStore.verify(faulted, "654321", () -> KEY).status());
         }
         assertEquals(AdminPinStore.Status.LOCKED, AdminPinStore.verify(faulted, "654321", () -> KEY).status());
         assertEquals(AdminPinStore.Status.LOCKED, verify(faulted));
