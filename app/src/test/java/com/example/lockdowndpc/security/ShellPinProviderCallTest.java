@@ -316,7 +316,7 @@ public class ShellPinProviderCallTest {
     /** The JVM has no AndroidKeyStore; this one always holds a fixed test key. */
     public static final class TestKeyStoreProvider extends Provider {
         public TestKeyStoreProvider() {
-            super("ShellPinProviderCallTest", "1", "Fixed HMAC key for tests");
+            super("ShellPinProviderCallTest", 1.0, "Fixed HMAC key for tests");
             put("KeyStore.AndroidKeyStore", TestKeyStore.class.getName());
         }
     }
