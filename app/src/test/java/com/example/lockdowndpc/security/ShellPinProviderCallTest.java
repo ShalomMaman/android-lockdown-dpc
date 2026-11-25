@@ -192,6 +192,16 @@ public class ShellPinProviderCallTest {
     }
 
     @Test
+    public void aConsoleRotationPendingAcrossAShellReplacementKeepsTheShellsCode() {
+        setPin();
+        AdminSession.unlock();
+        long session = AdminSession.activeGeneration();
+        String code = call(METHODS[2], PIN, NEW_PIN).getString(ShellPinProvider.KEY_RECOVERY);
+        assertNull(AdminPinStore.rotateRecoveryCode(context, session));
+        assertNotNull(AdminPinStore.verify(context, code).recoveryGrant());
+    }
+
+    @Test
     public void replacingThePinWithItselfRotatesTheRecoveryCode() {
         String old = setPin().getString(ShellPinProvider.KEY_RECOVERY);
         Bundle replaced = call(METHODS[2], PIN, PIN);

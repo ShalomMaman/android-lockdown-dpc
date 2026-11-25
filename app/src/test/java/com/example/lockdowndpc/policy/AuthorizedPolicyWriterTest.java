@@ -175,6 +175,8 @@ public class AuthorizedPolicyWriterTest {
         // maintenance, or updates. Evidence writes do not change policy choices.
         return switch (store) {
             case "AdminPinStore" -> Set.of("setInitialPin", "replacePin", "rotateRecoveryCode", "verify",
+                    // verifyAndUnlock opens the local session on a PIN match; it changes no policy.
+                    "verifyAndUnlock",
                     // completeRecoveryPinReset writes credentials without an AdminSession.
                     // It requires a live recovery grant and LOCAL_PIN mode.
                     "completeRecoveryPinReset",

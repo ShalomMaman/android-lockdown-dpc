@@ -517,7 +517,13 @@ already active but the previous recovery code stays valid, or no recovery code
 exists after `set-initial`. Check which PIN is active with `verify`, then run
 `replace` with that PIN as both `current` and `pin`: it keeps the PIN, rotates
 the recovery code and returns the new one. The same command recovers from
-`pin-saved-recovery-failed`.
+`pin-saved-recovery-failed`, with two exceptions:
+
+- `recovery-pin-reset-pending`: a recovery code was just used on the device.
+  `verify` and `replace` fail until that reset ends (up to 3 minutes). If it
+  set a new PIN, the recovery code it showed on the device is the valid one.
+- `recovery-code-mode-refused`: the device is no longer managed by a local
+  PIN, so the provider cannot issue a recovery code.
 
 > **Security note.** The PIN passed via `--extra` appears briefly in the
 > device's shell process list (and in the computer's shell history if typed

@@ -288,7 +288,23 @@ public final class AdminPinStore {
         return true;
     }
 
+    /** For a caller that just wrote the PIN: console PIN setup or change, and the shell. */
     public static synchronized String rotateRecoveryCode(Context context) throws SecurityException {
+        return rotateRecoveryCodeIf(() -> true, context, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    /** Returns null without writing unless {@code session} is still the live administrator session. */
+    public static String rotateRecoveryCode(Context context, long session) throws SecurityException {
+        return rotateRecoveryCode(context, session, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    static synchronized String rotateRecoveryCode(Context context, long session, HmacKeySource keySource) {
+        return rotateRecoveryCodeIf(
+                () -> session != 0L && AdminSession.activeGeneration() == session, context, keySource);
+    }
+
+    /** The caller holds AdminPinStore.class, so a shell PIN change cannot lock the session before the write. */
+    private static String rotateRecoveryCodeIf(BooleanSupplier allowed, Context context, HmacKeySource keySource) {
         if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
             throw new SecurityException("recovery-code-mode-refused");
         }
@@ -299,7 +315,10 @@ public final class AdminPinStore {
         RecoveryCode recovery;
         boolean saved;
         try {
-            recovery = newRecoveryCode(getOrCreateHmacKey(), new SecureRandom(), null, null);
+            recovery = newRecoveryCode(keySource.get(), new SecureRandom(), null, null);
+            if (!allowed.getAsBoolean()) {
+                return null;
+            }
             saved = DurablePreferences.commit(prefs,
                     recovery.credential.write(edit(prefs), KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER),
                     KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER);
@@ -317,6 +336,28 @@ public final class AdminPinStore {
         Verification verification = verify(context, pin);
         if (verification.recoveryGrant() != null) {
             clearRecoveryGrant();
+        }
+        return verification;
+    }
+
+    /**
+     * Verifies and, on a PIN match, opens the administrator session before
+     * another caller can change the PIN.
+     */
+    public static Verification verifyAndUnlock(Context context, String pin) {
+        return verifyAndUnlock(context, pin, AdminPinStore::getOrCreateHmacKey);
+    }
+
+    static synchronized Verification verifyAndUnlock(Context context, String pin, HmacKeySource keySource) {
+        Verification verification = verify(context, pin, keySource);
+        if (verification.status() != Status.SUCCESS || verification.recoveryGrant() != null) {
+            return verification;
+        }
+        synchronized (ManagementModeStore.class) {
+            if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
+                return new Verification(Status.ERROR, 0L, null);
+            }
+            AdminSession.unlock();
         }
         return verification;
     }
