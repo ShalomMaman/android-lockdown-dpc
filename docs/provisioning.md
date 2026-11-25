@@ -507,7 +507,17 @@ success, `set-initial` and `replace` return `status=ok` together with the
 generated `recovery` code — store that recovery code safely off the device. If
 the PIN was saved but rotating the recovery code failed, the call returns
 `status=pin-saved-recovery-failed` with an error `code` so the caller knows the
-new PIN took effect and must generate a recovery code separately.
+new PIN took effect and must generate a recovery code separately. A successful
+`replace` also locks an administrator session that is open on the device; an
+open maintenance window is not affected.
+
+The PIN is saved before the recovery code is rotated. If the call ends without
+a result in between (for example, the app process is killed), the new PIN is
+already active but the previous recovery code stays valid, or no recovery code
+exists after `set-initial`. Check which PIN is active with `verify`, then run
+`replace` with that PIN as both `current` and `pin`: it keeps the PIN, rotates
+the recovery code and returns the new one. The same command recovers from
+`pin-saved-recovery-failed`.
 
 > **Security note.** The PIN passed via `--extra` appears briefly in the
 > device's shell process list (and in the computer's shell history if typed

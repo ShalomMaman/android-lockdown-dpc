@@ -58,6 +58,7 @@ public final class ShellPinProvider extends ContentProvider {
             "recovery-code-create-failed"
     );
 
+    /** Neither {@code verify} nor {@code replaceWithCurrent} may leave a recovery grant live. */
     interface PinStore {
         boolean hasPin();
 
@@ -68,8 +69,6 @@ public final class ShellPinProvider extends ContentProvider {
         AdminPinStore.ReplaceResult replaceWithCurrent(String currentPin, String newPin);
 
         String rotateRecoveryCode();
-
-        default void clearRecoveryGrant() {}
 
         default void recordAudit(boolean replaced) {}
     }
@@ -173,7 +172,7 @@ public final class ShellPinProvider extends ContentProvider {
     }
 
     private static Result handleVerify(String pin, PinStore store) {
-        return mapVerification(store.verify(pin), store);
+        return mapVerification(store.verify(pin));
     }
 
     private static Result handleReplace(String currentPin, String newPin, PinStore store) {
@@ -184,7 +183,7 @@ public final class ShellPinProvider extends ContentProvider {
         if (replaceResult == null) {
             return Result.error("replace-failed");
         }
-        Result verified = mapVerification(replaceResult.verification(), store);
+        Result verified = mapVerification(replaceResult.verification());
         if (!STATUS_MATCH.equals(verified.status())) {
             return verified;
         }
@@ -208,18 +207,13 @@ public final class ShellPinProvider extends ContentProvider {
         return Result.ok(recovery);
     }
 
-    private static Result mapVerification(AdminPinStore.Verification verification, PinStore store) {
+    private static Result mapVerification(AdminPinStore.Verification verification) {
         if (verification == null || verification.status() == null) {
             return Result.error("verify-failed");
         }
         return switch (verification.status()) {
-            case SUCCESS -> {
-                if (verification.recoveryGrant() != null) {
-                    store.clearRecoveryGrant();
-                    yield Result.statusOnly(STATUS_MISMATCH);
-                }
-                yield Result.statusOnly(STATUS_MATCH);
-            }
+            case SUCCESS -> Result.statusOnly(
+                    verification.recoveryGrant() == null ? STATUS_MATCH : STATUS_MISMATCH);
             case INVALID -> Result.statusOnly(STATUS_MISMATCH);
             case LOCKED -> Result.locked(verification.remainingMillis());
             case NOT_CONFIGURED -> Result.statusOnly(STATUS_NOT_CONFIGURED);
@@ -298,10 +292,10 @@ public final class ShellPinProvider extends ContentProvider {
         throw new UnsupportedOperationException("ShellPinProvider supports call() only");
     }
 
-    private static final class AndroidPinStore implements PinStore {
+    static class AndroidPinStore implements PinStore {
         private final Context context;
 
-        private AndroidPinStore(Context context) {
+        AndroidPinStore(Context context) {
             this.context = context;
         }
 
@@ -317,7 +311,7 @@ public final class ShellPinProvider extends ContentProvider {
 
         @Override
         public AdminPinStore.Verification verify(String pin) {
-            return AdminPinStore.verify(context, pin);
+            return AdminPinStore.verifyWithoutGrant(context, pin);
         }
 
         @Override
@@ -331,14 +325,10 @@ public final class ShellPinProvider extends ContentProvider {
         }
 
         @Override
-        public void clearRecoveryGrant() {
-            AdminPinStore.clearRecoveryGrant();
-        }
-
-        @Override
         public void recordAudit(boolean replaced) {
             try {
-                AuditLog.append(
+                // On disk before returning; a failed write does not undo the PIN change.
+                AuditLog.appendCommitted(
                         context,
                         replaced ? AuditEvent.PIN_REPLACED : AuditEvent.PIN_SET,
                         context.getString(replaced

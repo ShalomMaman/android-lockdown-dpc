@@ -29,6 +29,7 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import javax.crypto.KeyGenerator;
 import javax.crypto.Mac;
@@ -155,7 +156,8 @@ public final class AdminPinStore {
 
     /**
      * Atomically verifies {@code current} through the normal lockout policy and,
-     * on a plain PIN match (no recovery-code grant), writes {@code newPin}.
+     * on a plain PIN match (no recovery-code grant), writes {@code newPin} and
+     * locks any administrator session the old PIN opened.
      */
     static synchronized ReplaceResult replaceWithCurrent(Context context, String current, String newPin) {
         return replaceWithCurrent(context, current, newPin, AdminPinStore::getOrCreateHmacKey);
@@ -183,15 +185,15 @@ public final class AdminPinStore {
             clearRecoveryGrant();
             return new ReplaceResult(verification, false);
         }
-        if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
-            return new ReplaceResult(verification, false);
-        }
         SharedPreferences prefs = prefs(context);
-        if (!hasPin(prefs) || liveRecoveryGrant(context) != null) {
-            return new ReplaceResult(verification, false);
+        boolean replaced = writePinIf(
+                () -> ManagementModeStore.read(context) == ManagementMode.LOCAL_PIN
+                        && hasPin(prefs) && liveRecoveryGrant(context) == null,
+                prefs, newPin, keySource);
+        if (replaced) {
+            AdminSession.lock();
         }
-        writePin(prefs, newPin, keySource);
-        return new ReplaceResult(verification, true);
+        return new ReplaceResult(verification, replaced);
     }
 
     /** Returns the new recovery code, or null when the grant can no longer authorize a reset. */
@@ -252,6 +254,12 @@ public final class AdminPinStore {
     }
 
     private static void writePin(SharedPreferences prefs, String pin, HmacKeySource keySource) {
+        writePinIf(() -> true, prefs, pin, keySource);
+    }
+
+    /** Returns false without writing when {@code allowed} does not hold after derivation. */
+    private static boolean writePinIf(
+            BooleanSupplier allowed, SharedPreferences prefs, String pin, HmacKeySource keySource) {
         if (!isValidPin(pin)) {
             throw new IllegalArgumentException(PIN_FORMAT_ERROR);
         }
@@ -261,9 +269,15 @@ public final class AdminPinStore {
             SharedPreferences.Editor editor = putLockout(
                     credential.write(edit(prefs), KEY_SALT, KEY_VERIFIER),
                     PinLockoutPolicy.LockoutState.CLEARED);
-            saved = DurablePreferences.commit(prefs, editor, KEY_SALT, KEY_VERIFIER,
-                    KEY_FAILURES, KEY_LOCKOUT_BOOT_KIND, KEY_LOCKOUT_BOOT_VALUE,
-                    KEY_LOCKOUT_ELAPSED_UNTIL, KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL);
+            // Check after derivation and serialize the write with mode transitions.
+            synchronized (ManagementModeStore.class) {
+                if (!allowed.getAsBoolean()) {
+                    return false;
+                }
+                saved = DurablePreferences.commit(prefs, editor, KEY_SALT, KEY_VERIFIER,
+                        KEY_FAILURES, KEY_LOCKOUT_BOOT_KIND, KEY_LOCKOUT_BOOT_VALUE,
+                        KEY_LOCKOUT_ELAPSED_UNTIL, KEY_LOCKOUT_PENALTY, KEY_LOCKOUT_UNTIL);
+            }
         } catch (Exception exception) {
             throw new SecurityException("admin-pin-save-failed", exception);
         }
@@ -271,6 +285,7 @@ public final class AdminPinStore {
             throw new SecurityException("admin-pin-save-failed");
         }
         unpersistedLockouts.remove(prefs);
+        return true;
     }
 
     public static synchronized String rotateRecoveryCode(Context context) throws SecurityException {
@@ -281,17 +296,29 @@ public final class AdminPinStore {
         if (PROCESS.liveRecoveryGrant(context) != null) {
             throw new SecurityException("recovery-pin-reset-pending");
         }
+        RecoveryCode recovery;
+        boolean saved;
         try {
-            RecoveryCode recovery = newRecoveryCode(getOrCreateHmacKey(), new SecureRandom(), null, null);
-            if (!DurablePreferences.commit(prefs,
+            recovery = newRecoveryCode(getOrCreateHmacKey(), new SecureRandom(), null, null);
+            saved = DurablePreferences.commit(prefs,
                     recovery.credential.write(edit(prefs), KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER),
-                    KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER)) {
-                throw new SecurityException("recovery-code-save-failed");
-            }
-            return recovery.formatted();
+                    KEY_RECOVERY_SALT, KEY_RECOVERY_VERIFIER);
         } catch (Exception exception) {
             throw new SecurityException("recovery-code-create-failed", exception);
         }
+        if (!saved) {
+            throw new SecurityException("recovery-code-save-failed");
+        }
+        return recovery.formatted();
+    }
+
+    /** Like {@link #verify}, but drops a recovery code's grant before another caller can see it. */
+    static synchronized Verification verifyWithoutGrant(Context context, String pin) {
+        Verification verification = verify(context, pin);
+        if (verification.recoveryGrant() != null) {
+            clearRecoveryGrant();
+        }
+        return verification;
     }
 
     public static Verification verify(Context context, String pin) {

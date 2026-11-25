@@ -7,6 +7,7 @@ import android.provider.Settings;
 import android.util.Base64;
 
 import com.example.lockdowndpc.policy.ManagementMode;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.testing.MemoryPreferences;
 
 import org.junit.After;
@@ -366,6 +367,37 @@ public class AdminPinAttemptTest {
         assertEquals(AdminPinStore.Status.SUCCESS, result.verification().status());
         assertFalse(result.replaced());
         assertEquals(verifier, prefs.getString("pin_verifier", null));
+    }
+
+    @Test
+    public void replacingIsRefusedWhenTheModeChangesBeforeTheNewPinIsStored() {
+        String verifier = prefs.getString("pin_verifier", null);
+        AtomicInteger uses = new AtomicInteger();
+        var result = AdminPinStore.replaceWithCurrent(context, PIN, NEW_PIN, () -> {
+            // The second key is fetched to hash the new PIN.
+            if (uses.getAndIncrement() == 1) {
+                setMode(ManagementMode.ENROLLING);
+            }
+            return KEY;
+        });
+        assertEquals(2, uses.get());
+        assertFalse(result.replaced());
+        assertEquals(verifier, prefs.getString("pin_verifier", null));
+    }
+
+    @Test
+    public void theNewPinIsStoredUnderTheModeLock() {
+        MemoryPreferences disk = writableCopy();
+        AtomicInteger pinWrites = new AtomicInteger();
+        disk.beforeCommit = keys -> {
+            if (keys.contains("pin_verifier")) {
+                pinWrites.incrementAndGet();
+                assertTrue(Thread.holdsLock(ManagementModeStore.class));
+            }
+        };
+        assertTrue(AdminPinStore.replaceWithCurrent(
+                withPinStore(disk.preferences()), PIN, NEW_PIN, () -> KEY).replaced());
+        assertEquals(1, pinWrites.get());
     }
 
     @Test
