@@ -133,7 +133,7 @@ public final class ShellPinProviderTest {
     }
 
     @Test
-    public void verifyWithRecoveryGrantMapsToMismatchAndClearsGrant() {
+    public void verifyWithRecoveryGrantMapsToMismatch() {
         FakePinStore store = new FakePinStore();
         store.nextVerification = new AdminPinStore.Verification(
                 AdminPinStore.Status.SUCCESS, 0L, AdminPinStore.RecoveryGrant.forTest());
@@ -143,7 +143,6 @@ public final class ShellPinProviderTest {
 
         assertEquals(ShellPinProvider.STATUS_MISMATCH, result.status());
         assertNull(result.remainingMillis());
-        assertEquals(1, store.clearRecoveryGrantCalls);
     }
 
     @Test
@@ -163,7 +162,7 @@ public final class ShellPinProviderTest {
     }
 
     @Test
-    public void replaceWithRecoveryGrantMapsToMismatchAndClearsGrant() {
+    public void replaceWithRecoveryGrantMapsToMismatch() {
         FakePinStore store = new FakePinStore();
         store.hasPin = true;
         store.nextVerification = new AdminPinStore.Verification(
@@ -173,7 +172,6 @@ public final class ShellPinProviderTest {
                 SHELL_UID, ShellPinProvider.METHOD_REPLACE, "1111-2222-3333", "654321", store);
 
         assertEquals(ShellPinProvider.STATUS_MISMATCH, result.status());
-        assertEquals(1, store.clearRecoveryGrantCalls);
         assertNull(store.writtenReplacementPin);
         assertEquals(0, store.rotateCalls);
         assertEquals(0, store.auditCalls);
@@ -375,7 +373,6 @@ public final class ShellPinProviderTest {
         String lastVerifiedPin;
         int rotateCalls;
         int auditCalls;
-        int clearRecoveryGrantCalls;
         boolean lastAuditReplaced;
 
         @Override
@@ -432,12 +429,6 @@ public final class ShellPinProviderTest {
                 throw throwOnRotate;
             }
             return nextRecoveryCode;
-        }
-
-        @Override
-        public void clearRecoveryGrant() {
-            touched = true;
-            clearRecoveryGrantCalls++;
         }
 
         @Override

@@ -7,6 +7,7 @@ import android.provider.Settings;
 import android.util.Base64;
 
 import com.example.lockdowndpc.policy.ManagementMode;
+import com.example.lockdowndpc.policy.ManagementModeStore;
 import com.example.lockdowndpc.testing.MemoryPreferences;
 
 import org.junit.After;
@@ -369,6 +370,37 @@ public class AdminPinAttemptTest {
     }
 
     @Test
+    public void replacingIsRefusedWhenTheModeChangesBeforeTheNewPinIsStored() {
+        String verifier = prefs.getString("pin_verifier", null);
+        AtomicInteger uses = new AtomicInteger();
+        var result = AdminPinStore.replaceWithCurrent(context, PIN, NEW_PIN, () -> {
+            // The second key is fetched to hash the new PIN.
+            if (uses.getAndIncrement() == 1) {
+                setMode(ManagementMode.ENROLLING);
+            }
+            return KEY;
+        });
+        assertEquals(2, uses.get());
+        assertFalse(result.replaced());
+        assertEquals(verifier, prefs.getString("pin_verifier", null));
+    }
+
+    @Test
+    public void theNewPinIsStoredUnderTheModeLock() {
+        MemoryPreferences disk = writableCopy();
+        AtomicInteger pinWrites = new AtomicInteger();
+        disk.beforeCommit = keys -> {
+            if (keys.contains("pin_verifier")) {
+                pinWrites.incrementAndGet();
+                assertTrue(Thread.holdsLock(ManagementModeStore.class));
+            }
+        };
+        assertTrue(AdminPinStore.replaceWithCurrent(
+                withPinStore(disk.preferences()), PIN, NEW_PIN, () -> KEY).replaced());
+        assertEquals(1, pinWrites.get());
+    }
+
+    @Test
     public void replacingIsRefusedWhileARecoveryGrantIsLive() throws Exception {
         LegacyAdminPinTest.seedRecoveryCode(prefs);
         var grant = verify(context, RECOVERY_CODE).recoveryGrant();
@@ -439,6 +471,85 @@ public class AdminPinAttemptTest {
         assertEquals(0, failuresOnDisk());
         assertEquals(AdminPinStore.Status.INVALID, verify(context, PIN).status());
         assertEquals(AdminPinStore.Status.SUCCESS, verify(context, NEW_PIN).status());
+    }
+
+    // ---- The console session --------------------------------------------------------------
+
+    @Test
+    public void theConsoleRotatesTheRecoveryCodeOnlyInItsOwnLiveSession() {
+        AdminSession.unlock();
+        long session = AdminSession.activeGeneration();
+        var before = prefs.getAll();
+        AdminSession.unlock();
+        assertNull(AdminPinStore.rotateRecoveryCode(context, session, () -> KEY));
+        long current = AdminSession.activeGeneration();
+        // The session ends after the rotation was authorized and started.
+        assertNull(AdminPinStore.rotateRecoveryCode(context, current, () -> {
+            AdminSession.lock();
+            return KEY;
+        }));
+        assertNull(AdminPinStore.rotateRecoveryCode(context, current, () -> KEY));
+        assertNull(AdminPinStore.rotateRecoveryCode(context, 0L, () -> KEY));
+        assertEquals(before, prefs.getAll());
+
+        AdminSession.unlock();
+        String code = AdminPinStore.rotateRecoveryCode(context, AdminSession.activeGeneration(), () -> KEY);
+        assertNotNull(verify(context, code).recoveryGrant());
+    }
+
+    @Test
+    public void onlyAPinMatchInLocalModeOpensTheSession() throws Exception {
+        LegacyAdminPinTest.seedRecoveryCode(prefs);
+        for (String refused : new String[]{WRONG_PIN, "", null}) {
+            AdminPinStore.verifyAndUnlock(context, refused, () -> KEY);
+            assertFalse(AdminSession.isUnlocked());
+        }
+        assertNotNull(AdminPinStore.verifyAndUnlock(context, RECOVERY_CODE, () -> KEY).recoveryGrant());
+        assertFalse(AdminSession.isUnlocked());
+        AdminPinStore.clearRecoveryGrant();
+
+        assertEquals(AdminPinStore.Status.ERROR, AdminPinStore.verifyAndUnlock(context, PIN,
+                () -> new ProbeKey(() -> setMode(ManagementMode.ENROLLING))).status());
+        assertFalse(AdminSession.isUnlocked());
+
+        setMode(ManagementMode.LOCAL_PIN);
+        assertEquals(AdminPinStore.Status.SUCCESS,
+                AdminPinStore.verifyAndUnlock(context, PIN, () -> KEY).status());
+        assertTrue(AdminSession.isUnlocked());
+    }
+
+    @Test
+    public void thePinStoreStaysLockedFromThePinMatchToTheUnlock() throws Exception {
+        Thread console = new Thread(() -> AdminPinStore.verifyAndUnlock(context, PIN, () -> KEY));
+        CountDownLatch shellEntered = new CountDownLatch(1);
+        Thread shell = new Thread(() -> {
+            synchronized (AdminPinStore.class) {
+                // Where a shell replacement would write the PIN and lock the session.
+                shellEntered.countDown();
+                AdminSession.lock();
+            }
+        });
+        synchronized (AdminSession.class) {
+            console.start();
+            // The PIN matched; only the unlock itself waits for the session.
+            awaitBlockedOnSession(console);
+            shell.start();
+            assertFalse(shellEntered.await(1, SECONDS));
+        }
+        console.join(30_000);
+        shell.join(30_000);
+        assertFalse(AdminSession.isUnlocked());
+    }
+
+    private static void awaitBlockedOnSession(Thread thread) throws InterruptedException {
+        for (int wait = 0; wait < 3_000; wait++) {
+            if (thread.getState() == Thread.State.BLOCKED && thread.getStackTrace()[0].getClassName()
+                    .equals(AdminSession.class.getName())) {
+                return;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("The console never reached the unlock");
     }
 
     // ---- Fixtures -------------------------------------------------------------------------

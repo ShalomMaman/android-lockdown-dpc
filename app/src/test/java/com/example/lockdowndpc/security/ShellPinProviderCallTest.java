@@ -7,6 +7,8 @@ import android.os.Bundle;
 import android.os.Process;
 import android.provider.Settings;
 
+import com.example.lockdowndpc.policy.AuditEvent;
+import com.example.lockdowndpc.policy.AuditLog;
 import com.example.lockdowndpc.testing.MemoryPreferences;
 
 import org.junit.After;
@@ -30,6 +32,7 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.Date;
 import java.util.Enumeration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -39,6 +42,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /** Drives the real provider entry point, caller check and PIN store together. */
@@ -141,6 +146,117 @@ public class ShellPinProviderCallTest {
     }
 
     @Test
+    public void aGrantTheConsoleOpensRightAfterAShellAttemptIsKept() {
+        String recovery = setPin().getString(ShellPinProvider.KEY_RECOVERY);
+        for (String method : new String[]{METHODS[1], METHODS[2]}) {
+            AdminPinStore.RecoveryGrant[] console = new AdminPinStore.RecoveryGrant[1];
+            var store = new ShellPinProvider.AndroidPinStore(context) {
+                @Override
+                public AdminPinStore.Verification verify(String pin) {
+                    var result = super.verify(pin);
+                    console[0] = AdminPinStore.verify(context, recovery).recoveryGrant();
+                    return result;
+                }
+
+                @Override
+                public AdminPinStore.ReplaceResult replaceWithCurrent(String current, String pin) {
+                    var result = super.replaceWithCurrent(current, pin);
+                    console[0] = AdminPinStore.verify(context, recovery).recoveryGrant();
+                    return result;
+                }
+            };
+            String pin = METHODS[1].equals(method) ? recovery : NEW_PIN;
+            assertEquals(ShellPinProvider.STATUS_MISMATCH, ShellPinProvider.handleCall(
+                    Process.SHELL_UID, method, recovery, pin, store).status());
+            assertNotNull(method, console[0]);
+            assertSame(method, console[0], AdminPinStore.getRecoveryGrant(context));
+            AdminPinStore.clearRecoveryGrant();
+        }
+    }
+
+    @Test
+    public void onlyASuccessfulReplacementLocksAnOpenConsoleSession() {
+        setPin();
+        AdminSession.unlock();
+        verify(PIN);
+        verify(WRONG_PIN);
+        call(METHODS[2], WRONG_PIN, NEW_PIN);
+        call(METHODS[2], PIN, "invalid");
+        assertTrue(AdminSession.isUnlocked());
+
+        assertEquals(ShellPinProvider.STATUS_OK, status(call(METHODS[2], PIN, NEW_PIN)));
+        assertFalse(AdminSession.isUnlocked());
+        // The session the old PIN opened cannot overwrite the new PIN.
+        assertFalse(AdminPinStore.replacePin(context, PIN));
+        assertEquals(ShellPinProvider.STATUS_MATCH, status(verify(NEW_PIN)));
+    }
+
+    @Test
+    public void aConsoleRotationPendingAcrossAShellReplacementKeepsTheShellsCode() {
+        setPin();
+        AdminSession.unlock();
+        long session = AdminSession.activeGeneration();
+        String code = call(METHODS[2], PIN, NEW_PIN).getString(ShellPinProvider.KEY_RECOVERY);
+        assertNull(AdminPinStore.rotateRecoveryCode(context, session));
+        assertNotNull(AdminPinStore.verify(context, code).recoveryGrant());
+    }
+
+    @Test
+    public void replacingThePinWithItselfRotatesTheRecoveryCode() {
+        String old = setPin().getString(ShellPinProvider.KEY_RECOVERY);
+        Bundle replaced = call(METHODS[2], PIN, PIN);
+        assertEquals(ShellPinProvider.STATUS_OK, status(replaced));
+        assertEquals(ShellPinProvider.STATUS_MATCH, status(verify(PIN)));
+        assertEquals(AdminPinStore.Status.INVALID, AdminPinStore.verify(context, old).status());
+        assertNotNull(AdminPinStore.verify(
+                context, replaced.getString(ShellPinProvider.KEY_RECOVERY)).recoveryGrant());
+    }
+
+    @Test
+    public void pinChangesAreAuditedOnDiskBeforeTheCallReturns() {
+        MemoryPreferences audit = new MemoryPreferences(Map.of());
+        audit.failCommit = false;
+        // This store has no asynchronous apply().
+        Context audited = withStore("admin_audit", audit.preferences());
+        provider = attached(audited);
+        setPin();
+        assertEquals(ShellPinProvider.STATUS_OK, status(call(METHODS[2], PIN, NEW_PIN)));
+        audit.restart();
+        assertEquals(List.of(AuditEvent.PIN_SET.code(), AuditEvent.PIN_REPLACED.code()),
+                AuditLog.codes(audited).stream().map(AuditLog.CodeEntry::code).toList());
+    }
+
+    @Test
+    public void aFailedAuditWriteDoesNotFailTheCompletedPinChange() {
+        for (boolean throwing : new boolean[]{false, true}) {
+            assertTrue(prefs.edit().clear().commit());
+            MemoryPreferences audit = new MemoryPreferences(Map.of());
+            audit.throwBeforeCommit = throwing;
+            provider = attached(withStore("admin_audit", audit.preferences()));
+            assertNotNull(setPin().getString(ShellPinProvider.KEY_RECOVERY));
+            Bundle replaced = call(METHODS[2], PIN, NEW_PIN);
+            assertEquals(ShellPinProvider.STATUS_OK, status(replaced));
+            assertNotNull(replaced.getString(ShellPinProvider.KEY_RECOVERY));
+            assertEquals(ShellPinProvider.STATUS_MATCH, status(verify(NEW_PIN)));
+        }
+    }
+
+    @Test
+    public void aRecoveryCodeThatCannotBeSavedIsReportedAsSuch() {
+        MemoryPreferences failing = new MemoryPreferences(Map.of());
+        failing.beforeCommit = keys -> failing.failCommit = keys.contains("recovery_salt");
+        provider = attached(withStore("admin_security", failing.preferences()));
+        Bundle result = call(METHODS[0], null, PIN);
+        assertEquals(ShellPinProvider.STATUS_PIN_SAVED_RECOVERY_FAILED, status(result));
+        assertEquals("recovery-code-save-failed", result.getString(ShellPinProvider.KEY_CODE));
+        assertEquals(Set.of(ShellPinProvider.KEY_STATUS, ShellPinProvider.KEY_CODE), result.keySet());
+
+        Security.removeProvider(keystore.getName());
+        assertEquals("recovery-code-create-failed", assertThrows(SecurityException.class,
+                () -> AdminPinStore.rotateRecoveryCode(context)).getMessage());
+    }
+
+    @Test
     public void shellCannotReplaceWhileTheConsoleHoldsARecoveryGrant() {
         String recovery = setPin().getString(ShellPinProvider.KEY_RECOVERY);
         var grant = AdminPinStore.verify(context, recovery).recoveryGrant();
@@ -227,17 +343,7 @@ public class ShellPinProviderCallTest {
         setPin();
         MemoryPreferences failing = new MemoryPreferences(prefs.getAll());
         SharedPreferences store = failing.preferences();
-        ShellPinProvider faulted = attached(new ContextWrapper(context) {
-            @Override
-            public Context getApplicationContext() {
-                return this;
-            }
-
-            @Override
-            public SharedPreferences getSharedPreferences(String name, int mode) {
-                return "admin_security".equals(name) ? store : super.getSharedPreferences(name, mode);
-            }
-        });
+        ShellPinProvider faulted = attached(withStore("admin_security", store));
         String verifier = store.getString("pin_verifier", null);
         assertError("verify-failed", faulted.call(METHODS[1], null, extras(null, PIN)));
         assertError("verify-failed", faulted.call(METHODS[2], null, extras(PIN, NEW_PIN)));
@@ -264,6 +370,20 @@ public class ShellPinProviderCallTest {
     @Test
     public void aProviderWithoutAContextIsRefused() {
         assertError("context-unavailable", new ShellPinProvider().call(METHODS[1], null, extras(null, PIN)));
+    }
+
+    private Context withStore(String replaced, SharedPreferences store) {
+        return new ContextWrapper(context) {
+            @Override
+            public Context getApplicationContext() {
+                return this;
+            }
+
+            @Override
+            public SharedPreferences getSharedPreferences(String name, int mode) {
+                return replaced.equals(name) ? store : super.getSharedPreferences(name, mode);
+            }
+        };
     }
 
     private static ShellPinProvider attached(Context context) {

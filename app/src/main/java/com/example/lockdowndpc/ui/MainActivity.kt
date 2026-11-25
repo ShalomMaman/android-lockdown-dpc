@@ -535,7 +535,7 @@ private fun AdminConsole(
 
     fun unlockWith(pin: String) {
         if (enterRemoteStatusIfNeeded() || syncRecoveryPinSetup()) return
-        val result = AdminPinStore.verify(context, pin)
+        val result = AdminPinStore.verifyAndUnlock(context, pin)
         if (enterRemoteStatusIfNeeded()) return
         when (result.status()) {
             AdminPinStore.Status.SUCCESS -> {
@@ -544,7 +544,6 @@ private fun AdminConsole(
                 if (grant != null) {
                     showRecoveryPinSetup(grant)
                 } else {
-                    AdminSession.unlock()
                     showAdmin()
                 }
             }
@@ -667,10 +666,17 @@ private fun AdminConsole(
         if (!requireSession()) {
             return
         }
+        val session = AdminSession.activeGeneration()
         try {
-            AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, resources.getString(R.string.audit_recovery))
-            showRecovery(AdminPinStore.rotateRecoveryCode(context))
+            val code: String? = AdminPinStore.rotateRecoveryCode(context, session)
+            if (code == null) {
+                haptics.reject()
+                showLocked()
+                return
+            }
+            showRecovery(code)
             haptics.confirm()
+            AuditLog.append(context, AuditEvent.RECOVERY_ROTATED, resources.getString(R.string.audit_recovery))
         } catch (exception: RuntimeException) {
             haptics.reject()
             message = UiMessage(resources.getString(R.string.admin_error_recovery), isError = true)
