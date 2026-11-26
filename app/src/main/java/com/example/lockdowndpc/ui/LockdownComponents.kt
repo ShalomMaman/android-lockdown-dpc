@@ -1,9 +1,11 @@
 package com.example.lockdowndpc.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -24,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Autorenew
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
@@ -37,14 +41,18 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +64,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -68,6 +77,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDirection
 import androidx.compose.ui.unit.dp
+import com.example.lockdowndpc.R
 import com.example.lockdowndpc.ui.theme.LockdownStatusColors
 
 /** A single inline result line shown under the status card or a form. */
@@ -101,20 +111,40 @@ private val MinTouchTarget = 52.dp
 @Composable
 internal fun LockdownScreen(
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     modifier: Modifier = Modifier,
     refreshing: Boolean = false,
     onRefresh: (() -> Unit)? = null,
+    scrollState: ScrollState = rememberScrollState(),
+    onBack: (() -> Unit)? = null,
+    backEnabled: Boolean = true,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    Scaffold(modifier = modifier.fillMaxSize()) { insets ->
+    Scaffold(
+        modifier = modifier.fillMaxSize(),
+        topBar = {
+            if (onBack != null) {
+                TopAppBar(
+                    title = {},
+                    navigationIcon = {
+                        IconButton(onClick = onBack, enabled = backEnabled) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                                contentDescription = stringResource(R.string.action_back),
+                            )
+                        }
+                    },
+                )
+            }
+        },
+    ) { insets ->
         val frame = Modifier.fillMaxSize().padding(insets)
         if (onRefresh != null) {
             PullToRefreshBox(isRefreshing = refreshing, onRefresh = onRefresh, modifier = frame) {
-                LockdownScreenContent(title, subtitle, Modifier.fillMaxSize(), content)
+                LockdownScreenContent(title, subtitle, Modifier.fillMaxSize(), scrollState, content)
             }
         } else {
-            LockdownScreenContent(title, subtitle, frame, content)
+            LockdownScreenContent(title, subtitle, frame, scrollState, content)
         }
     }
 }
@@ -124,11 +154,12 @@ private fun LockdownScreenContent(
     title: String,
     subtitle: String,
     modifier: Modifier,
+    scrollState: ScrollState,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
         modifier = modifier
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 20.dp)
             .padding(top = 28.dp, bottom = 36.dp),
     ) {
@@ -138,14 +169,78 @@ private fun LockdownScreenContent(
             color = MaterialTheme.colorScheme.primary,
             modifier = Modifier.semantics { heading() },
         )
-        Spacer(Modifier.height(10.dp))
-        Text(
-            text = subtitle,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (subtitle.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Spacer(Modifier.height(24.dp))
         content()
+    }
+}
+
+@Composable
+internal fun ConfirmationScreen(
+    title: String,
+    confirmText: String,
+    onBack: () -> Unit,
+    onConfirm: () -> Unit,
+    subtitle: String = "",
+    cancelText: String = stringResource(R.string.action_cancel),
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    confirmIcon: ImageVector? = null,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val haptics = rememberHaptics()
+    BackHandler { if (!loading) onBack() }
+    LockdownScreen(title = title, subtitle = subtitle, onBack = onBack, backEnabled = !loading) {
+        content()
+        Spacer(Modifier.height(24.dp))
+        PrimaryAction(
+            text = confirmText,
+            icon = confirmIcon,
+            enabled = enabled,
+            loading = loading,
+            onClick = {
+                haptics.tick()
+                onConfirm()
+            },
+        )
+        Spacer(Modifier.height(12.dp))
+        SecondaryAction(text = cancelText, enabled = !loading, onClick = onBack)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ChoiceSheet(
+    title: String,
+    onDismiss: () -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.semantics { heading() },
+            )
+            content()
+        }
     }
 }
 
@@ -349,7 +444,7 @@ internal fun PinField(
         visualTransformation = PasswordVisualTransformation(),
         textStyle = LocalTextStyle.current.copy(
             textDirection = TextDirection.Ltr,
-            textAlign = TextAlign.Left,
+            textAlign = TextAlign.Start,
         ),
         keyboardOptions = KeyboardOptions(
             keyboardType = KeyboardType.NumberPassword,

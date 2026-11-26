@@ -21,10 +21,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Build
@@ -44,14 +44,13 @@ import androidx.compose.material.icons.rounded.SystemUpdateAlt
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.material.icons.rounded.VpnKey
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +102,7 @@ import com.example.lockdowndpc.updates.UpdatePhase
 import com.example.lockdowndpc.updates.UpdateScheduler
 import com.example.lockdowndpc.updates.UpdateSnapshot
 import com.example.lockdowndpc.updates.UpdateStateStore
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -344,6 +344,9 @@ private fun AdminConsole(
     val kioskOperationInProgress = kioskActionInProgress != null
     var updateSnapshot by remember { mutableStateOf(UpdateStateStore.read(context)) }
     var kiosk by remember { mutableStateOf(KioskSnapshot.Empty) }
+    var kioskReading by remember { mutableStateOf(false) }
+    var kioskTransitionRevision by remember { mutableIntStateOf(0) }
+    var statusReadError by remember { mutableStateOf<UiMessage?>(null) }
     var managementEntries by remember { mutableStateOf(emptyList<ManagementEntry>()) }
     var statusRevision by remember { mutableIntStateOf(0) }
     val coroutineScope = rememberCoroutineScope()
@@ -369,8 +372,17 @@ private fun AdminConsole(
         }
     }
 
+    fun dismissAdminOverlays() {
+        modePickerVisible = false
+        languagePickerVisible = false
+        auditLogVisible = false
+        recoveryRotateVisible = false
+        managementVisible = false
+    }
+
     fun showLocked() {
         AdminSession.lock()
+        dismissAdminOverlays()
         message = null
         applyFailureMessage = null
         recoveryGrant = null
@@ -381,6 +393,7 @@ private fun AdminConsole(
     fun enterRemoteStatusIfNeeded(): Boolean {
         if (ManagementModeStore.read(context).usesLocalPolicy()) return false
         AdminSession.lock()
+        dismissAdminOverlays()
         screen = ConsoleScreen.REMOTE_STATUS
         return true
     }
@@ -422,11 +435,7 @@ private fun AdminConsole(
         AdminSession.lock()
         message = null
         applyFailureMessage = null
-        modePickerVisible = false
-        languagePickerVisible = false
-        auditLogVisible = false
-        recoveryRotateVisible = false
-        managementVisible = false
+        dismissAdminOverlays()
         recoveryGrant = grant
         pinSetupMode = PinSetupMode.RECOVERY
         screen = ConsoleScreen.PIN_SETUP
@@ -716,10 +725,38 @@ private fun AdminConsole(
     }
 
     fun refreshKiosk() {
+        if (kioskReading || kioskActionInProgress != null) return
+        kioskReading = true
+        val revision = kioskTransitionRevision
         coroutineScope.launch {
-            val app = context.applicationContext
-            kiosk = withContext(Dispatchers.IO) { readKioskSnapshot(app) }
-            managementEntries = withContext(Dispatchers.IO) { readManagementEntries(app) }
+            try {
+                val app = context.applicationContext
+                val (snapshot, entries) = withContext(Dispatchers.IO) {
+                    readKioskSnapshot(app) to readManagementEntries(app)
+                }
+                if (revision == kioskTransitionRevision) {
+                    kiosk = snapshot
+                    managementEntries = entries
+                    statusReadError = null
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                if (revision == kioskTransitionRevision) {
+                    statusReadError = UiMessage(resources.getString(R.string.status_refresh_failed), isError = true)
+                    haptics.reject()
+                }
+            } finally {
+                kioskReading = false
+            }
+        }
+    }
+
+    fun refreshConsoleStatus() {
+        if (!kioskReading && requireSession()) {
+            statusRevision++
+            updateSnapshot = UpdateStateStore.read(context)
+            refreshKiosk()
         }
     }
 
@@ -737,6 +774,7 @@ private fun AdminConsole(
         }
         AdminSession.extend()
         val authority = AdminAuthority.localSession(context) ?: return
+        kioskTransitionRevision++
         kioskActionInProgress = successMessage
         message = null
         coroutineScope.launch {
@@ -853,6 +891,30 @@ private fun AdminConsole(
         }
     }
 
+    val adminScroll = rememberScrollState()
+    if (screen == ConsoleScreen.ADMIN && recoveryRotateVisible) {
+        ConfirmationScreen(
+            title = stringResource(R.string.recovery_rotate_title),
+            confirmText = stringResource(R.string.recovery_rotate_confirm),
+            onBack = { recoveryRotateVisible = false },
+            onConfirm = confirm@{
+                if (!recoveryRotateVisible) return@confirm
+                recoveryRotateVisible = false
+                rotateRecoveryCode()
+            },
+        ) {
+            Text(stringResource(R.string.recovery_rotate_body))
+        }
+        return
+    }
+    if (screen == ConsoleScreen.ADMIN && auditLogVisible) {
+        AuditLogScreen(
+            onBack = { auditLogVisible = false },
+            canRefresh = ::requireSession,
+        )
+        return
+    }
+
     when (screen) {
         ConsoleScreen.ENROLLMENT -> EnrollmentScreen()
         ConsoleScreen.REMOTE_STATUS -> Unit
@@ -878,6 +940,10 @@ private fun AdminConsole(
             policyActionInProgress = policyActionInProgress,
             updateOperationInProgress = updateOperationInProgress,
             updateSnapshot = updateSnapshot,
+            scrollState = adminScroll,
+            refreshing = kioskReading,
+            onRefresh = ::refreshConsoleStatus,
+            statusReadError = statusReadError,
             message = message,
             onApply = ::applyProtection,
             onPause = ::pauseProtection,
@@ -946,6 +1012,9 @@ private fun AdminConsole(
             busy = kioskOperationInProgress,
             clearing = kioskActionInProgress == R.string.kiosk_cleared,
             exiting = kioskActionInProgress == R.string.kiosk_exited,
+            refreshing = kioskReading,
+            onRefresh = ::refreshConsoleStatus,
+            statusReadError = statusReadError,
             message = message,
             onConfigureApp = {
                 if (requireSession()) {
@@ -1024,11 +1093,12 @@ private fun AdminConsole(
         )
     }
 
-    if (modePickerVisible) {
-        ModePickerDialog(
+    if (screen == ConsoleScreen.ADMIN && modePickerVisible) {
+        ModePickerSheet(
             current = status.mode,
             onDismiss = { modePickerVisible = false },
             onSave = { chosen ->
+                if (!modePickerVisible) return@ModePickerSheet
                 modePickerVisible = false
                 // The session is re-checked here, not only when the dialog was
                 // opened. `AdminSession` expires on wall time rather than on
@@ -1036,7 +1106,7 @@ private fun AdminConsole(
                 // could otherwise be saved by whoever picked the device up three
                 // minutes later — and the write commits before `showAdmin` drops
                 // back to the PIN screen.
-                if (!requireSession()) return@ModePickerDialog
+                if (!requireSession()) return@ModePickerSheet
                 if (!AuthorizedPolicyWriter.setProtectionMode(
                         context, AdminAuthority.localSession(context), chosen,
                     )
@@ -1046,7 +1116,7 @@ private fun AdminConsole(
                         resources.getString(R.string.policy_settings_save_failed),
                         isError = true,
                     )
-                    return@ModePickerDialog
+                    return@ModePickerSheet
                 }
                 AuditLog.append(
                     context,
@@ -1065,11 +1135,12 @@ private fun AdminConsole(
         )
     }
 
-    if (languagePickerVisible) {
-        LanguagePickerDialog(
+    if (screen == ConsoleScreen.ADMIN && languagePickerVisible) {
+        LanguagePickerSheet(
             current = AppLocales.current(),
             onDismiss = { languagePickerVisible = false },
             onSave = { chosen ->
+                if (!languagePickerVisible) return@LanguagePickerSheet
                 languagePickerVisible = false
                 // Same re-check as the mode picker, for the same reason.
                 if (requireSession()) {
@@ -1084,39 +1155,8 @@ private fun AdminConsole(
         )
     }
 
-    if (recoveryRotateVisible) {
-        // Revoking the standing recovery credential is at least as hard to undo as
-        // activating kiosk, which gets a confirmation screen of its own — and the
-        // row directly above this one is "Change the administrator PIN", so a
-        // mistap lands here. A 64 dp subtitle is not the place to disclose it.
-        AlertDialog(
-            onDismissRequest = { recoveryRotateVisible = false },
-            title = { Text(stringResource(R.string.recovery_rotate_title)) },
-            text = { Text(stringResource(R.string.recovery_rotate_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        recoveryRotateVisible = false
-                        rotateRecoveryCode()
-                    }
-                ) {
-                    Text(stringResource(R.string.recovery_rotate_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { recoveryRotateVisible = false }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
-    }
-
-    if (auditLogVisible) {
-        AuditLogDialog(onDismiss = { auditLogVisible = false })
-    }
-
-    if (managementVisible) {
-        ManagementPackagesDialog(
+    if (screen == ConsoleScreen.ADMIN && managementVisible) {
+        ManagementPackagesSheet(
             entries = managementEntries,
             onDismiss = { managementVisible = false },
         )
@@ -1247,6 +1287,10 @@ private fun AdminScreen(
     policyActionInProgress: ProtectionAction?,
     updateOperationInProgress: Boolean,
     updateSnapshot: UpdateSnapshot,
+    scrollState: ScrollState,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    statusReadError: UiMessage?,
     message: UiMessage?,
     onApply: () -> Unit,
     onPause: () -> Unit,
@@ -1273,6 +1317,9 @@ private fun AdminScreen(
         subtitle = stringResource(
             if (allowSelected) R.string.admin_subtitle_allow else R.string.admin_subtitle_block
         ),
+        scrollState = scrollState,
+        refreshing = refreshing,
+        onRefresh = onRefresh,
     ) {
         PolicyStatusCard(
             tone = statusTone(status.policyState),
@@ -1280,6 +1327,7 @@ private fun AdminScreen(
             facts = statusFacts(status),
             detail = statusDetail(status),
         )
+        MessageBanner(statusReadError, Modifier.padding(top = 16.dp))
         MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(24.dp))
@@ -1537,7 +1585,7 @@ private fun RecoveryScreen(code: String, onAcknowledge: () -> Unit) {
 }
 
 @Composable
-private fun ModePickerDialog(
+private fun ModePickerSheet(
     current: AllowedAppsStore.ProtectionMode,
     onDismiss: () -> Unit,
     onSave: (AllowedAppsStore.ProtectionMode) -> Unit,
@@ -1548,53 +1596,51 @@ private fun ModePickerDialog(
         AllowedAppsStore.ProtectionMode.ALLOW_SELECTED to R.string.mode_option_allow,
     )
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.mode_dialog_title)) },
-        text = {
-            Column {
-                options.forEach { (mode, label) ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .selectable(
-                                selected = selected == mode,
-                                role = Role.RadioButton,
-                                onClick = { selected = mode },
-                            )
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = selected == mode, onClick = null)
-                        Spacer(Modifier.size(12.dp))
-                        Text(
-                            text = stringResource(label),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
+    val haptics = rememberHaptics()
+    ChoiceSheet(title = stringResource(R.string.mode_dialog_title), onDismiss = onDismiss) {
+        options.forEach { (mode, label) ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .selectable(
+                        selected = selected == mode,
+                        role = Role.RadioButton,
+                        onClick = {
+                        if (selected != mode) haptics.tick()
+                        selected = mode
+                    },
+                    )
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = selected == mode, onClick = null)
+                Spacer(Modifier.size(12.dp))
                 Text(
-                    // Each method keeps its own saved list, so this dialog can say
-                    // plainly that switching costs nothing. Up to 0.5.0 saving a
-                    // different method deleted the curated list outright, with no
-                    // warning on this screen or anywhere else.
-                    text = stringResource(R.string.mode_dialog_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = stringResource(label),
+                    style = MaterialTheme.typography.bodyLarge,
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(selected) }) {
-                Text(stringResource(R.string.action_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-        },
-    )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            // Each method keeps its own saved list, so this dialog can say
+            // plainly that switching costs nothing. Up to 0.5.0 saving a
+            // different method deleted the curated list outright, with no
+            // warning on this screen or anywhere else.
+            text = stringResource(R.string.mode_dialog_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrimaryAction(
+            text = stringResource(R.string.action_save),
+            onClick = {
+                haptics.tick()
+                onSave(selected)
+            },
+        )
+        SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onDismiss)
+    }
 }
 
 /**
@@ -1603,80 +1649,109 @@ private fun ModePickerDialog(
  * currently showing one they cannot read.
  */
 @Composable
-private fun LanguagePickerDialog(
+private fun LanguagePickerSheet(
     current: LanguageChoice,
     onDismiss: () -> Unit,
     onSave: (LanguageChoice) -> Unit,
 ) {
     var selected by remember { mutableStateOf(current) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.language_dialog_title)) },
-        text = {
-            Column {
-                LanguageChoice.entries.forEach { choice ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 52.dp)
-                            .selectable(
-                                selected = selected == choice,
-                                role = Role.RadioButton,
-                                onClick = { selected = choice },
-                            )
-                            .padding(vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        RadioButton(selected = selected == choice, onClick = null)
-                        Spacer(Modifier.size(12.dp))
-                        Text(
-                            // A language name is written in its own script, so it
-                            // is isolated and lets the bidi algorithm resolve its
-                            // direction from its own first strong character.
-                            text = stringResource(AppLocales.labelOf(choice)).bidiIsolated(),
-                            style = MaterialTheme.typography.bodyLarge,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
+    val haptics = rememberHaptics()
+    ChoiceSheet(title = stringResource(R.string.language_dialog_title), onDismiss = onDismiss) {
+        LanguageChoice.entries.forEach { choice ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 52.dp)
+                    .selectable(
+                        selected = selected == choice,
+                        role = Role.RadioButton,
+                        onClick = {
+                        if (selected != choice) haptics.tick()
+                        selected = choice
+                    },
+                    )
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RadioButton(selected = selected == choice, onClick = null)
+                Spacer(Modifier.size(12.dp))
                 Text(
-                    text = stringResource(R.string.language_dialog_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // A language name is written in its own script, so it
+                    // is isolated and lets the bidi algorithm resolve its
+                    // direction from its own first strong character.
+                    text = stringResource(AppLocales.labelOf(choice)).bidiIsolated(),
+                    style = MaterialTheme.typography.bodyLarge,
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(selected) }) {
-                Text(stringResource(R.string.action_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
-        },
-    )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.language_dialog_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrimaryAction(
+            text = stringResource(R.string.action_save),
+            onClick = {
+                haptics.tick()
+                onSave(selected)
+            },
+        )
+        SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onDismiss)
+    }
 }
 
 @Composable
-private fun AuditLogDialog(onDismiss: () -> Unit) {
+private fun AuditLogScreen(onBack: () -> Unit, canRefresh: () -> Boolean) {
     val context = LocalContext.current
-    // Entries were recorded in whichever language was active at the time, so each
-    // line is isolated on its own instead of inheriting the direction of the first.
-    val entries = remember { bidiIsolatedLines(AuditLog.formatted(context).orEmpty()) }
+    val haptics = rememberHaptics()
+    var entries by remember { mutableStateOf<String?>(null) }
+    var revision by remember { mutableIntStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
+    var failed by remember { mutableStateOf(false) }
 
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.audit_dialog_title)) },
-        text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text(text = entries, style = MaterialTheme.typography.bodyMedium)
+    LaunchedEffect(revision) {
+        try {
+            // Each entry retains the direction of the language it was recorded in.
+            entries = withContext(Dispatchers.IO) {
+                bidiIsolatedLines(AuditLog.formatted(context).orEmpty())
             }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
-        },
-    )
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            failed = true
+            haptics.reject()
+        } finally {
+            loading = false
+        }
+    }
+
+    fun refresh() {
+        if (!loading && canRefresh()) {
+            loading = true
+            failed = false
+            revision++
+        }
+    }
+
+    BackHandler(onBack = onBack)
+    LockdownScreen(
+        title = stringResource(R.string.audit_dialog_title),
+        refreshing = loading && revision > 0,
+        onRefresh = ::refresh,
+    ) {
+        if (loading && entries == null) {
+            CircularProgressIndicator()
+        }
+        if (failed) {
+            MessageBanner(UiMessage(stringResource(R.string.audit_load_failed), isError = true))
+            ConsoleTextAction(stringResource(R.string.action_retry), onClick = ::refresh)
+        }
+        entries?.let { Text(text = it, style = MaterialTheme.typography.bodyMedium) }
+        Spacer(Modifier.height(24.dp))
+        SecondaryAction(text = stringResource(R.string.action_close), onClick = onBack)
+    }
 }
 
 private fun statusTone(state: AllowedAppsStore.PolicyState): StatusTone = when (state) {

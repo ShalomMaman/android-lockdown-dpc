@@ -74,6 +74,7 @@ import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator
 import com.example.lockdowndpc.policy.SystemPolicyStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -152,6 +153,8 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
     val haptics = rememberHaptics()
 
     var loading by remember { mutableStateOf(true) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshFailed by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf(MaintenanceSnapshot.unknown()) }
     var draft by remember { mutableStateOf(MaintenanceDraft()) }
@@ -185,13 +188,27 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    suspend fun refreshSnapshot() {
         val app = context.applicationContext
-        val result = onPolicyThread { loadMaintenance(app) }
-        snapshot = result
-        elapsedNow = SystemClock.elapsedRealtime()
-        loading = false
+        try {
+            val result = onPolicyThread { loadMaintenance(app) }
+            if (!working) {
+                snapshot = result
+                elapsedNow = SystemClock.elapsedRealtime()
+                refreshFailed = false
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            refreshFailed = true
+            haptics.reject()
+        } finally {
+            loading = false
+            refreshing = false
+        }
     }
+
+    LaunchedEffect(Unit) { refreshSnapshot() }
 
     // The countdown, and the pass that ends an expired window. Expiry is not a
     // display concern: when the time is up the coordinator restores the base
@@ -255,14 +272,29 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
     val window = snapshot.window
     val canRetreat = window == null &&
         (draft.step == MaintenanceStep.CONFIRM || draft.step == MaintenanceStep.CONFIRM_BREAK_GLASS)
-    BackHandler(enabled = canRetreat || working) {
-        if (canRetreat) backOneStep()
+    BackHandler {
+        if (!working) {
+            if (canRetreat) backOneStep() else onBack()
+        }
     }
     LockdownScreen(
         title = stringResource(R.string.maint_title),
         subtitle = stringResource(R.string.maint_subtitle),
+        refreshing = refreshing,
+        onRefresh = {
+            if (!working && !loading && !refreshing && !canRetreat && AdminSession.isUnlocked()) {
+                refreshing = true
+                coroutineScope.launch { refreshSnapshot() }
+            }
+        },
     ) {
         MaintenanceStatusCard(window, elapsedNow)
+        if (refreshFailed) {
+            MessageBanner(
+                UiMessage(stringResource(R.string.status_refresh_failed), isError = true),
+                Modifier.padding(top = 16.dp),
+            )
+        }
 
         if (!snapshot.deviceOwner) {
             Spacer(Modifier.height(16.dp))
@@ -300,7 +332,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
                 working = working,
                 onCloseNow = { closeNow() },
             )
-        } else {
+        } else if (!refreshFailed) {
             when (draft.step) {
                 MaintenanceStep.CONFIRM -> ConfirmSection(
                     draft = draft,

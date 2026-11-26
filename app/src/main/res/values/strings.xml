@@ -330,6 +330,7 @@
     <!-- Audit log -->
     <string name="audit_dialog_title">Administration audit log</string>
     <string name="audit_empty">No administrative actions have been recorded yet.</string>
+    <string name="audit_load_failed">Could not read the administration audit log.</string>
     <string name="audit_kiosk_configured_off">Kiosk profile saved: managed app filtering only</string>
     <string name="audit_kiosk_configured_app">Kiosk profile saved: single-app kiosk, locked app %1$s</string>
     <string name="audit_kiosk_configured_site">Kiosk profile saved: single-site kiosk, allowed origin %1$s</string>
@@ -358,4 +359,5 @@
     <string name="kiosk_app_load_failed">Could not read the kiosk app list. Pull down to try again.</string>
     <string name="home_filter_apply_success">Home filter changes verified on this device.</string>
     <string name="home_filter_apply_unverified">The device has not confirmed the home filter changes. Review the status and reapply if needed.</string>
+    <string name="status_refresh_failed">Could not refresh the device status.</string>
 </resources>

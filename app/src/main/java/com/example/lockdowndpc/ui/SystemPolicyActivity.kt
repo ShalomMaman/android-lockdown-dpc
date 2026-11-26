@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -18,13 +19,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -72,6 +72,7 @@ import com.example.lockdowndpc.policy.SystemPolicyProfile
 import com.example.lockdowndpc.policy.SystemPolicyStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -89,7 +90,7 @@ import kotlinx.coroutines.withContext
  *    outcome underneath, and flipping a switch marks that verification stale, so
  *    a saved choice reads as "saved, not verified yet" until an apply pass
  *    confirms it against the platform.
- * 3. Nothing is written until the operator confirms a dialog that says what the
+ * 3. Nothing is written until the operator confirms on a screen that says what the
  *    control does to the device in front of them.
  *
  * `AppCompatActivity` is the base class for the same localization reason as the
@@ -302,13 +303,25 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         working = true
         message = null
         coroutineScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                PolicyReconciliationCoordinator.callOnPolicyThread {
-                    LockdownPolicyController.apply(context.applicationContext)
+            val result = try {
+                withContext(Dispatchers.IO) {
+                    PolicyReconciliationCoordinator.callOnPolicyThread {
+                        LockdownPolicyController.apply(context.applicationContext)
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: RuntimeException) {
+                message = UiMessage(
+                    resources.getString(R.string.system_policy_applied_failed, failure.javaClass.simpleName.bidiIsolated()),
+                    isError = true,
+                )
+                haptics.reject()
+                return@launch
+            } finally {
+                working = false
+                revision++
             }
-            working = false
-            revision++
             message = when {
                 !result.deviceOwner() -> UiMessage(
                     resources.getString(R.string.not_device_owner),
@@ -389,6 +402,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
             }
             working = false
             clearingApprovals = false
+            pendingExemption = null
             revision++
             val changed = outcome.getOrNull()
             val result = changed?.result()
@@ -454,7 +468,9 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
      * then runs the enforcing pass.
      */
     fun submitSchedule(requested: Boolean) {
-        if (working || !requireSession()) {
+        if (working) return
+        if (!requireSession()) {
+            pendingSchedule = null
             return
         }
         working = true
@@ -469,6 +485,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
                 }
             }
             working = false
+            pendingSchedule = null
             revision++
             val result = outcome.getOrElse { failure ->
                 // The stored schedule is re-read on the next render, so the
@@ -527,11 +544,13 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
 
     /** Pins the application to the signer it has right now, then submits. */
     fun approveSocial(candidate: ExemptionCandidate) {
+        if (working) return
         val signer = PackageIdentity.currentSignerSha256IncludingHidden(
             context.packageManager,
             candidate.packageName,
         )
         if (signer.isEmpty()) {
+            pendingExemption = null
             haptics.reject()
             message = UiMessage(
                 resources.getString(R.string.system_policy_exempt_social_signer_unreadable),
@@ -544,9 +563,68 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         }
     }
 
+    val scrollState = rememberScrollState()
+    BackHandler(onBack = onBack)
+
+    pending?.let { change ->
+        SystemPolicyConfirmScreen(
+            change = change,
+            onConfirm = confirm@{
+                if (pending !== change) return@confirm
+                pending = null
+                commit(change)
+            },
+            onDismiss = { pending = null },
+        )
+        return
+    }
+
+    pendingExemption?.let { change ->
+        ExemptionConfirmScreen(
+            pending = change,
+            loading = working,
+            onConfirm = confirm@{
+                if (pendingExemption !== change) return@confirm
+                when (change) {
+                    PendingExemption.Chrome -> submitExemption("approve:chrome") { settings ->
+                        settings.withChrome(true)
+                    }
+                    is PendingExemption.Social -> approveSocial(change.candidate)
+                }
+            },
+            onDismiss = { if (!working) pendingExemption = null },
+        )
+        return
+    }
+
+    pendingSchedule?.let { requested ->
+        ScheduleConfirmScreen(
+            requested = requested,
+            loading = working,
+            onConfirm = { if (pendingSchedule == requested) submitSchedule(requested) },
+            onDismiss = { if (!working) pendingSchedule = null },
+        )
+        return
+    }
+
+    pendingPlayCompatibility?.let { requested ->
+        PlayCompatibilityConfirmScreen(
+            requested = requested,
+            onConfirm = confirm@{
+                if (pendingPlayCompatibility != requested) return@confirm
+                pendingPlayCompatibility = null
+                commitPlayCompatibility(requested)
+            },
+            onDismiss = { pendingPlayCompatibility = null },
+        )
+        return
+    }
+
     LockdownScreen(
         title = stringResource(R.string.system_policy_title),
         subtitle = stringResource(R.string.system_policy_subtitle),
+        onRefresh = { if (!working) revision++ },
+        scrollState = scrollState,
     ) {
         PolicyStatusCard(
             tone = if (profile == SystemPolicyProfile.PRODUCTION) {
@@ -654,55 +732,6 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(12.dp))
         SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
     }
-
-    pending?.let { change ->
-        SystemPolicyConfirmDialog(
-            change = change,
-            onConfirm = {
-                pending = null
-                commit(change)
-            },
-            onDismiss = { pending = null },
-        )
-    }
-
-    pendingExemption?.let { change ->
-        ExemptionConfirmDialog(
-            pending = change,
-            onConfirm = {
-                pendingExemption = null
-                when (change) {
-                    PendingExemption.Chrome -> submitExemption("approve:chrome") { settings ->
-                        settings.withChrome(true)
-                    }
-                    is PendingExemption.Social -> approveSocial(change.candidate)
-                }
-            },
-            onDismiss = { pendingExemption = null },
-        )
-    }
-
-    pendingSchedule?.let { requested ->
-        ScheduleConfirmDialog(
-            requested = requested,
-            onConfirm = {
-                pendingSchedule = null
-                submitSchedule(requested)
-            },
-            onDismiss = { pendingSchedule = null },
-        )
-    }
-
-    pendingPlayCompatibility?.let { requested ->
-        PlayCompatibilityConfirmDialog(
-            requested = requested,
-            onConfirm = {
-                pendingPlayCompatibility = null
-                commitPlayCompatibility(requested)
-            },
-            onDismiss = { pendingPlayCompatibility = null },
-        )
-    }
 }
 
 /**
@@ -710,7 +739,7 @@ private fun SystemPolicyScreen(onBack: () -> Unit) {
  * confirmed, and a switch.
  *
  * The boundary paragraph is always on screen rather than only inside the
- * confirmation dialog. An operator who inherits a configured device has to be
+ * confirmation screen. An operator who inherits a configured device has to be
  * able to read why an application store is visible on a protected phone without
  * touching the switch to find out.
  */
@@ -879,90 +908,50 @@ private fun ScheduleRow(
 
 /** What turning the windows on or off does, stated before anything is written. */
 @Composable
-private fun ScheduleConfirmDialog(
+private fun ScheduleConfirmScreen(
     requested: Boolean,
+    loading: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                stringResource(
-                    if (requested) {
-                        R.string.system_policy_schedule_confirm_enable_title
-                    } else {
-                        R.string.system_policy_schedule_confirm_disable_title
-                    }
-                )
-            )
-        },
-        text = {
-            Text(
-                stringResource(
-                    if (requested) {
-                        R.string.system_policy_schedule_confirm_enable_body
-                    } else {
-                        R.string.system_policy_schedule_confirm_disable_body
-                    }
-                )
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.system_policy_confirm_apply))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(
+            if (requested) R.string.system_policy_schedule_confirm_enable_title
+            else R.string.system_policy_schedule_confirm_disable_title,
+        ),
+        confirmText = stringResource(R.string.system_policy_confirm_apply),
+        loading = loading,
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(stringResource(
+            if (requested) R.string.system_policy_schedule_confirm_enable_body
+            else R.string.system_policy_schedule_confirm_disable_body,
+        ))
+    }
 }
 
 /** The price of the exception, stated before anything is written. */
 @Composable
-private fun PlayCompatibilityConfirmDialog(
+private fun PlayCompatibilityConfirmScreen(
     requested: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                stringResource(
-                    if (requested) {
-                        R.string.system_policy_play_compat_confirm_enable_title
-                    } else {
-                        R.string.system_policy_play_compat_confirm_disable_title
-                    }
-                )
-            )
-        },
-        text = {
-            Text(
-                stringResource(
-                    if (requested) {
-                        R.string.system_policy_play_compat_confirm_enable_body
-                    } else {
-                        R.string.system_policy_play_compat_confirm_disable_body
-                    }
-                )
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.system_policy_confirm_apply))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(
+            if (requested) R.string.system_policy_play_compat_confirm_enable_title
+            else R.string.system_policy_play_compat_confirm_disable_title,
+        ),
+        confirmText = stringResource(R.string.system_policy_confirm_apply),
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(stringResource(
+            if (requested) R.string.system_policy_play_compat_confirm_enable_body
+            else R.string.system_policy_play_compat_confirm_disable_body,
+        ))
+    }
 }
 
 /**
@@ -1065,48 +1054,25 @@ private fun SystemPolicyControlRow(
 
 /** Consequences first, then the choice. Nothing is written before this returns. */
 @Composable
-private fun SystemPolicyConfirmDialog(
+private fun SystemPolicyConfirmScreen(
     change: PendingChange,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                stringResource(
-                    if (change.requested) {
-                        R.string.system_policy_confirm_enable_title
-                    } else {
-                        R.string.system_policy_confirm_disable_title
-                    }
-                )
-            )
-        },
-        text = {
-            Column {
-                Text(stringResource(SystemPolicyLabels.title(change.control)))
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    stringResource(
-                        if (change.requested) {
-                            SystemPolicyLabels.consequence(change.control)
-                        } else {
-                            R.string.system_policy_confirm_disable_body
-                        }
-                    )
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.system_policy_confirm_apply))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(
+            if (change.requested) R.string.system_policy_confirm_enable_title
+            else R.string.system_policy_confirm_disable_title,
+        ),
+        confirmText = stringResource(R.string.system_policy_confirm_apply),
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(stringResource(SystemPolicyLabels.title(change.control)))
+        Spacer(Modifier.height(10.dp))
+        Text(stringResource(
+            if (change.requested) SystemPolicyLabels.consequence(change.control)
+            else R.string.system_policy_confirm_disable_body,
+        ))
+    }
 }

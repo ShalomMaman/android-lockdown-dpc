@@ -94,4 +94,5 @@
     <string name="mgmtid_audit_pin_added">אישור ניהול אושר: %1$s — הזהות כעת %2$s</string>
     <string name="mgmtid_audit_pin_removed">אישור ניהול הוסר: %1$s — הזהות כעת %2$s</string>
     <string name="mgmtid_audit_refused">חבילת ניהול נדחתה: %1$s — %2$s</string>
+    <string name="mgmtid_load_failed">לא ניתן לקרוא את תעודות החתימה. משכו כלפי מטה כדי לנסות שוב.</string>
 </resources>

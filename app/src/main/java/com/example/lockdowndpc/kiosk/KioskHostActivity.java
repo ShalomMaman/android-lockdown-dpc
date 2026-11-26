@@ -268,6 +268,8 @@ public final class KioskHostActivity extends AppCompatActivity {
 
         Button retry = new Button(this);
         retry.setText(R.string.kiosk_host_retry);
+        retry.setMinimumHeight(Math.max(retry.getMinimumHeight(), dp(48)));
+        retry.setMinimumWidth(Math.max(retry.getMinimumWidth(), dp(48)));
         retry.setOnClickListener(view -> render());
         errorView.addView(retry);
 
@@ -294,6 +296,8 @@ public final class KioskHostActivity extends AppCompatActivity {
 
         Button resume = new Button(this);
         resume.setText(R.string.kiosk_home_resume);
+        resume.setMinimumHeight(Math.max(resume.getMinimumHeight(), dp(48)));
+        resume.setMinimumWidth(Math.max(resume.getMinimumWidth(), dp(48)));
         resume.setOnClickListener(view -> {
             targetLaunched = false;
             render();
