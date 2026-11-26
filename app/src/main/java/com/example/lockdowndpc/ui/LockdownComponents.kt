@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -202,11 +203,19 @@ internal fun ConfirmationScreen(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val haptics = rememberHaptics()
-    // Measured on the uptime clock at first composition, so recomposition never restarts it.
-    val shownAt = remember { SystemClock.uptimeMillis() }
+    var shownAt by remember { mutableLongStateOf(-1L) }
     var nextConfirmAt by remember { mutableLongStateOf(0L) }
     BackHandler { if (!loading) onBack() }
-    LockdownScreen(title = title, subtitle = subtitle, onBack = onBack, backEnabled = !loading) {
+    LockdownScreen(
+        title = title,
+        subtitle = subtitle,
+        modifier = Modifier.onGloballyPositioned {
+            // Start with the first positioned frame, after composition has finished.
+            if (shownAt < 0L) shownAt = SystemClock.uptimeMillis()
+        },
+        onBack = onBack,
+        backEnabled = !loading,
+    ) {
         content()
         Spacer(Modifier.height(24.dp))
         PrimaryAction(
@@ -216,7 +225,7 @@ internal fun ConfirmationScreen(
             loading = loading,
             onClick = confirm@{
                 val now = SystemClock.uptimeMillis()
-                val ready = now - shownAt >= ConfirmTapGuardMillis
+                val ready = shownAt >= 0L && now - shownAt >= ConfirmTapGuardMillis
                 if (!ready || !enabled || loading || now < nextConfirmAt) return@confirm
                 nextConfirmAt = now + ConfirmTapGuardMillis
                 haptics.tick()

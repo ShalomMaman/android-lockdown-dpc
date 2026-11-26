@@ -7,7 +7,11 @@ import android.view.ViewGroup
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.StringRes
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.InternalComposeUiApi
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
@@ -19,6 +23,7 @@ import com.example.lockdowndpc.policy.PlayStoreCompatibilityStore
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyStore
 import com.example.lockdowndpc.security.AdminSession
+import com.example.lockdowndpc.ui.theme.LockdownTheme
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -31,6 +36,8 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowChoreographer
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
 
@@ -88,21 +95,73 @@ class PolicyConfirmationScreenTest {
     }
 
     @Test
-    fun repeatedConfirmCallbacksAreDebouncedUntilTheNextTapWindow() = withConsole { activity ->
-        val usbPolicy = SystemPolicyControl.USB_FILE_TRANSFER
-        val original = SystemPolicyStore.isRequested(activity, usbPolicy)
+    @LooperMode(LooperMode.Mode.PAUSED)
+    @OptIn(InternalComposeUiApi::class)
+    fun repeatedConfirmCallbacksAreDebouncedUntilTheNextTapWindow() {
+        var confirmCalls = 0
+        var composed = false
+        val placeConfirmation = mutableStateOf(false)
+        Robolectric.buildActivity(ComponentActivity::class.java).setup().use { controller ->
+            val activity = controller.get()
+            val confirmText = activity.getString(R.string.system_policy_confirm_apply)
+            activity.setContent {
+                LockdownTheme {
+                    Layout(content = {
+                        SideEffect { composed = true }
+                        ConfirmationScreen(
+                            title = "Confirm policy",
+                            confirmText = confirmText,
+                            onBack = {},
+                            onConfirm = { confirmCalls++ },
+                        ) {}
+                    }) { measurables, constraints ->
+                        val placePage = placeConfirmation.value
+                        val page = measurables.single().measure(constraints)
+                        layout(page.width, page.height) {
+                            if (placePage) page.placeRelative(0, 0)
+                        }
+                    }
+                }
+            }
+            val looper = shadowOf(Looper.getMainLooper())
+            looper.idleFor(Duration.ofMillis(50))
+            assertTrue(composed)
+            val root = requireNotNull(findComposeRoot(activity.window.decorView))
+            root.measureAndLayoutForTest()
+            assertFalse(root.findLabel(confirmText)?.layoutInfo?.isPlaced == true)
 
-        activity.tap(R.string.system_policy_control_usb_file_transfer_title)
-        assertNotNull(activity.findLabel(R.string.system_policy_confirm_apply))
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(550))
-        val confirm = requireNotNull(activity.clickAction(R.string.system_policy_confirm_apply))
-        confirm()
-        confirm()
-        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50))
+            // Frame requests otherwise advance Robolectric's uptime during layout and clicks.
+            ShadowChoreographer.setPaused(true)
+            // Composition can precede the first frame the operator sees by more than the guard.
+            ShadowSystemClock.advanceBy(Duration.ofMillis(500))
+            placeConfirmation.value = true
+            Snapshot.sendApplyNotifications()
+            looper.idle()
+            root.measureAndLayoutForTest()
+            val label = requireNotNull(root.findLabel(confirmText))
+            assertTrue(label.layoutInfo.isPlaced)
+            val confirm = requireNotNull(label.clickAction())
+            confirm()
+            assertEquals(0, confirmCalls)
 
-        // A second delivery of the same confirm must not flip the choice back.
-        assertTrue(SystemPolicyStore.hasExplicitChoice(activity, usbPolicy))
-        assertEquals(!original, SystemPolicyStore.isRequested(activity, usbPolicy))
+            ShadowSystemClock.advanceBy(Duration.ofMillis(499))
+            confirm()
+            assertEquals(0, confirmCalls)
+
+            ShadowSystemClock.advanceBy(Duration.ofMillis(1))
+            confirm()
+            confirm()
+            assertEquals(1, confirmCalls)
+
+            ShadowSystemClock.advanceBy(Duration.ofMillis(499))
+            confirm()
+            assertEquals(1, confirmCalls)
+
+            ShadowSystemClock.advanceBy(Duration.ofMillis(1))
+            confirm()
+            confirm()
+            assertEquals(2, confirmCalls)
+        }
     }
 
     @Test
@@ -142,17 +201,22 @@ class PolicyConfirmationScreenTest {
 
     private fun ComponentActivity.clickAction(@StringRes id: Int): (() -> Boolean)? {
         val label = requireNotNull(findLabel(id)) { getString(id) }
-        return generateSequence(label) { it.parent }
-            .firstNotNullOfOrNull { it.config.getOrNull(SemanticsActions.OnClick)?.action }
+        return label.clickAction()
     }
+
+    private fun SemanticsNode.clickAction(): (() -> Boolean)? = generateSequence(this) { it.parent }
+        .firstNotNullOfOrNull { it.config.getOrNull(SemanticsActions.OnClick)?.action }
 }
 
 @OptIn(InternalComposeUiApi::class)
 internal fun ComponentActivity.findLabel(@StringRes id: Int): SemanticsNode? {
     shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(50))
     val root = requireNotNull(findComposeRoot(window.decorView))
-    val label = getString(id)
+    return root.findLabel(getString(id))
+}
 
+@OptIn(InternalComposeUiApi::class)
+private fun ViewRootForTest.findLabel(label: String): SemanticsNode? {
     fun find(node: SemanticsNode): SemanticsNode? {
         if (node.config.getOrNull(SemanticsProperties.Text).orEmpty().any { it.text == label }) {
             return node
@@ -160,11 +224,11 @@ internal fun ComponentActivity.findLabel(@StringRes id: Int): SemanticsNode? {
         return node.children.firstNotNullOfOrNull(::find)
     }
 
-    return find(root.semanticsOwner.unmergedRootSemanticsNode)
+    return find(semanticsOwner.unmergedRootSemanticsNode)
 }
 
 @OptIn(InternalComposeUiApi::class)
-private fun findComposeRoot(view: View): ViewRootForTest? = when (view) {
+internal fun findComposeRoot(view: View): ViewRootForTest? = when (view) {
     is ViewRootForTest -> view
     is ViewGroup -> (0 until view.childCount).firstNotNullOfOrNull { findComposeRoot(view.getChildAt(it)) }
     else -> null
