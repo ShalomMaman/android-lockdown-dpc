@@ -67,6 +67,7 @@ import com.example.lockdowndpc.maintenance.MaintenanceStore
 import com.example.lockdowndpc.maintenance.MaintenanceWindow
 import com.example.lockdowndpc.policy.AllowedAppsStore
 import com.example.lockdowndpc.policy.AuditLog
+import com.example.lockdowndpc.policy.ManagementModeStore
 import com.example.lockdowndpc.policy.SystemPolicyControl
 import com.example.lockdowndpc.policy.SystemPolicyDeviceGateway
 import com.example.lockdowndpc.policy.SystemPolicyLabels
@@ -75,9 +76,11 @@ import com.example.lockdowndpc.policy.SystemPolicyStore
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import java.util.Date
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -157,6 +160,8 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
     var refreshFailed by remember { mutableStateOf(false) }
     var working by remember { mutableStateOf(false) }
     var snapshot by remember { mutableStateOf(MaintenanceSnapshot.unknown()) }
+    // Only a liveness pass or a deliberate action can arm the console's expiry pass.
+    var expiryWindow by remember { mutableStateOf<MaintenanceWindow?>(null) }
     var draft by remember { mutableStateOf(MaintenanceDraft()) }
     var blocked by remember { mutableStateOf<OpenBlocker?>(null) }
     // Read from the monotonic clock, the same reading the window itself is judged
@@ -177,6 +182,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
             working = false
             loading = false
             snapshot = result
+            expiryWindow = result.window
             if (announceResult) {
                 result.result?.let { haptics.result(it.kind.tone == MaintenanceResultTone.FAILED) }
             }
@@ -188,36 +194,49 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         }
     }
 
-    suspend fun refreshSnapshot() {
+    suspend fun refreshSnapshot(readOnly: Boolean) {
         val app = context.applicationContext
+        val previous = snapshot
         try {
-            val result = onPolicyThread { loadMaintenance(app) }
-            if (!working) {
+            val result = if (readOnly) {
+                withContext(Dispatchers.IO) { readMaintenance(app, previous.result) }
+            } else {
+                onPolicyThread { loadMaintenance(app) }
+            }
+            if (!working && snapshot === previous) {
                 snapshot = result
+                if (!readOnly) expiryWindow = result.window
                 elapsedNow = SystemClock.elapsedRealtime()
                 refreshFailed = false
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: RuntimeException) {
-            refreshFailed = true
-            haptics.reject()
+            if (!working && snapshot === previous) {
+                refreshFailed = true
+                haptics.reject()
+            }
         } finally {
             loading = false
             refreshing = false
         }
     }
 
-    LaunchedEffect(Unit) { refreshSnapshot() }
+    LaunchedEffect(Unit) { refreshSnapshot(readOnly = false) }
 
-    // The countdown, and the pass that ends an expired window. Expiry is not a
-    // display concern: when the time is up the coordinator restores the base
-    // policy and reads it back, and the screen reports what came of that.
+    // An observed window can update the countdown independently of the expiry pass.
     LaunchedEffect(snapshot.window) {
         val current = snapshot.window ?: return@LaunchedEffect
         while (true) {
             elapsedNow = SystemClock.elapsedRealtime()
-            if (current.remainingMillis(elapsedNow) <= 0L) {
+            if (current.remainingMillis(elapsedNow) <= 0L) return@LaunchedEffect
+            delay(1_000L)
+        }
+    }
+    LaunchedEffect(expiryWindow) {
+        val current = expiryWindow ?: return@LaunchedEffect
+        while (true) {
+            if (current.remainingMillis(SystemClock.elapsedRealtime()) <= 0L) {
                 perform(announceResult = false) { app -> closeMaintenance(app, CloseReason.EXPIRED) }
                 return@LaunchedEffect
             }
@@ -284,7 +303,7 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         onRefresh = {
             if (!working && !loading && !refreshing && !canRetreat && AdminSession.isUnlocked()) {
                 refreshing = true
-                coroutineScope.launch { refreshSnapshot() }
+                coroutineScope.launch { refreshSnapshot(readOnly = true) }
             }
         },
     ) {
@@ -304,10 +323,10 @@ private fun MaintenanceScreen(onBack: () -> Unit) {
         snapshot.result?.let { result ->
             Spacer(Modifier.height(16.dp))
             MessageBanner(maintenanceResultMessage(result))
-            if (result.kind.restoreOwed) {
-                Spacer(Modifier.height(16.dp))
-                RestoreFailedCard(result.failures)
-            }
+        }
+        if (snapshot.restoreOwed) {
+            Spacer(Modifier.height(16.dp))
+            RestoreFailedCard(snapshot.result?.failures.orEmpty())
         }
 
         blocked?.let { blocker ->
@@ -998,8 +1017,7 @@ private suspend fun <T> onPolicyThread(block: () -> T): T =
 /**
  * What the screen knows after one device pass.
  *
- * [window] is populated only from an outcome the coordinator reported as open, so
- * this type cannot carry an optimistic window.
+ * [window] comes from a verified coordinator outcome or its stored live window.
  */
 private class MaintenanceSnapshot(
     val window: MaintenanceWindow?,
@@ -1007,6 +1025,7 @@ private class MaintenanceSnapshot(
     val residual: List<SystemPolicyControl>,
     val deviceOwner: Boolean,
     val result: MaintenanceResultView?,
+    val restoreOwed: Boolean = result?.kind?.restoreOwed == true,
 ) {
     companion object {
         /** Before the first read: assume nothing, claim nothing. */
@@ -1041,6 +1060,41 @@ private fun maintenanceCoordinatorOf(context: Context): MaintenanceCoordinator? 
 private fun loadMaintenance(context: Context): MaintenanceSnapshot {
     val outcome = refreshOnce(context) ?: return MaintenanceSnapshot.notDeviceOwner()
     return snapshotOf(context, outcome, reportUnchanged = false)
+}
+
+/** Reads display state without running the guard or changing maintenance records. */
+private fun readMaintenance(context: Context, previousResult: MaintenanceResultView?): MaintenanceSnapshot {
+    val dpm = context.getSystemService(DevicePolicyManager::class.java)
+    if (dpm?.isDeviceOwnerApp(context.packageName) != true) return MaintenanceSnapshot.notDeviceOwner()
+
+    val mode = ManagementModeStore.readForDisplay(context)
+    val localPolicy = mode.usesLocalPolicy()
+    // Same mode rule as MaintenanceStore.liveWindow(): only LOCAL_PIN has a window.
+    val window = if (mode == com.example.lockdowndpc.policy.ManagementMode.LOCAL_PIN &&
+        AllowedAppsStore.isProtectionEnabled(context)
+    ) {
+        MaintenanceStore.readLiveWindowForDisplay(context)
+    } else {
+        null
+    }
+    val restoreOwed = window == null && MaintenanceStore.restorePending(context)
+    if (!localPolicy && !restoreOwed) return MaintenanceSnapshot.notDeviceOwner()
+
+    val plan = window?.let {
+        MaintenancePlan.forWindow(
+            SystemPolicyStore.readEffectiveProfileForDisplay(context),
+            SystemPolicyStore.readBaseChoicesForDisplay(context),
+            it,
+        )
+    }
+    return MaintenanceSnapshot(
+        window = window,
+        relaxed = plan?.relaxed()?.toList().orEmpty(),
+        residual = plan?.residualBlockers()?.toList().orEmpty(),
+        deviceOwner = true,
+        result = previousResult?.takeIf { restoreOwed && it.kind.restoreOwed },
+        restoreOwed = restoreOwed,
+    )
 }
 
 /**

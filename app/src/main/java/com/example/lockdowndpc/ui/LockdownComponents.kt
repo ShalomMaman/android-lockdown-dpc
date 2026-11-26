@@ -1,5 +1,6 @@
 package com.example.lockdowndpc.ui
 
+import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -55,8 +56,11 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -182,6 +186,8 @@ private fun LockdownScreenContent(
     }
 }
 
+private const val ConfirmTapGuardMillis = 500L
+
 @Composable
 internal fun ConfirmationScreen(
     title: String,
@@ -196,6 +202,9 @@ internal fun ConfirmationScreen(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val haptics = rememberHaptics()
+    // Measured on the uptime clock at first composition, so recomposition never restarts it.
+    val shownAt = remember { SystemClock.uptimeMillis() }
+    var nextConfirmAt by remember { mutableLongStateOf(0L) }
     BackHandler { if (!loading) onBack() }
     LockdownScreen(title = title, subtitle = subtitle, onBack = onBack, backEnabled = !loading) {
         content()
@@ -205,7 +214,11 @@ internal fun ConfirmationScreen(
             icon = confirmIcon,
             enabled = enabled,
             loading = loading,
-            onClick = {
+            onClick = confirm@{
+                val now = SystemClock.uptimeMillis()
+                val ready = now - shownAt >= ConfirmTapGuardMillis
+                if (!ready || !enabled || loading || now < nextConfirmAt) return@confirm
+                nextConfirmAt = now + ConfirmTapGuardMillis
                 haptics.tick()
                 onConfirm()
             },
