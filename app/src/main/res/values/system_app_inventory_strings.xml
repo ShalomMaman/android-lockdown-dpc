@@ -95,4 +95,5 @@
 
     <string name="sysinv_load_failed">Could not read the application inventory. Pull down to try again.</string>
 
+    <string name="sysinv_saved_apply_failed">The selection was saved, but applying it could not be verified.</string>
 </resources>

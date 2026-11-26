@@ -33,6 +33,7 @@ import com.example.lockdowndpc.R
 import com.example.lockdowndpc.policy.RemotePolicyProjection
 import com.example.lockdowndpc.policy.RemotePolicyRuntime
 import com.example.lockdowndpc.remote.RemoteReanchor
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -45,18 +46,34 @@ internal fun RemoteConsole(onSecureScreen: (Boolean) -> Unit) {
     var status by remember { mutableStateOf(RemoteReanchor.Status()) }
     var showingRecovery by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    var refreshFailed by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val policyRefusal by RemotePolicyRuntime.policyRefusals.collectAsStateWithLifecycle()
 
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (!busy) scope.launch {
-            val latest = withContext(Dispatchers.IO) { RemotePolicyRuntime.reanchorStatus(context) }
-            if (!busy) {
-                if (latest.reason != status.reason) showingRecovery = RemoteReanchor.supports(latest.reason)
-                status = latest
+    fun refreshStatus() {
+        if (busy || refreshing) return
+        refreshing = true
+        scope.launch {
+            try {
+                val latest = withContext(Dispatchers.IO) { RemotePolicyRuntime.reanchorStatus(context) }
+                if (!busy) {
+                    if (latest.reason != status.reason) showingRecovery = RemoteReanchor.supports(latest.reason)
+                    status = latest
+                    refreshFailed = false
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: RuntimeException) {
+                refreshFailed = true
+                haptics.reject()
+            } finally {
+                refreshing = false
             }
         }
     }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { refreshStatus() }
     SideEffect { onSecureScreen(showingRecovery) }
 
     if (!showingRecovery) {
@@ -67,7 +84,13 @@ internal fun RemoteConsole(onSecureScreen: (Boolean) -> Unit) {
                 status.reason != null -> reanchorReason(status.reason?.code)
                 else -> R.string.remote_policy_unavailable
             }),
+            refreshing = refreshing,
+            onRefresh = ::refreshStatus,
         ) {
+            if (refreshFailed) {
+                MessageBanner(UiMessage(stringResource(R.string.status_refresh_failed), isError = true))
+                Spacer(Modifier.height(12.dp))
+            }
             val refusalMessage = when (policyRefusal) {
                 RemotePolicyProjection.LOCALE_UNSUPPORTED -> R.string.remote_policy_locale_unsupported
                 RemotePolicyProjection.FILTER_CLEANUP_LIMIT -> R.string.remote_policy_filter_cleanup_limit
@@ -104,7 +127,7 @@ internal fun RemoteConsole(onSecureScreen: (Boolean) -> Unit) {
     ) {
         if (nonce != null) {
             val nonceLabel = stringResource(R.string.remote_reanchor_nonce)
-            val ltr = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr, textAlign = TextAlign.Left)
+            val ltr = LocalTextStyle.current.copy(textDirection = TextDirection.Ltr, textAlign = TextAlign.Start)
             Text(stringResource(R.string.remote_reanchor_instructions))
             Spacer(Modifier.height(12.dp))
             Text(nonceLabel)

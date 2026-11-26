@@ -105,4 +105,5 @@
 
     <string name="sysinv_load_failed">לא ניתן לקרוא את רשימת האפליקציות. יש למשוך למטה כדי לנסות שוב.</string>
 
+    <string name="sysinv_saved_apply_failed">הבחירה נשמרה, אך לא ניתן לאמת שהיא הוחלה.</string>
 </resources>

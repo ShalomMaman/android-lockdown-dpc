@@ -19,6 +19,8 @@
     <string name="home_filter_ca_removal_status">הסרת תעודת הסינון</string>
     <string name="home_filter_restrictions">הגבלות המכשיר</string>
     <string name="home_filter_choose_ca">בחירת קובץ תעודה</string>
+    <string name="home_filter_browse_files">עיון בקבצים</string>
+    <string name="home_filter_certificate_file_note">יש לבחור תעודת CA ציבורית בפורמט PEM או DER מהמסנן המשפחתי המהימן.</string>
     <string name="home_filter_ca_selected">נבחרה תעודה</string>
     <string name="home_filter_clear_selection">ביטול הבחירה</string>
     <string name="home_filter_enable">הפעלת הסינון הביתי</string>

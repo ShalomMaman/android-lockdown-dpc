@@ -94,4 +94,5 @@
     <string name="mgmtid_audit_pin_added">Management certificate approved: %1$s — identity now %2$s</string>
     <string name="mgmtid_audit_pin_removed">Management certificate removed: %1$s — identity now %2$s</string>
     <string name="mgmtid_audit_refused">Management package refused: %1$s — %2$s</string>
+    <string name="mgmtid_load_failed">Could not read the signing certificates. Pull down to try again.</string>
 </resources>

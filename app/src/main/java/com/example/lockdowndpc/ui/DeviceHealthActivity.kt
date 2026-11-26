@@ -9,20 +9,20 @@ import android.os.Bundle
 import android.text.format.DateFormat
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -141,9 +141,58 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
         }
     }
 
+    val scrollState = rememberScrollState()
+    BackHandler(onBack = onBack)
+    if (exportVisible) {
+        val current = snapshot
+        ConfirmationScreen(
+            title = stringResource(R.string.health_export_title),
+            confirmText = stringResource(R.string.health_export_confirm),
+            cancelText = stringResource(R.string.health_export_cancel),
+            enabled = current != null,
+            onBack = { exportVisible = false },
+            onConfirm = confirm@{
+                if (!exportVisible) return@confirm
+                exportVisible = false
+                if (current == null) {
+                    return@confirm
+                }
+                // The redacted form, never the screen's own text.
+                val export = DeviceHealthReport.export(current, System.currentTimeMillis())
+                val copied = try {
+                    copyToClipboard(context, export)
+                } catch (_: RuntimeException) {
+                    false
+                }
+                if (!copied) {
+                    message = UiMessage(resources.getString(R.string.health_export_failed), isError = true)
+                    haptics.reject()
+                    return@confirm
+                }
+                coroutineScope.launch(Dispatchers.IO) {
+                    // The action is audited; the exported text is not.
+                    AuditLog.append(
+                        context,
+                        AuditEvent.HEALTH_EXPORTED,
+                        resources.getString(R.string.health_audit_exported),
+                    )
+                }
+                message = UiMessage(
+                    text = resources.getString(R.string.health_export_copied),
+                    isError = false,
+                )
+                haptics.confirm()
+            },
+        ) {
+            Text(stringResource(R.string.health_export_body))
+        }
+        return
+    }
+
     LockdownScreen(
         title = stringResource(R.string.health_title),
         subtitle = stringResource(R.string.health_local_only),
+        scrollState = scrollState,
         refreshing = loading && refreshVersion > 0,
         onRefresh = {
             if (!loading) {
@@ -189,58 +238,6 @@ private fun DeviceHealthScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(12.dp))
         SecondaryAction(text = stringResource(R.string.health_close), onClick = onBack)
-    }
-
-    if (exportVisible) {
-        val current = snapshot
-        AlertDialog(
-            onDismissRequest = { exportVisible = false },
-            title = { Text(stringResource(R.string.health_export_title)) },
-            text = { Text(stringResource(R.string.health_export_body)) },
-            confirmButton = {
-                TextButton(
-                    enabled = current != null,
-                    onClick = {
-                        exportVisible = false
-                        if (current == null) {
-                            return@TextButton
-                        }
-                        // The redacted form, never the screen's own text.
-                        val export = DeviceHealthReport.export(current, System.currentTimeMillis())
-                        val copied = try {
-                            copyToClipboard(context, export)
-                        } catch (_: RuntimeException) {
-                            false
-                        }
-                        if (!copied) {
-                            message = UiMessage(resources.getString(R.string.health_export_failed), isError = true)
-                            haptics.reject()
-                            return@TextButton
-                        }
-                        coroutineScope.launch(Dispatchers.IO) {
-                            // The action is audited; the exported text is not.
-                            AuditLog.append(
-                                context,
-                                AuditEvent.HEALTH_EXPORTED,
-                                resources.getString(R.string.health_audit_exported),
-                            )
-                        }
-                        message = UiMessage(
-                            text = resources.getString(R.string.health_export_copied),
-                            isError = false,
-                        )
-                        haptics.confirm()
-                    },
-                ) {
-                    Text(stringResource(R.string.health_export_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { exportVisible = false }) {
-                    Text(stringResource(R.string.health_export_cancel))
-                }
-            },
-        )
     }
 }
 

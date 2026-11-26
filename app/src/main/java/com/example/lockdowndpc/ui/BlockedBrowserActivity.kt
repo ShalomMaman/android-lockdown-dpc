@@ -3,6 +3,7 @@ package com.example.lockdowndpc.ui
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -42,13 +43,14 @@ class BlockedBrowserActivity : AppCompatActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, SYSTEM_BAR_DARK_SCRIM),
         )
         setContent {
-            LockdownTheme { BrowserBlockedScreen() }
+            LockdownTheme { BrowserBlockedScreen(onBack = ::finish) }
         }
     }
 }
 
 @Composable
-private fun BrowserBlockedScreen() {
+private fun BrowserBlockedScreen(onBack: () -> Unit) {
+    BackHandler(onBack = onBack)
     LockdownScreen(
         title = stringResource(R.string.browser_blocked_title),
         subtitle = stringResource(R.string.browser_blocked_subtitle),

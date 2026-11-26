@@ -19,6 +19,8 @@
     <string name="home_filter_ca_removal_status">Certificate removal</string>
     <string name="home_filter_restrictions">Device restrictions</string>
     <string name="home_filter_choose_ca">Choose a certificate file</string>
+    <string name="home_filter_browse_files">Browse files</string>
+    <string name="home_filter_certificate_file_note">Select a public CA certificate in PEM or DER format from the family filter you trust.</string>
     <string name="home_filter_ca_selected">Certificate selected</string>
     <string name="home_filter_clear_selection">Clear selection</string>
     <string name="home_filter_enable">Enable home filter</string>

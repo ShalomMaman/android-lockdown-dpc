@@ -5,7 +5,6 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -29,6 +28,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -41,7 +41,6 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,12 +65,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -99,6 +100,7 @@ import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val ICON_SIZE_DP = 40
@@ -166,43 +168,58 @@ class AllowedAppsActivity : AppCompatActivity() {
      * The store saves the selection and system opt-ins together and strips
      * protected packages from the opt-ins before writing.
      */
-    private fun saveAndClose(
+    private suspend fun saveAndClose(
         adminSelectedSystem: Set<String>,
         selection: Set<String>,
         managed: Set<String>,
         haptics: ConsoleHaptics,
-    ) {
+    ): UiMessage? {
         if (!AdminSession.isUnlocked()) {
             haptics.reject()
             finish()
-            return
+            return null
         }
         val hadSystemSelection = AllowedAppsStore
             .getAdminSelectedSystemPackages(this).isNotEmpty() || adminSelectedSystem.isNotEmpty()
-
-        if (!AuthorizedPolicyWriter.setAllowedPackages(
-                this, AdminAuthority.localSession(this), selection, managed, adminSelectedSystem,
-            )
-        ) {
-            haptics.reject()
-            Toast.makeText(this, R.string.policy_settings_save_failed, Toast.LENGTH_LONG).show()
-            return
-        }
-        AuditLog.append(this, AuditEvent.POLICY_ALLOWLIST_SAVED, getString(R.string.audit_apps_saved))
-        if (hadSystemSelection) {
-            AuditLog.append(this, AuditEvent.SYSTEM_SELECTION_SAVED, getString(R.string.sysinv_audit_system_saved))
-        }
-        // The controller owns the requested → applied/failed contract and marks
-        // the policy state itself. Nothing here may pre-announce success.
-        if (AllowedAppsStore.isProtectionEnabled(this)) {
-            PolicyReconciliationCoordinator.callOnPolicyThread {
-                LockdownPolicyController.apply(this)
+        val authority = AdminAuthority.localSession(this)
+        val outcome = withContext(Dispatchers.IO) {
+            if (!AuthorizedPolicyWriter.setAllowedPackages(
+                    this@AllowedAppsActivity, authority,
+                    selection, managed, adminSelectedSystem,
+                )
+            ) {
+                return@withContext R.string.policy_settings_save_failed
             }
+            AuditLog.append(
+                this@AllowedAppsActivity, AuditEvent.POLICY_ALLOWLIST_SAVED, getString(R.string.audit_apps_saved),
+            )
+            if (hadSystemSelection) {
+                AuditLog.append(
+                    this@AllowedAppsActivity, AuditEvent.SYSTEM_SELECTION_SAVED,
+                    getString(R.string.sysinv_audit_system_saved),
+                )
+            }
+            // The policy engine owns the applied/failed status read by the console.
+            if (AllowedAppsStore.isProtectionEnabled(this@AllowedAppsActivity)) {
+                try {
+                    PolicyReconciliationCoordinator.callOnPolicyThread {
+                        LockdownPolicyController.apply(this@AllowedAppsActivity)
+                    }
+                } catch (_: RuntimeException) {
+                    return@withContext R.string.sysinv_saved_apply_failed
+                }
+            }
+            null
+        }
+        if (outcome != null) {
+            haptics.reject()
+            return UiMessage(getString(outcome), isError = true)
         }
         AdminSession.extend()
         haptics.confirm()
         setResult(RESULT_OK)
         finish()
+        return null
     }
 }
 
@@ -219,9 +236,11 @@ private data class InventoryUiState(
 private fun InventoryScreen(
     allowSelected: Boolean,
     onBack: () -> Unit,
-    onSave: (Set<String>, Set<String>, Set<String>, ConsoleHaptics) -> Unit,
+    onSave: suspend (Set<String>, Set<String>, Set<String>, ConsoleHaptics) -> UiMessage?,
 ) {
     val context = LocalContext.current
+    val resources = LocalResources.current
+    val scope = rememberCoroutineScope()
 
     val haptics = rememberHaptics()
     val loadFailedText = stringResource(R.string.sysinv_load_failed)
@@ -236,6 +255,9 @@ private fun InventoryScreen(
     var riskRow by remember { mutableStateOf<InventoryRow?>(null) }
     var riskWriteFailed by remember { mutableStateOf(false) }
     var confirmingSave by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    var saveError by remember { mutableStateOf<UiMessage?>(null) }
+    val listState = rememberLazyListState()
 
     LaunchedEffect(refreshVersion) {
         try {
@@ -273,13 +295,90 @@ private fun InventoryScreen(
         if (query.isNotEmpty()) query = "" else onBack()
     }
 
-    BackHandler(enabled = query.isNotEmpty(), onBack = ::back)
+    BackHandler(onBack = ::back)
 
     val visible = remember(state.rows, category, query) {
         filterInventory(state.rows, state.protectedContext, category, query)
     }
     val adminSelectedSystem = remember(state.rows, state.optedInSystem) {
         adminSelectedSystemPackages(state.rows, state.optedInSystem)
+    }
+
+    riskRow?.let { row ->
+        RiskAcceptanceScreen(
+            row = row,
+            firmwareBuild = state.firmwareBuild,
+            writeFailed = riskWriteFailed,
+            saving = saving,
+            onDismiss = { if (!saving) riskRow = null },
+            onAccept = accept@{
+                if (saving) return@accept
+                val authority = AdminAuthority.localSession(context)
+                val acceptance = riskAcceptanceFor(row, state.firmwareBuild, System.currentTimeMillis())
+                saving = true
+                riskWriteFailed = false
+                scope.launch {
+                    try {
+                        val persisted = withContext(Dispatchers.IO) {
+                            AuthorizedPolicyWriter.recordSystemRiskAcceptance(context, authority, acceptance)
+                        }
+                        if (!persisted) {
+                            haptics.reject()
+                            riskWriteFailed = true
+                            return@launch
+                        }
+                        val accepted = row.withAcceptedRisk(
+                            protectedContext = state.protectedContext,
+                            // A reviewed component starts unticked under either policy mode.
+                            effectivelyAllowed = !allowSelected,
+                        )
+                        state = state.copy(
+                            rows = state.rows.map { if (it.packageName == row.packageName) accepted else it },
+                        )
+                        haptics.confirm()
+                        riskRow = null
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: RuntimeException) {
+                        haptics.reject()
+                        riskWriteFailed = true
+                    } finally {
+                        saving = false
+                    }
+                }
+            },
+        )
+        return
+    }
+
+    if (confirmingSave) {
+        SaveConfirmationScreen(
+            systemCount = adminSelectedSystem.size,
+            saving = saving,
+            error = saveError,
+            onDismiss = { if (!saving) confirmingSave = false },
+            onConfirm = confirm@{
+                if (saving) return@confirm
+                val selection = persistedSelection(state.rows, state.ticked, adminSelectedSystem)
+                val managed = managedPackagesToPersist(state.rows)
+                saving = true
+                saveError = null
+                scope.launch {
+                    try {
+                        saveError = onSave(adminSelectedSystem, selection, managed, haptics)
+                        if (saveError == null) confirmingSave = false
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: RuntimeException) {
+                        haptics.reject()
+                        saveError = UiMessage(resources.getString(R.string.policy_settings_save_failed), isError = true)
+                    } finally {
+                        saving = false
+                    }
+                }
+            },
+        )
+        return
     }
 
     Scaffold(
@@ -310,7 +409,10 @@ private fun InventoryScreen(
             SaveBar(
                 systemCount = adminSelectedSystem.size,
                 enabled = !loading && !loadFailed,
-                onSave = { confirmingSave = true },
+                onSave = {
+                    saveError = null
+                    confirmingSave = true
+                },
             )
         },
     ) { insets ->
@@ -351,6 +453,7 @@ private fun InventoryScreen(
                 }
 
                 else -> LazyColumn(
+                    state = listState,
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(bottom = 16.dp),
                 ) {
@@ -416,53 +519,6 @@ private fun InventoryScreen(
                 }
             }
         }
-    }
-
-    riskRow?.let { row ->
-        RiskAcceptanceDialog(
-            row = row,
-            firmwareBuild = state.firmwareBuild,
-            writeFailed = riskWriteFailed,
-            onDismiss = { riskRow = null },
-            onAccept = {
-                if (!AuthorizedPolicyWriter.recordSystemRiskAcceptance(
-                        context, AdminAuthority.localSession(context),
-                        riskAcceptanceFor(row, state.firmwareBuild, System.currentTimeMillis()),
-                    )
-                ) {
-                    haptics.reject()
-                    riskWriteFailed = true
-                    return@RiskAcceptanceDialog
-                }
-                val accepted = row.withAcceptedRisk(
-                    protectedContext = state.protectedContext,
-                    // A freshly reviewed component starts unticked, which under
-                    // either method means "leave it exactly as it is today".
-                    effectivelyAllowed = !allowSelected,
-                )
-                state = state.copy(
-                    rows = state.rows.map { if (it.packageName == row.packageName) accepted else it },
-                )
-                haptics.confirm()
-                riskRow = null
-            },
-        )
-    }
-
-    if (confirmingSave) {
-        SaveConfirmationDialog(
-            systemCount = adminSelectedSystem.size,
-            onDismiss = { confirmingSave = false },
-            onConfirm = {
-                confirmingSave = false
-                onSave(
-                    adminSelectedSystem,
-                    persistedSelection(state.rows, state.ticked, adminSelectedSystem),
-                    managedPackagesToPersist(state.rows),
-                    haptics,
-                )
-            },
-        )
     }
 }
 
@@ -800,10 +856,11 @@ private fun loadIcon(context: Context, packageName: String, sizePx: Int): ImageB
  * operator who cannot see it cannot judge it.
  */
 @Composable
-private fun RiskAcceptanceDialog(
+private fun RiskAcceptanceScreen(
     row: InventoryRow,
     firmwareBuild: String,
     writeFailed: Boolean,
+    saving: Boolean,
     onDismiss: () -> Unit,
     onAccept: () -> Unit,
 ) {
@@ -815,64 +872,54 @@ private fun RiskAcceptanceDialog(
             else -> R.string.sysinv_not_installed
         },
     )
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(imageVector = Icons.Rounded.Warning, contentDescription = null) },
-        title = { Text(stringResource(R.string.sysinv_risk_title)) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.sysinv_risk_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                if (row.riskStatus == RiskAcceptanceStatus.DRIFTED) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.sysinv_risk_drift_warning),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = stringResource(R.string.sysinv_risk_record_intro),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-                Spacer(Modifier.height(4.dp))
-                // Each value is isolated left-to-right on its own: a package name,
-                // a hex digest, a version and a build fingerprint are Latin
-                // identifiers sitting inside a Hebrew sentence, and an RTL
-                // paragraph would otherwise reorder their punctuation.
-                RecordLine(R.string.sysinv_risk_field_package, row.packageName)
-                RecordLine(
-                    R.string.sysinv_risk_field_signer,
-                    row.signerDigest.ifEmpty { unknown },
-                )
-                RecordLine(R.string.sysinv_risk_field_version, row.version.ifEmpty { unknown })
-                RecordLine(R.string.sysinv_risk_field_prior_state, priorState)
-                RecordLine(
-                    R.string.sysinv_risk_field_firmware,
-                    firmwareBuild.ifEmpty { unknown },
-                )
-                MessageBanner(
-                    if (writeFailed) {
-                        UiMessage(stringResource(R.string.policy_settings_save_failed), isError = true)
-                    } else null,
-                    Modifier.padding(top = 12.dp),
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onAccept) {
-                Text(stringResource(R.string.sysinv_risk_confirm))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.sysinv_risk_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(R.string.sysinv_risk_title),
+        confirmText = stringResource(R.string.sysinv_risk_confirm),
+        cancelText = stringResource(R.string.sysinv_risk_cancel),
+        loading = saving,
+        onBack = onDismiss,
+        onConfirm = onAccept,
+    ) {
+        Text(
+            text = stringResource(R.string.sysinv_risk_body),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        if (row.riskStatus == RiskAcceptanceStatus.DRIFTED) {
+            Spacer(Modifier.height(12.dp))
+            Text(
+                text = stringResource(R.string.sysinv_risk_drift_warning),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.sysinv_risk_record_intro),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        Spacer(Modifier.height(4.dp))
+        // Each value is isolated left-to-right on its own: a package name,
+        // a hex digest, a version and a build fingerprint are Latin
+        // identifiers sitting inside a Hebrew sentence, and an RTL
+        // paragraph would otherwise reorder their punctuation.
+        RecordLine(R.string.sysinv_risk_field_package, row.packageName)
+        RecordLine(
+            R.string.sysinv_risk_field_signer,
+            row.signerDigest.ifEmpty { unknown },
+        )
+        RecordLine(R.string.sysinv_risk_field_version, row.version.ifEmpty { unknown })
+        RecordLine(R.string.sysinv_risk_field_prior_state, priorState)
+        RecordLine(
+            R.string.sysinv_risk_field_firmware,
+            firmwareBuild.ifEmpty { unknown },
+        )
+        MessageBanner(
+            if (writeFailed) {
+                UiMessage(stringResource(R.string.policy_settings_save_failed), isError = true)
+            } else null,
+            Modifier.padding(top = 12.dp),
+        )
+    }
 }
 
 @Composable
@@ -891,42 +938,36 @@ private fun RecordLine(template: Int, value: String) {
  * is not proof that Android applied anything.
  */
 @Composable
-private fun SaveConfirmationDialog(
+private fun SaveConfirmationScreen(
     systemCount: Int,
+    saving: Boolean,
+    error: UiMessage?,
     onDismiss: () -> Unit,
     onConfirm: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.sysinv_save_confirm_title)) },
-        text = {
-            Column {
-                Text(
-                    text = stringResource(R.string.sysinv_save_confirm_body),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    text = pluralStringResource(
-                        R.plurals.sysinv_system_selected_count,
-                        systemCount,
-                        systemCount,
-                    ),
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.sysinv_save_confirm_action))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.sysinv_save_confirm_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(R.string.sysinv_save_confirm_title),
+        confirmText = stringResource(R.string.sysinv_save_confirm_action),
+        cancelText = stringResource(R.string.sysinv_save_confirm_cancel),
+        loading = saving,
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(
+            text = stringResource(R.string.sysinv_save_confirm_body),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = pluralStringResource(
+                R.plurals.sysinv_system_selected_count,
+                systemCount,
+                systemCount,
+            ),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        MessageBanner(error, Modifier.padding(top = 12.dp))
+    }
 }
 
 @Composable

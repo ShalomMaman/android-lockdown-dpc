@@ -26,7 +26,6 @@ import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Warning
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -38,7 +37,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -182,6 +180,9 @@ internal fun KioskProfileScreen(
     busy: Boolean,
     clearing: Boolean,
     exiting: Boolean,
+    refreshing: Boolean,
+    onRefresh: () -> Unit,
+    statusReadError: UiMessage?,
     message: UiMessage?,
     onConfigureApp: () -> Unit,
     onConfigureSite: () -> Unit,
@@ -199,8 +200,11 @@ internal fun KioskProfileScreen(
     LockdownScreen(
         title = stringResource(R.string.kiosk_title),
         subtitle = stringResource(R.string.kiosk_subtitle),
+        refreshing = refreshing,
+        onRefresh = { if (!busy) onRefresh() },
     ) {
         KioskStatusCard(snapshot)
+        MessageBanner(statusReadError, Modifier.padding(top = 16.dp))
         MessageBanner(message, Modifier.padding(top = 16.dp))
 
         Spacer(Modifier.height(24.dp))
@@ -693,7 +697,7 @@ internal fun KioskSiteScreen(
             // field is the one place an operator checks their own typing.
             textStyle = LocalTextStyle.current.copy(
                 textDirection = TextDirection.Ltr,
-                textAlign = TextAlign.Left,
+                textAlign = TextAlign.Start,
             ),
             isError = preview.entered && preview.problem != null,
             modifier = Modifier.fillMaxWidth(),
@@ -757,9 +761,15 @@ internal fun KioskConfirmScreen(
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    LockdownScreen(
+    ConfirmationScreen(
         title = stringResource(R.string.kiosk_confirm_title),
         subtitle = stringResource(R.string.kiosk_confirm_subtitle),
+        confirmText = stringResource(R.string.kiosk_action_activate),
+        cancelText = stringResource(R.string.kiosk_confirm_cancel),
+        confirmIcon = Icons.Rounded.Lock,
+        loading = busy,
+        onConfirm = onConfirm,
+        onBack = onCancel,
     ) {
         Card(
             shape = MaterialTheme.shapes.large,
@@ -802,16 +812,6 @@ internal fun KioskConfirmScreen(
         RecoveryNote(snapshot.mode)
 
         MessageBanner(message, Modifier.padding(top = 16.dp))
-
-        Spacer(Modifier.height(28.dp))
-        PrimaryAction(
-            text = stringResource(R.string.kiosk_action_activate),
-            icon = Icons.Rounded.Lock,
-            loading = busy,
-            onClick = onConfirm,
-        )
-        Spacer(Modifier.height(12.dp))
-        SecondaryAction(text = stringResource(R.string.kiosk_confirm_cancel), onClick = onCancel, enabled = !busy)
     }
 }
 
@@ -825,41 +825,33 @@ internal fun KioskConfirmScreen(
  * and the dialog says so in as many words.
  */
 @Composable
-internal fun ManagementPackagesDialog(entries: List<ManagementEntry>, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.management_dialog_title)) },
-        text = {
-            Column {
-                entries.forEach { entry ->
-                    Text(
-                        text = entry.packageName.ltrIsolated(),
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = stringResource(
-                            when {
-                                !entry.installed -> R.string.management_status_absent
-                                entry.pinned -> R.string.management_status_pinned
-                                else -> R.string.management_status_unpinned
-                            }
-                        ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(12.dp))
-                }
-                Text(
-                    text = stringResource(R.string.management_dialog_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_close)) }
-        },
-    )
+internal fun ManagementPackagesSheet(entries: List<ManagementEntry>, onDismiss: () -> Unit) {
+    ChoiceSheet(title = stringResource(R.string.management_dialog_title), onDismiss = onDismiss) {
+        entries.forEach { entry ->
+            Text(
+                text = entry.packageName.ltrIsolated(),
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                text = stringResource(
+                    when {
+                        !entry.installed -> R.string.management_status_absent
+                        entry.pinned -> R.string.management_status_pinned
+                        else -> R.string.management_status_unpinned
+                    }
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(12.dp))
+        }
+        Text(
+            text = stringResource(R.string.management_dialog_note),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SecondaryAction(text = stringResource(R.string.action_close), onClick = onDismiss)
+    }
 }
 
 // ------------------------------------------------------------------- helpers

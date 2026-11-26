@@ -51,15 +51,26 @@ public final class SystemPolicyStore {
      * anything short of an administrator saying so on the console.
      */
     public static synchronized SystemPolicyProfile effectiveProfile(Context context) {
+        return effectiveProfile(context, true);
+    }
+
+    /** Reads the profile for display without pinning a profile on disk. */
+    public static synchronized SystemPolicyProfile readEffectiveProfileForDisplay(Context context) {
+        return effectiveProfile(context, false);
+    }
+
+    private static SystemPolicyProfile effectiveProfile(Context context, boolean pinProfile) {
         SharedPreferences preferences = prefs(context);
         SystemPolicyProfile detected =
                 SystemPolicyProfile.detect(context.getPackageName());
         String stored = preferences.getString(KEY_PROFILE, null);
         if (stored == null) {
-            preferences.edit()
-                    .putString(KEY_PROFILE, detected.name())
-                    .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
-                    .commit();
+            if (pinProfile) {
+                preferences.edit()
+                        .putString(KEY_PROFILE, detected.name())
+                        .putInt(KEY_SCHEMA_VERSION, SCHEMA_VERSION)
+                        .commit();
+            }
             return detected;
         }
         SystemPolicyProfile pinned;
@@ -97,6 +108,12 @@ public final class SystemPolicyStore {
      */
     public static Map<SystemPolicyControl, Boolean> baseChoices(Context context) {
         return baseChoices(context, HomeFilterController.isEnabled(context));
+    }
+
+    /** Reads the same choices for display without publishing a policy failure. */
+    public static Map<SystemPolicyControl, Boolean> readBaseChoicesForDisplay(Context context) {
+        var settings = HomeFilterStore.readOrReport(() -> HomeFilterStore.read(context), () -> {});
+        return baseChoices(context, settings == null || settings.enabled());
     }
 
     /**

@@ -12,12 +12,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -354,8 +352,9 @@ internal fun BuiltInExemptionsSection(
 
 /** The consequence of a loosening exemption, stated before anything is written. */
 @Composable
-internal fun ExemptionConfirmDialog(
+internal fun ExemptionConfirmScreen(
     pending: PendingExemption,
+    loading: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -370,19 +369,13 @@ internal fun ExemptionConfirmDialog(
             pending.candidate.displayName(),
         )
     }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(title)) },
-        text = { Text(body) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.system_policy_confirm_apply))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(title),
+        confirmText = stringResource(R.string.system_policy_confirm_apply),
+        loading = loading,
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(body)
+    }
 }

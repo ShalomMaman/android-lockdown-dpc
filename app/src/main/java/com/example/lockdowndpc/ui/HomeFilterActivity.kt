@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -17,13 +18,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -98,6 +98,9 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     var snapshot by remember { mutableStateOf<HomeFilterController.Snapshot?>(null) }
     var revision by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
+    var refreshing by remember { mutableStateOf(false) }
+    var certificateChoiceVisible by remember { mutableStateOf(false) }
+    var pickerInProgress by remember { mutableStateOf(false) }
     var readError by remember { mutableStateOf<Int?>(null) }
     var message by remember { mutableStateOf<UiMessage?>(null) }
     var applyingAction by remember { mutableStateOf<Int?>(null) }
@@ -131,11 +134,20 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         return true
     }
 
-    fun applyPolicy(action: Int, operation: (AdminAuthority) -> HomeFilterController.Snapshot) {
-        if (busy || !authorize()) return
+    fun applyPolicy(
+        action: Int,
+        onFinished: () -> Unit = {},
+        operation: (AdminAuthority) -> HomeFilterController.Snapshot,
+    ) {
+        if (busy) return
+        if (!authorize()) {
+            onFinished()
+            return
+        }
         val authority = AdminAuthority.localSession(context)
         if (authority == null) {
             report(R.string.home_filter_operation_failed, isError = true)
+            onFinished()
             return
         }
         busy = true
@@ -179,6 +191,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 applyingAction = null
                 busy = false
                 revision++
+                onFinished()
             }
         }
     }
@@ -186,6 +199,7 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
     val certificatePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
+        pickerInProgress = false
         if (uri != null && authorize()) {
             busy = true
             message = null
@@ -212,9 +226,11 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
 
     fun chooseCertificate() {
         if (!authorize()) return
+        pickerInProgress = true
         try {
             certificatePicker.launch(arrayOf("*/*"))
         } catch (_: RuntimeException) {
+            pickerInProgress = false
             report(R.string.home_filter_picker_unavailable, isError = true)
         }
     }
@@ -248,6 +264,8 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 snapshot = null
                 readError = R.string.home_filter_operation_failed
                 haptics.reject()
+            } finally {
+                refreshing = false
             }
         }
     }
@@ -256,10 +274,60 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         onBack()
     }
 
+    val scrollState = rememberScrollState()
+    BackHandler(onBack = onBack)
+    confirm?.let { action ->
+        fun closeConfirmation() {
+            confirm = null
+            pendingConfig = null
+        }
+        ConfirmationScreen(
+            title = stringResource(action.title),
+            confirmText = stringResource(action.title),
+            loading = applyingAction == action.title,
+            onBack = { if (!busy) closeConfirmation() },
+            onConfirm = {
+                val ca = selectedCa
+                when (action) {
+                    HomeFilterAction.ENABLE -> {
+                        val config = pendingConfig
+                        if (config == null) closeConfirmation()
+                        else applyPolicy(action.title, ::closeConfirmation) {
+                            HomeFilterController.enable(context, it, config, ca)
+                        }
+                    }
+                    HomeFilterAction.DISABLE ->
+                        applyPolicy(action.title, ::closeConfirmation) { HomeFilterController.disable(context, it) }
+                    HomeFilterAction.INSTALL_CA -> {
+                        if (ca == null) closeConfirmation()
+                        else applyPolicy(action.title, ::closeConfirmation) {
+                            HomeFilterController.installCa(context, it, ca)
+                        }
+                    }
+                    HomeFilterAction.REMOVE_CA ->
+                        applyPolicy(action.title, ::closeConfirmation) { HomeFilterController.removeCa(context, it) }
+                }
+            },
+        ) {
+            Text(stringResource(action.guidance))
+        }
+        return
+    }
+
     val current = snapshot
     LockdownScreen(
         title = stringResource(R.string.home_filter_title),
         subtitle = stringResource(R.string.home_filter_description),
+        refreshing = refreshing,
+        onRefresh = {
+            if (!busy && !refreshing && AdminSession.isUnlocked()) {
+                refreshing = true
+                readError = null
+                message = null
+                revision++
+            }
+        },
+        scrollState = scrollState,
     ) {
         if (current != null) {
             HomeFilterStatus(current, busy, probe)
@@ -304,8 +372,8 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                 ConsoleTextAction(
                     text = stringResource(R.string.home_filter_choose_ca),
                     enabled = !busy,
-                    loading = busy && applyingAction == null,
-                    onClick = ::chooseCertificate,
+                    loading = pickerInProgress || (busy && applyingAction == null),
+                    onClick = { certificateChoiceVisible = true },
                 )
                 if (selectedCa != null) {
                     Text(stringResource(R.string.home_filter_ca_selected))
@@ -352,9 +420,9 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
                         ConsoleTextAction(
                             text = stringResource(R.string.home_filter_choose_ca),
                             enabled = !busy,
-                            loading = busy && (applyingAction == null ||
-                                applyingAction == R.string.home_filter_install_ca),
-                            onClick = ::chooseCertificate,
+                            loading = pickerInProgress || (busy && (applyingAction == null ||
+                                applyingAction == R.string.home_filter_install_ca)),
+                            onClick = { certificateChoiceVisible = true },
                         )
                     } else if (!settings.removeCa()) {
                         ConsoleTextAction(
@@ -377,38 +445,25 @@ private fun HomeFilterScreen(onBack: () -> Unit) {
         SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
     }
 
-    confirm?.let { action ->
-        AlertDialog(
-            onDismissRequest = { confirm = null },
-            title = { Text(stringResource(action.title)) },
-            text = { Text(stringResource(action.guidance)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirm = null
-                    val ca = selectedCa
-                    when (action) {
-                        HomeFilterAction.ENABLE -> {
-                            pendingConfig?.let { config ->
-                                applyPolicy(action.title) { HomeFilterController.enable(context, it, config, ca) }
-                            }
-                            pendingConfig = null
-                        }
-                        HomeFilterAction.DISABLE ->
-                            applyPolicy(action.title) { HomeFilterController.disable(context, it) }
-                        HomeFilterAction.INSTALL_CA -> if (ca != null) {
-                            applyPolicy(action.title) { HomeFilterController.installCa(context, it, ca) }
-                        }
-                        HomeFilterAction.REMOVE_CA ->
-                            applyPolicy(action.title) { HomeFilterController.removeCa(context, it) }
-                    }
-                }) { Text(stringResource(action.title)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirm = null }) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
+    if (certificateChoiceVisible) {
+        ChoiceSheet(
+            title = stringResource(R.string.home_filter_choose_ca),
+            onDismiss = { certificateChoiceVisible = false },
+        ) {
+            Text(stringResource(R.string.home_filter_certificate_file_note))
+            PrimaryAction(
+                text = stringResource(R.string.home_filter_browse_files),
+                onClick = {
+                    certificateChoiceVisible = false
+                    haptics.tick()
+                    chooseCertificate()
+                },
+            )
+            SecondaryAction(
+                text = stringResource(R.string.action_cancel),
+                onClick = { certificateChoiceVisible = false },
+            )
+        }
     }
 }
 

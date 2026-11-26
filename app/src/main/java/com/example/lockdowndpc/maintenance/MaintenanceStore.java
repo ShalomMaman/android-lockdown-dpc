@@ -84,7 +84,11 @@ public final class MaintenanceStore {
      * The stored window, or {@code null} when there is none — including when the
      * record exists but cannot be trusted.
      */
-    public static synchronized MaintenanceWindow readWindow(Context context) {
+    public static MaintenanceWindow readWindow(Context context) {
+        return readWindow(context, true);
+    }
+
+    private static synchronized MaintenanceWindow readWindow(Context context, boolean discardInvalid) {
         SharedPreferences preferences = prefs(context);
         String capabilityKeys = preferences.getString(KEY_CAPABILITIES, null);
         if (capabilityKeys == null || capabilityKeys.isEmpty()) {
@@ -97,14 +101,14 @@ public final class MaintenanceStore {
             // A process death is a fail-closed maintenance boundary. It also
             // defeats resurrection of a stale on-disk authorization if clearing
             // the old window previously reported an I/O failure.
-            return discard(context);
+            return discardInvalid ? discard(context) : null;
         }
         try {
             Set<MaintenanceCapability> capabilities = new LinkedHashSet<>();
             for (String key : capabilityKeys.split(",")) {
                 MaintenanceCapability capability = MaintenanceCapability.fromStorageKey(key.trim());
                 if (capability == null) {
-                    return discard(context);
+                    return discardInvalid ? discard(context) : null;
                 }
                 capabilities.add(capability);
             }
@@ -118,7 +122,7 @@ public final class MaintenanceStore {
         } catch (RuntimeException ignored) {
             // A rejected duration, a value stored under the wrong type, an empty
             // capability list: none of them is evidence of a legitimate window.
-            return discard(context);
+            return discardInvalid ? discard(context) : null;
         }
     }
 
@@ -137,7 +141,19 @@ public final class MaintenanceStore {
         if (ManagementModeStore.read(context) != ManagementMode.LOCAL_PIN) {
             return null;
         }
-        MaintenanceWindow window = readWindow(context);
+        return evaluateLiveWindow(readWindow(context));
+    }
+
+    /**
+     * Observes the stored window without recording a heartbeat or repairing storage.
+     * Display only: never use the result to authorize anything; callers must also
+     * apply the LOCAL_PIN mode rule that {@link #liveWindow} enforces.
+     */
+    public static MaintenanceWindow readLiveWindowForDisplay(Context context) {
+        return evaluateLiveWindow(readWindow(context, false));
+    }
+
+    private static MaintenanceWindow evaluateLiveWindow(MaintenanceWindow window) {
         if (window == null) {
             return null;
         }

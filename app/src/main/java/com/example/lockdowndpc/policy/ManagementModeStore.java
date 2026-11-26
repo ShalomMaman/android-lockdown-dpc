@@ -41,6 +41,15 @@ public final class ManagementModeStore {
     }
 
     private static ManagementMode readMode(Context context) {
+        return readMode(context, true);
+    }
+
+    /** Observes the current authority without migrating settings or clearing any grant. */
+    public static synchronized ManagementMode readForDisplay(Context context) {
+        return readMode(context, false);
+    }
+
+    private static ManagementMode readMode(Context context, boolean migrateLegacy) {
         Marker marker = readMarker(context);
         if (marker == Marker.UNREADABLE) {
             return ManagementMode.ENROLLING;
@@ -52,7 +61,9 @@ public final class ManagementModeStore {
             if (marker == Marker.ABSENT && record == null && AdminPinStore.hasPin(context)) {
                 // An existing credential is local authority on an upgrade,
                 // even when this best-effort migration has to be retried.
-                storeLocalMode(context);
+                if (migrateLegacy) {
+                    storeLocalMode(context);
+                }
                 return ManagementMode.LOCAL_PIN;
             }
             return resolve(marker, record);

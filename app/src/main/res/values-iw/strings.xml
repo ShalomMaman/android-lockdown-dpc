@@ -353,6 +353,7 @@
     <!-- Audit log -->
     <string name="audit_dialog_title">יומן פעולות ניהול</string>
     <string name="audit_empty">עדיין אין פעולות מתועדות.</string>
+    <string name="audit_load_failed">לא ניתן לקרוא את יומן פעולות הניהול.</string>
     <string name="audit_kiosk_configured_off">תצורת קיוסק נשמרה: סינון אפליקציות מנוהל בלבד</string>
     <string name="audit_kiosk_configured_app">תצורת קיוסק נשמרה: קיוסק אפליקציה יחידה, האפליקציה הנעולה %1$s</string>
     <string name="audit_kiosk_configured_site">תצורת קיוסק נשמרה: קיוסק אתר יחיד, המקור המותר %1$s</string>
@@ -381,4 +382,5 @@
     <string name="kiosk_app_load_failed">לא ניתן לקרוא את רשימת האפליקציות למצב קיוסק. יש למשוך למטה כדי לנסות שוב.</string>
     <string name="home_filter_apply_success">השינויים בסינון הביתי אומתו במכשיר.</string>
     <string name="home_filter_apply_unverified">המכשיר עדיין לא אישר את השינויים בסינון הביתי. אפשר לבדוק את המצב ולהחיל שוב לפי הצורך.</string>
+    <string name="status_refresh_failed">לא ניתן לרענן את מצב המכשיר.</string>
 </resources>

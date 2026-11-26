@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.appcompat.app.AppCompatActivity
@@ -21,17 +22,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,6 +54,7 @@ import com.example.lockdowndpc.policy.AuditLog
 import com.example.lockdowndpc.policy.ManagementIdentityInspector
 import com.example.lockdowndpc.security.AdminSession
 import com.example.lockdowndpc.ui.theme.LockdownTheme
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -135,6 +137,8 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
     // what is on screen has to be what the next apply pass would compute, not
     // what this screen believes it just stored.
     var loading by remember { mutableStateOf(true) }
+    var refreshVersion by remember { mutableIntStateOf(0) }
+    var loadFailed by remember { mutableStateOf(false) }
     var writeInProgress by remember { mutableStateOf<IdentityWrite?>(null) }
     val working = writeInProgress != null
     var rows by remember { mutableStateOf(emptyList<ManagementIdentityRow>()) }
@@ -181,13 +185,21 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
         }
     }
 
-    LaunchedEffect(Unit) {
-        loading = true
+    LaunchedEffect(refreshVersion) {
         val app = context.applicationContext
-        val loaded = withContext(Dispatchers.IO) { readManagementIdentityRows(app) }
-        rows = loaded
-        loading = false
-        auditRefusals(loaded)
+        try {
+            val loaded = withContext(Dispatchers.IO) { readManagementIdentityRows(app) }
+            rows = loaded
+            auditRefusals(loaded)
+            loadFailed = false
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: RuntimeException) {
+            loadFailed = true
+            haptics.reject()
+        } finally {
+            loading = false
+        }
     }
 
     /**
@@ -204,8 +216,11 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
         auditEvent: AuditEvent,
         auditTemplate: Int,
         action: IdentityWrite,
+        onFinished: () -> Unit = {},
     ) {
-        if (writeInProgress != null || !requireSession()) {
+        if (writeInProgress != null) return
+        if (!requireSession()) {
+            onFinished()
             return
         }
         // The pin set is built by the same guard the store write applies, and a
@@ -222,6 +237,7 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                 ),
                 isError = true,
             )
+            onFinished()
             return
         }
         writeInProgress = action
@@ -272,70 +288,19 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                 auditRefusals(updated)
             } finally {
                 writeInProgress = null
+                onFinished()
             }
         }
     }
 
-    LockdownScreen(
-        title = stringResource(R.string.mgmtid_title),
-        subtitle = stringResource(R.string.mgmtid_subtitle),
-    ) {
-        val worst = worstSeverityOf(rows)
-        PolicyStatusCard(
-            tone = toneOf(worst),
-            headline = stringResource(summaryOf(worst)),
-            facts = emptyList(),
-            detail = stringResource(R.string.mgmtid_apply_note),
-        )
-
-        Spacer(Modifier.height(16.dp))
-        MessageBanner(message)
-
-        Spacer(Modifier.height(20.dp))
-        // Stated before the action, not after it: an operator who pins a signer
-        // from a device that is already compromised makes the compromise
-        // permanent, and that is not something to learn from a result banner.
-        SectionCard(title = stringResource(R.string.mgmtid_section_caution)) {
-            Text(
-                text = stringResource(R.string.mgmtid_caution_body),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(16.dp),
-            )
-        }
-
-        if (loading) {
-            Spacer(Modifier.height(20.dp))
-            CircularProgressIndicator()
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = stringResource(R.string.mgmtid_loading),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-
-        rows.forEach { row ->
-            Spacer(Modifier.height(20.dp))
-            ManagementIdentityCard(
-                row = row,
-                enabled = !working,
-                writeInProgress = writeInProgress?.takeIf { it.packageName == row.packageName },
-                onPinInstalled = { pendingPin = row },
-                onAddManual = { manualEntryFor = row },
-                onRemove = { digest -> pendingRemoval = PendingRemoval(row, digest) },
-            )
-        }
-
-        Spacer(Modifier.height(28.dp))
-        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
-    }
+    val scrollState = rememberScrollState()
+    BackHandler(onBack = onBack)
 
     pendingPin?.let { row ->
-        ConfirmPinDialog(
+        ConfirmPinScreen(
             row = row,
+            loading = working,
             onConfirm = {
-                pendingPin = null
                 write(
                     row = row,
                     computePins = {
@@ -348,16 +313,18 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     auditEvent = AuditEvent.MANAGEMENT_PIN_ADDED,
                     auditTemplate = R.string.mgmtid_audit_pin_added,
                     action = IdentityWrite(row.packageName, R.string.mgmtid_action_pin_installed),
+                    onFinished = { pendingPin = null },
                 )
             },
-            onDismiss = { pendingPin = null },
+            onDismiss = { if (writeInProgress == null) pendingPin = null },
         )
+        return
     }
 
     pendingRemoval?.let { removal ->
-        ConfirmRemoveDialog(
+        ConfirmRemoveScreen(
+            loading = working,
             onConfirm = {
-                pendingRemoval = null
                 write(
                     row = removal.row,
                     computePins = {
@@ -372,14 +339,83 @@ private fun ManagementIdentityScreen(onBack: () -> Unit) {
                     action = IdentityWrite(
                         removal.row.packageName, R.string.mgmtid_action_remove, removal.digest,
                     ),
+                    onFinished = { pendingRemoval = null },
                 )
             },
-            onDismiss = { pendingRemoval = null },
+            onDismiss = { if (writeInProgress == null) pendingRemoval = null },
         )
+        return
+    }
+
+    LockdownScreen(
+        title = stringResource(R.string.mgmtid_title),
+        subtitle = stringResource(R.string.mgmtid_subtitle),
+        scrollState = scrollState,
+        refreshing = loading && refreshVersion > 0,
+        onRefresh = {
+            if (!loading && !working && AdminSession.isUnlocked()) {
+                message = null
+                loading = true
+                refreshVersion++
+            }
+        },
+    ) {
+        val worst = worstSeverityOf(rows)
+        PolicyStatusCard(
+            tone = toneOf(worst),
+            headline = stringResource(summaryOf(worst)),
+            facts = emptyList(),
+            detail = stringResource(R.string.mgmtid_apply_note),
+        )
+
+        Spacer(Modifier.height(16.dp))
+        MessageBanner(
+            if (loadFailed) UiMessage(stringResource(R.string.mgmtid_load_failed), isError = true)
+            else message,
+        )
+
+        Spacer(Modifier.height(20.dp))
+        // Stated before the action, not after it: an operator who pins a signer
+        // from a device that is already compromised makes the compromise
+        // permanent, and that is not something to learn from a result banner.
+        SectionCard(title = stringResource(R.string.mgmtid_section_caution)) {
+            Text(
+                text = stringResource(R.string.mgmtid_caution_body),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(16.dp),
+            )
+        }
+
+        if (loading && refreshVersion == 0) {
+            Spacer(Modifier.height(20.dp))
+            CircularProgressIndicator()
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.mgmtid_loading),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        rows.forEach { row ->
+            Spacer(Modifier.height(20.dp))
+            ManagementIdentityCard(
+                row = row,
+                enabled = !working && !loading && !loadFailed,
+                writeInProgress = writeInProgress?.takeIf { it.packageName == row.packageName },
+                onPinInstalled = { pendingPin = row },
+                onAddManual = { manualEntryFor = row },
+                onRemove = { digest -> pendingRemoval = PendingRemoval(row, digest) },
+            )
+        }
+
+        Spacer(Modifier.height(28.dp))
+        SecondaryAction(text = stringResource(R.string.action_back), onClick = onBack)
     }
 
     manualEntryFor?.let { row ->
-        ManualDigestDialog(
+        ManualDigestSheet(
             row = row,
             onConfirm = { digest ->
                 manualEntryFor = null
@@ -527,7 +563,7 @@ private fun ManagementIdentityCard(
 
 /**
  * A digest is Latin hex. It is isolated left-to-right so it keeps its own
- * direction inside a Hebrew page, and it is left-aligned within that isolate so
+ * direction inside a Hebrew page, and it is start-aligned within that isolate so
  * two digests can be compared character by character.
  */
 @Composable
@@ -536,7 +572,7 @@ private fun DigestText(digest: String) {
         text = digest.ltrIsolated(),
         style = MaterialTheme.typography.bodySmall.copy(
             textDirection = TextDirection.Ltr,
-            textAlign = TextAlign.Left,
+            textAlign = TextAlign.Start,
         ),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier
@@ -547,56 +583,36 @@ private fun DigestText(digest: String) {
 
 /** Consequences first, then the choice. Nothing is written before this returns. */
 @Composable
-private fun ConfirmPinDialog(
+private fun ConfirmPinScreen(
     row: ManagementIdentityRow,
+    loading: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.mgmtid_confirm_pin_title)) },
-        text = {
-            Column {
-                Text(
-                    stringResource(
-                        R.string.mgmtid_confirm_pin_body,
-                        row.packageName.ltrIsolated(),
-                    )
-                )
-                Spacer(Modifier.height(10.dp))
-                row.pinnableObservedDigests.forEach { digest -> DigestText(digest) }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.mgmtid_confirm_action))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+    ConfirmationScreen(
+        title = stringResource(R.string.mgmtid_confirm_pin_title),
+        confirmText = stringResource(R.string.mgmtid_confirm_action),
+        loading = loading,
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(stringResource(R.string.mgmtid_confirm_pin_body, row.packageName.ltrIsolated()))
+        Spacer(Modifier.height(10.dp))
+        row.pinnableObservedDigests.forEach { digest -> DigestText(digest) }
+    }
 }
 
 @Composable
-private fun ConfirmRemoveDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.mgmtid_confirm_remove_title)) },
-        text = { Text(stringResource(R.string.mgmtid_confirm_remove_body)) },
-        confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.mgmtid_confirm_action))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+private fun ConfirmRemoveScreen(loading: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    ConfirmationScreen(
+        title = stringResource(R.string.mgmtid_confirm_remove_title),
+        confirmText = stringResource(R.string.mgmtid_confirm_action),
+        loading = loading,
+        onBack = onDismiss,
+        onConfirm = onConfirm,
+    ) {
+        Text(stringResource(R.string.mgmtid_confirm_remove_body))
+    }
 }
 
 /**
@@ -608,7 +624,7 @@ private fun ConfirmRemoveDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
  * conversion happened.
  */
 @Composable
-private fun ManualDigestDialog(
+private fun ManualDigestSheet(
     row: ManagementIdentityRow,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
@@ -616,70 +632,60 @@ private fun ManualDigestDialog(
     val haptics = rememberHaptics()
     var typed by remember { mutableStateOf("") }
     val pasted = pastedDigestOf(typed, row.status.pinnedCertificateSha256())
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.mgmtid_manual_title)) },
-        text = {
-            Column {
-                Text(stringResource(R.string.mgmtid_manual_body))
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = typed,
-                    onValueChange = { input ->
-                        val problem = pastedDigestOf(input, row.status.pinnedCertificateSha256()).problem
-                        if (problem != pasted.problem &&
-                            (problem == DigestProblem.NOT_HEXADECIMAL || problem == DigestProblem.ALREADY_PINNED)
-                        ) {
-                            haptics.reject()
-                        }
-                        typed = input
-                    },
-                    label = { Text(stringResource(R.string.mgmtid_manual_field)) },
-                    singleLine = true,
-                    isError = typed.isNotEmpty() && !pasted.usable,
-                    shape = MaterialTheme.shapes.small,
-                    // The content is Latin hex, and letting a right-to-left
-                    // paragraph lay it out moves the caret to the far side of
-                    // what is being typed. Same reasoning as the PIN field.
-                    textStyle = LocalTextStyle.current.copy(
-                        textDirection = TextDirection.Ltr,
-                        textAlign = TextAlign.Left,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (typed.isNotEmpty() && !pasted.usable) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = digestProblemMessage(pasted),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+    ChoiceSheet(title = stringResource(R.string.mgmtid_manual_title), onDismiss = onDismiss) {
+        Text(stringResource(R.string.mgmtid_manual_body))
+        Spacer(Modifier.height(12.dp))
+        OutlinedTextField(
+            value = typed,
+            onValueChange = { input ->
+                val problem = pastedDigestOf(input, row.status.pinnedCertificateSha256()).problem
+                if (problem != pasted.problem &&
+                    (problem == DigestProblem.NOT_HEXADECIMAL || problem == DigestProblem.ALREADY_PINNED)
+                ) {
+                    haptics.reject()
                 }
-                if (pasted.usable) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.mgmtid_manual_normalized),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    DigestText(pasted.normalized)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(pasted.normalized) },
-                enabled = pasted.usable,
-            ) {
-                Text(stringResource(R.string.mgmtid_manual_save))
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_cancel))
-            }
-        },
-    )
+                typed = input
+            },
+            label = { Text(stringResource(R.string.mgmtid_manual_field)) },
+            singleLine = true,
+            isError = typed.isNotEmpty() && !pasted.usable,
+            shape = MaterialTheme.shapes.small,
+            // The content is Latin hex, and letting a right-to-left
+            // paragraph lay it out moves the caret to the far side of
+            // what is being typed. Same reasoning as the PIN field.
+            textStyle = LocalTextStyle.current.copy(
+                textDirection = TextDirection.Ltr,
+                textAlign = TextAlign.Start,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (typed.isNotEmpty() && !pasted.usable) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = digestProblemMessage(pasted),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (pasted.usable) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.mgmtid_manual_normalized),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            DigestText(pasted.normalized)
+        }
+        PrimaryAction(
+            text = stringResource(R.string.mgmtid_manual_save),
+            enabled = pasted.usable,
+            onClick = {
+                haptics.tick()
+                onConfirm(pasted.normalized)
+            },
+        )
+        SecondaryAction(text = stringResource(R.string.action_cancel), onClick = onDismiss)
+    }
 }
 
 @Composable
