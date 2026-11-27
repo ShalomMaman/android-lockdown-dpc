@@ -244,6 +244,30 @@ public class ModeBoundaryTest {
         assertEquals(ManagementMode.UNDECIDED, ManagementModeStore.read(context));
     }
 
+    /** The real platform shape: the key is always present, null when the QR carries no admin extras. */
+    @Test
+    public void modeActivityAcceptsTheNullAdminExtrasThePlatformSends() {
+        Intent mode = new Intent(DevicePolicyManager.ACTION_GET_PROVISIONING_MODE)
+                .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, (PersistableBundle) null)
+                .putIntegerArrayListExtra(DevicePolicyManager.EXTRA_PROVISIONING_ALLOWED_PROVISIONING_MODES,
+                        new ArrayList<>(List.of(DevicePolicyManager.PROVISIONING_MODE_FULLY_MANAGED_DEVICE)));
+        assertTrue(mode.hasExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE));
+        assertTrue(RemoteEnrolmentGate.permitsLocalProvisioning(mode));
+        try (var activity = Robolectric.buildActivity(ProvisioningModeActivity.class, mode).create()) {
+            assertEquals(Activity.RESULT_OK, Shadows.shadowOf(activity.get()).getResultCode());
+            assertEquals(DevicePolicyManager.PROVISIONING_MODE_FULLY_MANAGED_DEVICE,
+                    Shadows.shadowOf(activity.get()).getResultIntent()
+                            .getIntExtra(DevicePolicyManager.EXTRA_PROVISIONING_MODE, -1));
+        }
+    }
+
+    @Test
+    public void adminExtrasOfTheWrongTypeStayUnreadable() {
+        Intent request = new Intent(DevicePolicyManager.ACTION_GET_PROVISIONING_MODE)
+                .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, "dg.remote.server");
+        assertFalse(RemoteEnrolmentGate.permitsLocalProvisioning(request));
+    }
+
     @Test
     public void failedLocalModeCommitCannotCreateTheFirstPin() {
         SharedPreferences failedMode = new MemoryPreferences(Map.of()).preferences();

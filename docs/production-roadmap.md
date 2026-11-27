@@ -379,10 +379,13 @@ proven, but no complete runbook-qualified hardware record has been entered in
   provisioning handlers, and the shell-only administrator PIN provider. It exists
   so a first QR enrolment can use a public APK that contains these; QR enrolment
   and the home filter still need their hardware evidence (Issue #28).
-- **0.5.6 — current release line.** Shows every sanitised provisioning failure
+- **0.5.6 — previous release line.** Shows every sanitised provisioning failure
   code and an `MQ-` reference on a full-screen page before a failed setup is
   cancelled (#117), so a failed QR enrolment on real hardware can be diagnosed
   from the screen. QR enrolment still needs its hardware evidence (Issue #28).
+- **0.5.7 — current release line.** Accepts the null admin-extras value the
+  platform always sends during QR provisioning (#120); without it every QR
+  enrolment without admin extras was cancelled at GET_PROVISIONING_MODE.
 - **Next pilot validation phase.** Execute the validation runbook on real Device
   Owner devices, complete the signed higher-version self-update on hardware,
   rehearse provisioning, and fix what those runs find. This phase turns
