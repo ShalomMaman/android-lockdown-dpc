@@ -36,8 +36,8 @@ android {
         // provisioned pilot device in place. Only the version identity moves.
         // Every published pilot increments this identity so Android and the
         // signed update channel can perform an in-place, replay-safe update.
-        versionCode = 15
-        versionName = "0.5.5"
+        versionCode = 16
+        versionName = "0.5.6"
         buildConfigField("boolean", "REMOTE_ENROLMENT_ENABLED", "false")
         // Update channels are an explicit build choice. Ordinary builds never
         // consume ambient properties or environment variables.
