@@ -30,7 +30,7 @@ public final class RemoteEnrolmentGate {
                 DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, PersistableBundle.class);
         if (extras == null && request.hasExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE)
                 && rawAdminExtras(request) != null) {
-            // Present with a value that is not a PersistableBundle: unreadable, fail closed.
+            // Present with a non-null value the typed read rejected: unreadable, fail closed.
             throw new IllegalArgumentException();
         }
         if (extras == null || extras.keySet().stream().noneMatch(key -> key.startsWith("dg.remote."))) {
