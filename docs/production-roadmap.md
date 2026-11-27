@@ -374,11 +374,15 @@ proven, but no complete runbook-qualified hardware record has been entered in
 - **0.5.4 — previous release line.** Google Play compatibility is an explicit
   administrator choice with a verified installation lock and fail-closed
   package visibility. The mode still requires its Group P hardware evidence.
-- **0.5.5 — current release line.** Carries the home filter network (always-on
+- **0.5.5 — previous release line.** Carries the home filter network (always-on
   Tailscale with a fixed exit node and a global PAC, fail-closed), the Android 12+
   provisioning handlers, and the shell-only administrator PIN provider. It exists
   so a first QR enrolment can use a public APK that contains these; QR enrolment
   and the home filter still need their hardware evidence (Issue #28).
+- **0.5.6 — current release line.** Shows every sanitised provisioning failure
+  code and an `MQ-` reference on a full-screen page before a failed setup is
+  cancelled (#117), so a failed QR enrolment on real hardware can be diagnosed
+  from the screen. QR enrolment still needs its hardware evidence (Issue #28).
 - **Next pilot validation phase.** Execute the validation runbook on real Device
   Owner devices, complete the signed higher-version self-update on hardware,
   rehearse provisioning, and fix what those runs find. This phase turns
