@@ -59,6 +59,29 @@ public final class SystemPolicyEnforcerTest {
         assertTrue(report.faulted());
     }
 
+    /** Floor for the loop below: removing a control from the defaults must fail here, not be skipped. */
+    @Test
+    public void productionDefaultsKeepEveryBaselineControl() {
+        java.util.Set<SystemPolicyControl> floor = java.util.EnumSet.of(
+                SystemPolicyControl.DEVELOPER_OPTIONS_AND_ADB,
+                SystemPolicyControl.USB_FILE_TRANSFER,
+                SystemPolicyControl.UNKNOWN_SOURCE_INSTALLS,
+                SystemPolicyControl.ACCOUNT_MODIFICATION,
+                SystemPolicyControl.VPN_CONFIGURATION,
+                SystemPolicyControl.NETWORK_RESET,
+                SystemPolicyControl.TETHERING,
+                SystemPolicyControl.PRIVATE_DNS,
+                SystemPolicyControl.DATE_AND_TIME,
+                SystemPolicyControl.SAFE_BOOT,
+                SystemPolicyControl.FACTORY_RESET,
+                SystemPolicyControl.USER_AND_PROFILE_CREATION,
+                SystemPolicyControl.APP_UNINSTALL,
+                SystemPolicyControl.APP_CONTROL_SETTINGS);
+        for (SystemPolicyControl control : floor) {
+            assertTrue(control.storageKey(), control.defaultRequested(SystemPolicyProfile.PRODUCTION));
+        }
+    }
+
     @Test
     public void baselineMandatoryControlsStillFailClosedOnRefusal() {
         for (SystemPolicyControl control : SystemPolicyControl.values()) {
