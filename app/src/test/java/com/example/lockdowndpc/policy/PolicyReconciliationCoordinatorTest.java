@@ -5,6 +5,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator.ProvisioningResult;
+
 import org.junit.Test;
 
 import java.util.List;
@@ -234,48 +236,67 @@ public final class PolicyReconciliationCoordinatorTest {
     @Test
     public void provisioningPassRunsWithoutTheProtectionGate() {
         AtomicBoolean worked = new AtomicBoolean();
-        AtomicReference<Boolean> verified = new AtomicReference<>();
+        AtomicReference<ProvisioningResult> outcome = new AtomicReference<>();
+        ProvisioningResult verified = new ProvisioningResult(true, List.of());
 
         PolicyReconciliationCoordinator.provisioningPass(
                 () -> {
                     worked.set(true);
-                    return true;
+                    return verified;
                 },
                 exception -> { throw new AssertionError(exception); },
-                verified::set
+                outcome::set
         ).run();
 
         assertTrue(worked.get());
-        assertTrue(verified.get());
+        assertEquals(verified, outcome.get());
     }
 
     @Test
-    public void provisioningPassReportsUnverifiedApply() {
-        AtomicReference<Boolean> verified = new AtomicReference<>();
+    public void provisioningPassPreservesEveryFailureCode() {
+        AtomicReference<ProvisioningResult> outcome = new AtomicReference<>();
+        ProvisioningResult failed = new ProvisioningResult(false, List.of(
+                "system-policy:private_dns:failed:not-in-force",
+                "link-filter-target-unverified:https"));
 
         PolicyReconciliationCoordinator.provisioningPass(
-                () -> false,
+                () -> failed,
                 exception -> { throw new AssertionError(exception); },
-                verified::set
+                outcome::set
         ).run();
 
-        assertFalse(verified.get());
+        assertEquals(failed, outcome.get());
     }
 
     @Test
     public void provisioningPassRecordsACrashAsFailure() {
-        AtomicReference<Boolean> verified = new AtomicReference<>();
+        AtomicReference<ProvisioningResult> outcome = new AtomicReference<>();
         List<RuntimeException> recorded = new CopyOnWriteArrayList<>();
         IllegalStateException failure = new IllegalStateException("Policy pass interrupted");
 
         PolicyReconciliationCoordinator.provisioningPass(
                 () -> { throw failure; },
                 recorded::add,
-                verified::set
+                outcome::set
         ).run();
 
         assertEquals(List.of(failure), recorded);
-        assertFalse(verified.get());
+        assertEquals(new ProvisioningResult(
+                false, List.of("policy-pass-crashed:IllegalStateException")), outcome.get());
+    }
+
+    @Test
+    public void provisioningPassReportsFailureEvenWhenCrashRecordingThrows() {
+        AtomicReference<ProvisioningResult> outcome = new AtomicReference<>();
+
+        PolicyReconciliationCoordinator.provisioningPass(
+                () -> { throw new IllegalStateException(); },
+                exception -> { throw new SecurityException(); },
+                outcome::set).run();
+
+        assertEquals(new ProvisioningResult(
+                false, List.of("policy-pass-crashed:IllegalStateException",
+                        "policy-crash-record-unverified:SecurityException")), outcome.get());
     }
 
     @Test

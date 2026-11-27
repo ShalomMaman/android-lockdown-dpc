@@ -429,7 +429,9 @@ public final class KioskController {
     ) {
         KioskConfigStore.Settings settings = KioskConfigStore.read(context);
         if (!KioskConfigStore.isContainmentState(settings.state())) {
-            return disableKiosk(context, dpm, admin, errors);
+            boolean kioskOff = settings.state() == KioskState.OFF
+                    && settings.config().mode() == KioskMode.OFF;
+            return disableKiosk(context, dpm, admin, kioskOff, errors);
         }
         applyLockTaskPackages(context, dpm, admin, settings, errors);
         // Order matters: the HOME component and the kiosk HOME preference are
@@ -491,6 +493,7 @@ public final class KioskController {
             Context context,
             DevicePolicyManager dpm,
             ComponentName admin,
+            boolean kioskOff,
             List<String> errors
     ) {
         boolean cleared = false;
@@ -518,16 +521,45 @@ public final class KioskController {
                 errors.add("kiosk-home-clear:" + exception.getClass().getSimpleName());
             }
         }
+        releaseLockTask(context, dpm, admin, kioskOff, errors);
+        setHostComponentEnabled(context, false, errors);
+        return cleared;
+    }
+
+    private static void releaseLockTask(Context context, DevicePolicyManager dpm,
+                                        ComponentName admin, boolean kioskOff, List<String> errors) {
+        boolean alreadyEmpty = false;
+        if (kioskOff) {
+            try {
+                alreadyEmpty = lockTaskListIsEmpty(dpm, admin);
+            } catch (RuntimeException ignored) {
+                // A failed pre-read cannot justify accepting a refused write.
+            }
+        }
+        boolean clearRefused = false;
         try {
             dpm.setLockTaskPackages(admin, new String[0]);
-            if (dpm.isLockTaskPermitted(context.getPackageName())) {
+        } catch (RuntimeException exception) {
+            if (!alreadyEmpty) {
+                errors.add("kiosk-lock-task-release:" + exception.getClass().getSimpleName());
+                return;
+            }
+            // Some platforms refuse a redundant clear. Verify the full list below.
+            clearRefused = true;
+        }
+        try {
+            if ((clearRefused && !lockTaskListIsEmpty(dpm, admin))
+                    || dpm.isLockTaskPermitted(context.getPackageName())) {
                 errors.add("kiosk-lock-task-release-unverified");
             }
         } catch (RuntimeException exception) {
             errors.add("kiosk-lock-task-release:" + exception.getClass().getSimpleName());
         }
-        setHostComponentEnabled(context, false, errors);
-        return cleared;
+    }
+
+    private static boolean lockTaskListIsEmpty(DevicePolicyManager dpm, ComponentName admin) {
+        String[] packages = dpm.getLockTaskPackages(admin);
+        return packages != null && packages.length == 0;
     }
 
     private static void applyLockTaskPackages(

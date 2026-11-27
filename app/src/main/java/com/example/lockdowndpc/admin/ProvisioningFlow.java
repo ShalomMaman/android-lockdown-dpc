@@ -1,8 +1,8 @@
 package com.example.lockdowndpc.admin;
 
-import static android.app.Activity.RESULT_CANCELED;
-import static android.app.Activity.RESULT_OK;
 import static android.app.admin.DevicePolicyManager.PROVISIONING_MODE_FULLY_MANAGED_DEVICE;
+
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator.ProvisioningResult;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -11,15 +11,14 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
 
 /** Platform-free logic behind the two setup wizard handlers. */
 final class ProvisioningFlow {
     private ProvisioningFlow() {}
 
-    /** Starts one verified baseline pass and reports whether it was verified. */
+    /** Starts one baseline pass and reports its verification and diagnostics. */
     interface CompliancePass {
-        void start(Consumer<Boolean> verified);
+        void start(Consumer<ProvisioningResult> report);
     }
 
     static OptionalInt selectMode(boolean hasAllowedModes, List<Integer> allowedModes) {
@@ -49,21 +48,23 @@ final class ProvisioningFlow {
     /** Shares one pass among all live requests. All state is accessed on the main thread. */
     static final class PendingCompliance {
         private final Consumer<Runnable> postToMain;
+        private final Consumer<ProvisioningResult> observePass;
         // Null means no pass is in flight. An empty set still has a pass running.
-        private Set<IntConsumer> waiters;
+        private Set<Consumer<ProvisioningResult>> waiters;
 
-        PendingCompliance(Consumer<Runnable> postToMain) {
+        PendingCompliance(Consumer<Runnable> postToMain, Consumer<ProvisioningResult> observePass) {
             this.postToMain = postToMain;
+            this.observePass = observePass;
         }
 
         void request(
                 BooleanSupplier baselineDue, Runnable showProgress, CompliancePass pass,
-                IntConsumer deliver
+                Consumer<ProvisioningResult> deliver
         ) {
             boolean start = waiters == null;
             if (start) {
                 if (!baselineDue.getAsBoolean()) {
-                    deliver.accept(RESULT_OK);
+                    deliver.accept(new ProvisioningResult(true, List.of()));
                     return;
                 }
                 waiters = new LinkedHashSet<>();
@@ -71,46 +72,40 @@ final class ProvisioningFlow {
             waiters.add(deliver);
             showProgress.run();
             if (start) {
-                completeCompliance(pass, code -> postToMain.accept(() -> finish(code)));
+                completeCompliance(pass, result -> postToMain.accept(() -> finish(result)));
             }
         }
 
-        void detach(IntConsumer deliver) {
+        void detach(Consumer<ProvisioningResult> deliver) {
             if (waiters != null) {
                 waiters.remove(deliver);
             }
         }
 
-        private void finish(int code) {
-            Set<IntConsumer> completed = waiters;
+        private void finish(ProvisioningResult result) {
+            Set<Consumer<ProvisioningResult>> completed = waiters;
             waiters = null;
-            for (IntConsumer deliver : completed) {
-                deliver.accept(code);
+            observePass.accept(result);
+            for (Consumer<ProvisioningResult> deliver : completed) {
+                deliver.accept(result);
             }
         }
     }
 
     /**
-     * Runs the compliance step and reports the activity result exactly once.
-     *
-     * <p>A verified pass returns {@code RESULT_OK}. An unverified pass, a pass
-     * that threw, or a pass that could not be started returns {@code RESULT_CANCELED}.
+     * Runs the compliance step and reports its outcome exactly once.
      */
-    static void completeCompliance(CompliancePass pass, IntConsumer result) {
+    static void completeCompliance(CompliancePass pass, Consumer<ProvisioningResult> result) {
         AtomicBoolean reported = new AtomicBoolean();
-        IntConsumer once = code -> {
+        Consumer<ProvisioningResult> once = outcome -> {
             if (reported.compareAndSet(false, true)) {
-                result.accept(code);
+                result.accept(outcome != null ? outcome : new ProvisioningResult(false, List.of()));
             }
         };
         try {
-            pass.start(verified -> once.accept(complianceResult(verified)));
+            pass.start(once);
         } catch (RuntimeException exception) {
-            once.accept(RESULT_CANCELED);
+            once.accept(ProvisioningResult.crashed(exception));
         }
-    }
-
-    static int complianceResult(Boolean verified) {
-        return Boolean.TRUE.equals(verified) ? RESULT_OK : RESULT_CANCELED;
     }
 }

@@ -60,6 +60,28 @@ public final class SystemPolicyEnforcerTest {
     }
 
     @Test
+    public void baselineMandatoryControlsStillFailClosedOnRefusal() {
+        for (SystemPolicyControl control : SystemPolicyControl.values()) {
+            // Every baseline control must fault on refusal, even if marked advisory by mistake.
+            if (!control.defaultRequested(SystemPolicyProfile.PRODUCTION)) {
+                continue;
+            }
+            int sdk = Math.max(ANDROID_TEN, control.minSdk());
+            FakeGateway gateway = new FakeGateway();
+            for (var restriction : control.supportedRestrictions(sdk)) {
+                gateway.refuseAdd.add(restriction.key());
+            }
+            var profile = control.defaultRequested(SystemPolicyProfile.PILOT)
+                    ? SystemPolicyProfile.PILOT : SystemPolicyProfile.PRODUCTION;
+
+            var report = SystemPolicyEnforcer.enforce(sdk, profile, Map.of(), gateway);
+
+            assertEquals(control.storageKey(), List.of(statusOf(report, control)), report.faults());
+            assertTrue(control.storageKey(), report.faulted());
+        }
+    }
+
+    @Test
     public void aRefusedRequestFaultsProtectionAndNamesTheRestriction() {
         FakeGateway gateway = new FakeGateway();
         gateway.refuseAdd.add("no_safe_boot");

@@ -11,11 +11,14 @@ final class RemotePolicyApplier {
     private RemotePolicyApplier() {}
 
     static boolean reconcile(Context context, String reason) {
+        return PolicyReconciliationCoordinator.recordResult(context, reason, apply(context));
+    }
+
+    static LockdownPolicyController.PolicyResult apply(Context context) {
         // An unreadable marker still requires containment when the build gate is on.
-        var result = RemoteEnrolmentGate.permits() && !ManagementModeStore.hasUnreadableRemoteIntent(context)
+        return RemoteEnrolmentGate.permits() && !ManagementModeStore.hasUnreadableRemoteIntent(context)
                 ? RemotePolicyRuntime.reconcile(context)
                 : LockdownPolicyController.applyRemoteContainment(context);
-        return PolicyReconciliationCoordinator.recordResult(context, reason, result);
     }
 
     static LockdownPolicyController.PolicyResult refusedLegacyPass() {
