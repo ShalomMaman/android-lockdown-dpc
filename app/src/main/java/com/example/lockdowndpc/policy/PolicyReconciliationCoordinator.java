@@ -3,10 +3,12 @@ package com.example.lockdowndpc.policy;
 import android.content.Context;
 import android.util.Log;
 
+import com.example.lockdowndpc.R;
 import com.example.lockdowndpc.kiosk.KioskConfigStore;
 import com.example.lockdowndpc.kiosk.KioskController;
 import com.example.lockdowndpc.kiosk.KioskStateMachine.KioskState;
 
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
@@ -15,6 +17,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /** Serializes background reconciliation requests from DPC lifecycle events. */
 public final class PolicyReconciliationCoordinator {
@@ -121,7 +124,7 @@ public final class PolicyReconciliationCoordinator {
                         Log.i(TAG, "Skipping reconciliation while protection is paused: " + reason);
                         return false;
                     }
-                    return applyAndRecord(appContext, reason);
+                    return applyAndRecord(appContext, reason).applied();
                 },
                 exception -> recordCrash(appContext, reason, exception),
                 completion
@@ -141,28 +144,83 @@ public final class PolicyReconciliationCoordinator {
      * crash handling and the policy thread are shared with every other pass.
      */
     public static void reconcileForProvisioning(Context context, Consumer<Boolean> completion) {
+        reconcileForProvisioningWithDiagnostics(context, result -> completion.accept(result.verified()));
+    }
+
+    /** Reports the verification and diagnostics from the same pass to the setup activity. */
+    public static void reconcileForProvisioningWithDiagnostics(
+            Context context, Consumer<ProvisioningResult> completion
+    ) {
         Context appContext = context.getApplicationContext();
         submit(provisioningPass(
-                () -> applyAndRecord(appContext, PROVISIONING_COMPLIANCE_REASON),
+                () -> {
+                    LockdownPolicyController.PolicyResult result =
+                            applyAndRecord(appContext, PROVISIONING_COMPLIANCE_REASON);
+                    if (result.applied()) {
+                        return new ProvisioningResult(true, List.of());
+                    }
+                    String webViewMissing = appContext.getString(R.string.policy_reason_webview_missing);
+                    return new ProvisioningResult(false, result.errors().stream()
+                            .map(error -> error.equals(webViewMissing)
+                                    ? "webview-provider-missing" : error)
+                            .collect(Collectors.toList()));
+                },
                 exception -> recordCrash(appContext, PROVISIONING_COMPLIANCE_REASON, exception),
                 completion));
     }
 
-    /** The provisioning pass: no protection gate, otherwise the guarded verified contract. */
-    static Runnable provisioningPass(
-            Supplier<Boolean> work,
-            Consumer<RuntimeException> crashHandler,
-            Consumer<Boolean> completion
-    ) {
-        return () -> runGuardedVerified(() -> true, work, crashHandler, completion);
+    /** The outcome and errors captured from this pass before the policy thread moves on. */
+    public record ProvisioningResult(boolean verified, List<String> errors) {
+        // Explicit canonical constructor: Android lint's VersionChecks crashes on a
+        // compact record constructor (it has no parameter list in PSI).
+        public ProvisioningResult(boolean verified, List<String> errors) {
+            if (verified && !errors.isEmpty()) {
+                throw new IllegalArgumentException("Verified provisioning must be error-free");
+            }
+            this.verified = verified;
+            this.errors = !verified && errors.isEmpty() ? List.of("policy-pass-unverified")
+                    : List.copyOf(errors);
+        }
+
+        public static ProvisioningResult crashed(RuntimeException exception) {
+            return new ProvisioningResult(false,
+                    List.of("policy-pass-crashed:" + exception.getClass().getSimpleName()));
+        }
     }
 
-    /** Applies the complete policy and records the outcome of the pass. */
-    private static boolean applyAndRecord(Context appContext, String reason) {
-        if (!ManagementModeStore.read(appContext).usesLocalPolicy()) {
-            return RemotePolicyApplier.reconcile(appContext, reason);
-        }
-        return recordResult(appContext, reason, LockdownPolicyController.apply(appContext));
+    /** Runs without the normal protection gate and reports even if recording a crash throws. */
+    static Runnable provisioningPass(
+            Supplier<ProvisioningResult> work,
+            Consumer<RuntimeException> crashHandler,
+            Consumer<ProvisioningResult> completion
+    ) {
+        return () -> {
+            ProvisioningResult result = new ProvisioningResult(false, List.of());
+            try {
+                result = work.get();
+            } catch (RuntimeException exception) {
+                result = ProvisioningResult.crashed(exception);
+                try {
+                    crashHandler.accept(exception);
+                } catch (RuntimeException recordingFailure) {
+                    result = new ProvisioningResult(false, List.of(result.errors().get(0),
+                            "policy-crash-record-unverified:"
+                                    + recordingFailure.getClass().getSimpleName()));
+                }
+            } finally {
+                completion.accept(result);
+            }
+        };
+    }
+
+    private static LockdownPolicyController.PolicyResult applyAndRecord(
+            Context appContext, String reason
+    ) {
+        LockdownPolicyController.PolicyResult result = ManagementModeStore.read(appContext).usesLocalPolicy()
+                ? LockdownPolicyController.apply(appContext)
+                : RemotePolicyApplier.apply(appContext);
+        recordResult(appContext, reason, result);
+        return result;
     }
 
     static boolean recordResult(

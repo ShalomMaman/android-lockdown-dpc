@@ -49,6 +49,10 @@
     <string name="remote_reanchor_document_invalid">מסמך השחזור אינו תקין. יש להדביק את המסמך החתום המלא שהתקבל ממנהל הצי.</string>
     <string name="admin_profile_name">מכשיר מוגן</string>
     <string name="provisioning_compliance_progress">מחיל את הגנת המכשיר…</string>
+    <string name="provisioning_failure_title">הגדרת מעקה לא הושלמה</string>
+    <string name="provisioning_failure_photo">צלמו את המסך לפני הלחיצה על סיום.</string>
+    <string name="provisioning_failure_reference_label">קוד תקלה</string>
+    <string name="provisioning_failure_finish">סיום</string>
     <string name="not_device_owner">לא ניתן להפעיל: הרשאת ניהול המערכת אינה מוגדרת.</string>
     <plurals name="policy_applied">
         <item quantity="one">ההגנה פעילה ומאומתת. נחסמה אפליקציה אחת.</item>

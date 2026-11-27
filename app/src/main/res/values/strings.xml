@@ -42,6 +42,10 @@
     <string name="remote_reanchor_document_invalid">The recovery document is invalid. Paste the full signed document from the fleet administrator.</string>
     <string name="admin_profile_name">Protected device</string>
     <string name="provisioning_compliance_progress">Applying device protection…</string>
+    <string name="provisioning_failure_title">Maakeh setup could not finish</string>
+    <string name="provisioning_failure_photo">Take a photo of this screen before tapping Finish.</string>
+    <string name="provisioning_failure_reference_label">Error code</string>
+    <string name="provisioning_failure_finish">Finish</string>
     <string name="not_device_owner">Cannot activate: system administration is not configured.</string>
     <plurals name="policy_applied">
         <item quantity="one">Protection is active and verified. %1$d app is blocked.</item>

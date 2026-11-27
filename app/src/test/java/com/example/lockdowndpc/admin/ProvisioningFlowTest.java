@@ -1,12 +1,12 @@
 package com.example.lockdowndpc.admin;
 
-import static android.app.Activity.RESULT_CANCELED;
-import static android.app.Activity.RESULT_OK;
 import static android.app.admin.DevicePolicyManager.PROVISIONING_MODE_FULLY_MANAGED_DEVICE;
 import static android.app.admin.DevicePolicyManager.PROVISIONING_MODE_MANAGED_PROFILE;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+
+import com.example.lockdowndpc.policy.PolicyReconciliationCoordinator.ProvisioningResult;
 
 import org.junit.Test;
 
@@ -18,9 +18,12 @@ import java.util.Queue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.IntConsumer;
 
 public final class ProvisioningFlowTest {
+    private static final ProvisioningResult VERIFIED = new ProvisioningResult(true, List.of());
+    private static final ProvisioningResult FAILED = new ProvisioningResult(
+            false, List.of("link-filter-target-unverified:https"));
+    private static final ProvisioningResult UNVERIFIED = new ProvisioningResult(false, List.of());
     @Test
     public void missingAllowedModesSelectsFullyManaged() {
         assertEquals(OptionalInt.of(PROVISIONING_MODE_FULLY_MANAGED_DEVICE),
@@ -47,65 +50,66 @@ public final class ProvisioningFlowTest {
     }
 
     @Test
-    public void verifiedPassReturnsOk() {
+    public void verifiedPassReportsSuccess() {
         AtomicInteger passes = new AtomicInteger();
-        List<Integer> results = new ArrayList<>();
+        List<ProvisioningResult> results = new ArrayList<>();
 
         ProvisioningFlow.completeCompliance(report -> {
             passes.incrementAndGet();
-            report.accept(true);
+            report.accept(VERIFIED);
         }, results::add);
 
         assertEquals(1, passes.get());
-        assertEquals(List.of(RESULT_OK), results);
+        assertEquals(List.of(VERIFIED), results);
     }
 
     @Test
-    public void unverifiedPassReturnsCanceled() {
-        List<Integer> results = new ArrayList<>();
+    public void unverifiedPassPreservesFailureCodes() {
+        List<ProvisioningResult> results = new ArrayList<>();
 
-        ProvisioningFlow.completeCompliance(report -> report.accept(false), results::add);
+        ProvisioningFlow.completeCompliance(report -> report.accept(FAILED), results::add);
 
-        assertEquals(List.of(RESULT_CANCELED), results);
+        assertEquals(List.of(FAILED), results);
     }
 
     @Test
     public void missingVerificationIsTreatedAsFailure() {
-        List<Integer> results = new ArrayList<>();
+        List<ProvisioningResult> results = new ArrayList<>();
 
         ProvisioningFlow.completeCompliance(report -> report.accept(null), results::add);
 
-        assertEquals(List.of(RESULT_CANCELED), results);
+        assertEquals(List.of(UNVERIFIED), results);
     }
 
     @Test
-    public void passThatCannotStartReturnsCanceled() {
-        List<Integer> results = new ArrayList<>();
+    public void passThatCannotStartReportsCrashCode() {
+        List<ProvisioningResult> results = new ArrayList<>();
 
         ProvisioningFlow.completeCompliance(report -> {
             throw new IllegalStateException("Policy queue unavailable");
         }, results::add);
 
-        assertEquals(List.of(RESULT_CANCELED), results);
+        assertEquals(List.of(new ProvisioningResult(
+                false, List.of("policy-pass-crashed:IllegalStateException"))), results);
     }
 
     @Test
     public void resultIsReportedOnlyOnce() {
-        List<Integer> results = new ArrayList<>();
+        List<ProvisioningResult> results = new ArrayList<>();
 
         ProvisioningFlow.completeCompliance(report -> {
-            report.accept(true);
-            report.accept(false);
+            report.accept(VERIFIED);
+            report.accept(FAILED);
         }, results::add);
 
-        assertEquals(List.of(RESULT_OK), results);
+        assertEquals(List.of(VERIFIED), results);
     }
 
     @Test
-    public void baselineNotDueReturnsOkInlineWithoutShowingProgressOrStartingAPass() {
+    public void baselineNotDueReportsSuccessInlineWithoutStartingAPass() {
         Queue<Runnable> main = new ArrayDeque<>();
-        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
-        List<Integer> results = new ArrayList<>();
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add, result -> {});
+        List<ProvisioningResult> results = new ArrayList<>();
 
         pending.request(() -> false, () -> {
             throw new AssertionError("progress must not be shown");
@@ -113,18 +117,18 @@ public final class ProvisioningFlowTest {
             throw new AssertionError("a pass must not start");
         }, results::add);
 
-        assertEquals(List.of(RESULT_OK), results);
+        assertEquals(List.of(VERIFIED), results);
         assertTrue(main.isEmpty());
     }
 
     @Test
     public void duplicateLaunchesShareOnePassAndEveryLiveRequestReceivesTheResult() {
         Queue<Runnable> main = new ArrayDeque<>();
-        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
-        AtomicReference<Consumer<Boolean>> verify = new AtomicReference<>();
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add, result -> {});
+        AtomicReference<Consumer<ProvisioningResult>> verify = new AtomicReference<>();
         AtomicInteger progress = new AtomicInteger();
-        List<Integer> first = new ArrayList<>();
-        List<Integer> second = new ArrayList<>();
+        List<ProvisioningResult> first = new ArrayList<>();
+        List<ProvisioningResult> second = new ArrayList<>();
 
         pending.request(() -> true, progress::incrementAndGet, verify::set, first::add);
         pending.request(() -> false, progress::incrementAndGet, report -> {
@@ -134,22 +138,22 @@ public final class ProvisioningFlowTest {
         assertTrue(first.isEmpty());
         assertTrue(second.isEmpty());
 
-        verify.get().accept(true);
+        verify.get().accept(VERIFIED);
         main.remove().run();
 
-        assertEquals(List.of(RESULT_OK), first);
-        assertEquals(List.of(RESULT_OK), second);
+        assertEquals(List.of(VERIFIED), first);
+        assertEquals(List.of(VERIFIED), second);
         assertTrue(main.isEmpty());
     }
 
     @Test
     public void destroyingALaterLaunchLeavesTheEarlierRequestWaitingForTheSameResult() {
         Queue<Runnable> main = new ArrayDeque<>();
-        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add);
-        AtomicReference<Consumer<Boolean>> verify = new AtomicReference<>();
-        List<Integer> first = new ArrayList<>();
-        List<Integer> destroyed = new ArrayList<>();
-        IntConsumer deliverDestroyed = destroyed::add;
+        ProvisioningFlow.PendingCompliance pending = new ProvisioningFlow.PendingCompliance(main::add, result -> {});
+        AtomicReference<Consumer<ProvisioningResult>> verify = new AtomicReference<>();
+        List<ProvisioningResult> first = new ArrayList<>();
+        List<ProvisioningResult> destroyed = new ArrayList<>();
+        Consumer<ProvisioningResult> deliverDestroyed = destroyed::add;
 
         pending.request(() -> true, () -> {}, verify::set, first::add);
         pending.request(() -> true, () -> {}, report -> {
@@ -157,10 +161,10 @@ public final class ProvisioningFlowTest {
         }, deliverDestroyed);
         pending.detach(deliverDestroyed);
 
-        verify.get().accept(false);
+        verify.get().accept(FAILED);
         main.remove().run();
 
-        assertEquals(List.of(RESULT_CANCELED), first);
+        assertEquals(List.of(FAILED), first);
         assertTrue(destroyed.isEmpty());
     }
 
